@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO sender (reservation_id, ip_address) VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "2bfa2b3c017997c92f7750a406c4fa2ebd1527b8a93a7ec2175a844461a67cf4"
+}

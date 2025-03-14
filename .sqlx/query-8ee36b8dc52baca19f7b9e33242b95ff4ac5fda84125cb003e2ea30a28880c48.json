@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM token_loadbalancer_permission\n                     WHERE token_id = ?1 AND loadbalancer_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "8ee36b8dc52baca19f7b9e33242b95ff4ac5fda84125cb003e2ea30a28880c48"
+}

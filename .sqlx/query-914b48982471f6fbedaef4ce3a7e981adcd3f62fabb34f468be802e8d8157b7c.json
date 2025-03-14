@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT tlp.permission\n                     FROM token_loadbalancer_permission tlp\n                     JOIN reservation r ON r.loadbalancer_id = tlp.loadbalancer_id\n                     JOIN session s ON s.reservation_id = r.id\n                     WHERE tlp.token_id = ?1 AND s.id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "permission",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "914b48982471f6fbedaef4ce3a7e981adcd3f62fabb34f468be802e8d8157b7c"
+}

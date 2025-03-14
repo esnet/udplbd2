@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sender SET deleted_at = NULL WHERE id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7333cd8b32e174018aa8817e4e8c4c3e3f4e7f01c07aa32c2953333dae8e4029"
+}

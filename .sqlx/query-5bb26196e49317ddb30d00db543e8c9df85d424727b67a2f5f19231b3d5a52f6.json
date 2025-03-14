@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT permission\n                     FROM token_loadbalancer_permission\n                     WHERE token_id = ?1 AND loadbalancer_id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "permission",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5bb26196e49317ddb30d00db543e8c9df85d424727b67a2f5f19231b3d5a52f6"
+}

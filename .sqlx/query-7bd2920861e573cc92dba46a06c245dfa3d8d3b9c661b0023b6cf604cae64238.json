@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reservation_id, permission FROM token_reservation_permission WHERE token_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "reservation_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "permission",
+        "ordinal": 1,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "7bd2920861e573cc92dba46a06c245dfa3d8d3b9c661b0023b6cf604cae64238"
+}

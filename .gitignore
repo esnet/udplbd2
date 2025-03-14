@@ -1,0 +1,9 @@
+.DS_Store
+bin/
+etc/
+.env
+etc/*
+__debug*
+.coverage*
+/target
+udplbd.db

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                (SELECT COUNT(*) FROM token_global_permission WHERE token_id = ?1) +\n                (SELECT COUNT(*) FROM token_loadbalancer_permission WHERE token_id = ?1) +\n                (SELECT COUNT(*) FROM token_reservation_permission WHERE token_id = ?1) +\n                (SELECT COUNT(*) FROM token_session_permission WHERE token_id = ?1) as count",
+  "describe": {
+    "columns": [
+      {
+        "name": "count",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "81eaccb8c239462c1db1c906bf68439c79f1a45b486422a3e26fb37f2b1c34b8"
+}

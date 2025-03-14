@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                            SELECT r.loadbalancer_id\n                            FROM session s\n                            JOIN reservation r ON r.id = s.reservation_id\n                            WHERE s.id = ?1\n                            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "87a5b4bbb7bd91ab8453365e0a68fbc70195073daf0cd23ec7d11d2b753f82c3"
+}

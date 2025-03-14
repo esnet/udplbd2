@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id FROM reservation\n             WHERE deleted_at IS NULL\n             AND reserved_until < CURRENT_TIMESTAMP",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c18222b8c982a1a1c5a6ad761deab81212b02dbf86d513c0e25e363e2d11940f"
+}

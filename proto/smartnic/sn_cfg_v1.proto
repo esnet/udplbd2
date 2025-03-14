@@ -1,0 +1,797 @@
+//--------------------------------------------------------------------------------------------------
+syntax = "proto3";
+
+package sn_cfg.v1;
+
+import "google/protobuf/duration.proto";
+import "google/protobuf/timestamp.proto";
+
+//--------------------------------------------------------------------------------------------------
+enum ErrorCode {
+    // General error codes.
+    EC_UNKNOWN = 0; // Field is unset.
+    EC_OK = 1;
+
+    // Batch error codes.
+    EC_UNKNOWN_BATCH_REQUEST = 100;
+    EC_UNKNOWN_BATCH_OP = 101;
+
+    // Device configuration error codes.
+    EC_INVALID_DEVICE_ID = 200;
+    EC_CARD_INFO_READ_FAILED = 201;
+
+    // Host configuration error codes.
+    EC_INVALID_HOST_ID = 300;
+    EC_MISSING_HOST_CONFIG = 301;
+    EC_MISSING_HOST_DMA_CONFIG = 302;
+    EC_UNSUPPORTED_HOST_ID = 303;
+    EC_FAILED_GET_DMA_QUEUES = 304;
+    EC_FAILED_SET_DMA_QUEUES = 305;
+
+    // Port configuration error codes.
+    EC_INVALID_PORT_ID = 400;
+    EC_MISSING_PORT_CONFIG = 401;
+    EC_UNSUPPORTED_PORT_ID = 402;
+    EC_UNSUPPORTED_PORT_STATE = 403;
+    EC_UNSUPPORTED_PORT_FEC = 404;
+    EC_UNSUPPORTED_PORT_LOOPBACK = 405;
+
+    // Switch configuration error codes.
+    EC_MISSING_SWITCH_CONFIG = 500;
+    EC_MISSING_IGR_SRC_FROM_INTF = 501;
+    EC_MISSING_IGR_SRC_TO_INTF = 502;
+    EC_UNSUPPORTED_IGR_SRC_FROM_INTF = 503;
+    EC_UNSUPPORTED_IGR_SRC_TO_INTF = 504;
+    EC_FAILED_GET_IGR_SRC = 505;
+    EC_FAILED_SET_IGR_SRC = 506;
+    EC_MISSING_IGR_CONN_FROM_INTF = 507;
+    EC_MISSING_IGR_CONN_TO_PROC = 508;
+    EC_UNSUPPORTED_IGR_CONN_FROM_INTF = 509;
+    EC_UNSUPPORTED_IGR_CONN_TO_PROC = 510;
+    EC_FAILED_GET_IGR_CONN = 511;
+    EC_FAILED_SET_IGR_CONN = 512;
+    EC_MISSING_EGR_CONN_ON_PROC = 513;
+    EC_MISSING_EGR_CONN_FROM_INTF = 514;
+    EC_MISSING_EGR_CONN_TO_INTF = 515;
+    EC_UNSUPPORTED_EGR_CONN_ON_PROC = 516;
+    EC_UNSUPPORTED_EGR_CONN_FROM_INTF = 517;
+    EC_UNSUPPORTED_EGR_CONN_TO_INTF = 518;
+    EC_FAILED_GET_EGR_CONN = 519;
+    EC_FAILED_SET_EGR_CONN = 520;
+
+    // Defaults configuration error codes.
+    EC_UNKNOWN_DEFAULTS_PROFILE = 600;
+
+    // Module configuration error codes.
+    EC_INVALID_MODULE_ID = 700;
+    EC_MODULE_PAGE_READ_FAILED = 701;
+    EC_INVALID_MODULE_MEM_OFFSET = 702;
+    EC_INVALID_MODULE_MEM_PAGE = 703;
+    EC_INVALID_MODULE_MEM_COUNT = 704;
+    EC_MODULE_MEM_READ_FAILED = 705;
+    EC_MODULE_MEM_WRITE_FAILED = 706;
+    EC_UNKNOWN_MODULE_GPIO_TYPE = 707;
+    EC_MODULE_GPIO_READ_FAILED = 708;
+    EC_MODULE_GPIO_WRITE_FAILED = 709;
+    EC_MODULE_NOT_PRESENT = 710;
+
+    // Server configuration error codes.
+    EC_SERVER_FAILED_GET_TIME = 800;
+    EC_SERVER_INVALID_DEBUG_FLAG = 801;
+    EC_SERVER_INVALID_CONTROL_STATS_FLAG = 802;
+}
+
+//--------------------------------------------------------------------------------------------------
+message StatsCounter {
+    string domain = 1;
+    string zone = 2;
+    string block = 3;
+    string name = 4;
+    uint64 value = 5;
+}
+
+enum StatsMetricType {
+    STATS_METRIC_TYPE_UNKNOWN = 0; // Field is unset.
+    STATS_METRIC_TYPE_COUNTER = 1;
+    STATS_METRIC_TYPE_GAUGE = 2;
+    STATS_METRIC_TYPE_FLAG = 3;
+}
+
+message StatsMetricScope {
+    string domain = 1;
+    string zone = 2;
+    string block = 3;
+}
+
+message StatsMetricValue {
+    uint64 u64 = 1;
+    double f64 = 2;
+}
+
+message StatsMetric {
+    StatsMetricType type = 1;
+    StatsMetricScope scope = 2;
+    string name = 3;
+    StatsMetricValue value = 4;
+    google.protobuf.Timestamp last_update = 5; // Monotonic timestamp indicating when the metric was
+                                               // last updated.
+}
+
+message Stats {
+    // This field is no longer populated. Use the metrics field instead.
+    repeated StatsCounter counters = 1 [deprecated = true];
+
+    repeated StatsMetric metrics = 2;
+}
+
+message StatsFilters {
+    repeated StatsMetricType metric_types = 1; // Restrict metrics to the given type(s).
+                                               // Leave unset for all types.
+    bool non_zero = 2; // Restrict metrics to those whose value is not zero.
+}
+
+message StatsRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    StatsFilters filters = 2; // Filters to restrict statistics on get operations.
+                              // Leave unset for all statistics.
+}
+
+message StatsResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    Stats stats = 3;
+}
+
+//--------------------------------------------------------------------------------------------------
+enum DefaultsProfile {
+    DS_UNKNOWN = 0;
+    DS_ONE_TO_ONE = 1;
+}
+
+message DefaultsRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    DefaultsProfile profile = 2;
+}
+
+message DefaultsResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+}
+
+//--------------------------------------------------------------------------------------------------
+message DevicePciInfo {
+    string bus_id = 1;
+    uint32 vendor_id = 2; // Only low 16-bits are valid (uint16 not supported by protobuf).
+    uint32 device_id = 3; // Only low 16-bits are valid (uint16 not supported by protobuf).
+}
+
+message DeviceBuildInfo {
+    uint32 number = 1; // Value from syscfg.usr_access.
+    uint32 status = 2; // Value from syscfg.build_status.
+    repeated uint32 dna = 3; // Array of length 3, value from syscfg.dna[3] (same ordering).
+}
+
+message DeviceCardInfo {
+    string name = 1;
+    string profile = 2;
+    string serial_number = 3;
+    string revision = 4;
+    string sc_version = 5;
+
+    string fan_presence = 10;
+    uint32 total_power_avail = 11; // in Watts
+    string config_mode = 12;
+
+    repeated string cage_types = 20;
+
+    repeated string mac_addrs = 30;
+}
+
+message DeviceInfo {
+    DevicePciInfo pci = 1;
+    DeviceBuildInfo build = 2;
+    DeviceCardInfo card = 3;
+}
+
+message DeviceInfoRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+}
+
+message DeviceInfoResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    DeviceInfo info = 3;
+}
+
+message DeviceSystemMonitor {
+    uint32 index = 1; // System monitor index.
+    float temperature = 2; // Value from sysmon0.temperature.
+}
+
+message DeviceStatusAlarm {
+    string source = 1;
+    string name = 2;
+    bool active = 3;
+}
+
+message DeviceStatusMonitor {
+    string source = 1;
+    string name = 2;
+    double value = 3;
+}
+
+message DeviceStatus {
+    // This field is no longer populated. Use the monitors field with:
+    // - source == "sysmon<index>" ("sysmon0", "sysmon1", ...)
+    // - name == "temp"
+    repeated DeviceSystemMonitor sysmons = 1 [deprecated = true];
+
+    repeated DeviceStatusMonitor monitors = 2;
+    repeated DeviceStatusAlarm alarms = 3;
+}
+
+message DeviceStatusRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+}
+
+message DeviceStatusResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    DeviceStatus status = 3;
+}
+
+//--------------------------------------------------------------------------------------------------
+message HostDmaConfig {
+    uint32 base_queue = 1;
+    uint32 num_queues = 2;
+}
+
+message HostConfig {
+    HostDmaConfig dma = 1;
+}
+
+message HostConfigRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 host_id = 2; // 0-based index. Set to -1 for all host interfaces.
+
+    // Configuration data used for set operations. Leave unset for get operations.
+    HostConfig config = 3;
+}
+
+message HostConfigResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 host_id = 3;
+
+    // Configuration data returned on get operations. Will be unset for set operations.
+    HostConfig config = 4;
+}
+
+message HostStatsRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 host_id = 2; // 0-based index. Set to -1 for all host interfaces.
+    StatsFilters filters = 3; // Filters to restrict statistics on get operations.
+                              // Leave unset for all counter statistics.
+}
+
+message HostStatsResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 host_id = 3;
+    Stats stats = 4;
+}
+
+//--------------------------------------------------------------------------------------------------
+enum ModuleGpioState {
+    GPIO_STATE_UNKNOWN = 0;
+    GPIO_STATE_ASSERT = 1;
+    GPIO_STATE_DEASSERT = 2;
+}
+
+message ModuleGpio {
+    // An enum is used instead of a bool in order to allow the server to detect which GPIOs
+    // are being modified during set operations.
+    ModuleGpioState reset = 1;          // read/write
+    ModuleGpioState low_power_mode = 2; // read/write
+    ModuleGpioState select = 3;         // read-only
+    ModuleGpioState present = 4;        // read-only
+    ModuleGpioState interrupt = 5;      // read-only
+}
+
+message ModuleGpioRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 mod_id = 2; // 0-based index. Set to -1 for all modules.
+
+    // Configuration data used for set operations. Leave unset for get operations.
+    ModuleGpio gpio = 3;
+}
+
+message ModuleGpioResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 mod_id = 3;
+
+    // Configuration data returned on get operations. Will be unset for set operations.
+    ModuleGpio gpio = 4;
+}
+
+message ModuleInfoVendorDate {
+    string year = 1;
+    string month = 2;
+    string day = 3;
+    string vendor = 4;
+}
+
+message ModuleInfoVendor {
+    string name = 1;
+    string oui = 2;
+    string revision = 3;
+    string part_number = 4;
+    string serial_number = 5;
+    string clei = 6;
+    ModuleInfoVendorDate date = 7;
+}
+
+message ModuleInfoSpecComplianceFibre {
+    repeated string length = 1; // List of support fibre lengths. May be empty.
+    repeated string tx_technology = 2; // List of support fibre Tx technology types. May be empty.
+    repeated string media = 3; // List of support fibre media types. May be empty.
+    repeated string speed = 4; // List of support fibre speeds. May be empty.
+}
+
+message ModuleInfoSpecCompliance {
+    repeated string ethernet = 1; // List of supported ethernet types. May be empty.
+    repeated string sonet = 2; // List of supported SONET types. May be empty.
+    repeated string sas = 3; // List of supported SAS types. May be empty.
+    repeated string gigabit_ethernet = 4; // List of supported GigaBit ethernet types. May be empty.
+    ModuleInfoSpecComplianceFibre fibre = 5;
+}
+
+message ModuleInfoDeviceIdentifier {
+    string identifier = 1;
+    string revision_compliance = 2;
+    bytes optional_upper_pages = 3; // List of supported upper pages (each byte is a page number).
+    uint32 power_class = 4;
+    bool rx_cdr = 5;
+    bool tx_cdr = 6;
+    string connector_type = 7;
+    string encoding = 8;
+    uint32 baud_rate = 9; // in Megabaud
+    ModuleInfoSpecCompliance spec_compliance = 10;
+}
+
+message ModuleInfoDevice {
+    ModuleInfoDeviceIdentifier identifier = 1;
+}
+
+message ModuleInfo {
+    ModuleInfoVendor vendor = 1;
+    ModuleInfoDevice device = 2;
+}
+
+message ModuleInfoRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 mod_id = 2; // 0-based index. Set to -1 for all modules.
+}
+
+message ModuleInfoResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 mod_id = 3;
+    ModuleInfo info = 4;
+}
+
+message ModuleMem {
+    uint32 offset = 1; // Offset into the 256 byte module memory. Memory is divided in 2 128 byte
+                       // pages, where the lower page (bytes 0-127) are fixed and the upper page
+                       // (bytes 128-255) are dynamically selected by the page index.
+    uint32 page = 2;   // Index used to select one of 256 possible dynamic upper memory pages. Only
+                       // needed when accessing bytes in the offset range 128-255.
+    uint32 count = 3;  // For get operations, indicates the number of bytes to read starting from
+                       // the given offset. Must not exceed 256 bytes (offset + count <= 256).
+                       // Not used for set operations.
+    bytes data = 4;    // Bytes returned on get operations or given for set operations.
+}
+
+message ModuleMemRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 mod_id = 2; // 0-based index. Set to -1 for all modules.
+    ModuleMem mem = 3;
+}
+
+message ModuleMemResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 mod_id = 3;
+    ModuleMem mem = 4;        // Data returned on get operations. Will be unset for set operations.
+}
+
+message ModuleStatusAlarm {
+    string name = 1;
+    bool active = 2;
+}
+
+message ModuleStatusMonitor {
+    string name = 1;
+    double value = 2;
+}
+
+message ModuleStatus {
+    repeated ModuleStatusAlarm alarms = 1;
+    repeated ModuleStatusMonitor monitors = 2;
+}
+
+message ModuleStatusRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 mod_id = 2; // 0-based index. Set to -1 for all modules.
+}
+
+message ModuleStatusResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 mod_id = 3;
+    ModuleStatus status = 4;
+}
+
+//--------------------------------------------------------------------------------------------------
+enum PortState {
+    PORT_STATE_UNKNOWN = 0; // Field is unset.
+    PORT_STATE_DISABLE = 1;
+    PORT_STATE_ENABLE = 2;
+}
+
+enum PortFec {
+    PORT_FEC_UNKNOWN = 0; // Field is unset.
+    PORT_FEC_NONE = 1;
+    PORT_FEC_REED_SOLOMON = 2;
+}
+
+enum PortLoopback {
+    PORT_LOOPBACK_UNKNOWN = 0; // Field is unset.
+    PORT_LOOPBACK_NONE = 1;
+    PORT_LOOPBACK_NEAR_END_PMA = 2;
+}
+
+message PortConfig {
+    PortState state = 1;
+    PortFec fec = 2;
+    PortLoopback loopback = 3;
+}
+
+message PortConfigRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 port_id = 2; // 0-based index. Set to -1 for all ports.
+
+    // Configuration data used for set operations. Leave unset for get operations.
+    PortConfig config = 3;
+}
+
+message PortConfigResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 port_id = 3;
+
+    // Configuration data returned on get operations. Will be unset for set operations.
+    PortConfig config = 4;
+}
+
+enum PortLink {
+    PORT_LINK_UNKNOWN = 0; // Field is unset.
+    PORT_LINK_DOWN = 1;
+    PORT_LINK_UP = 2;
+}
+
+message PortStatus {
+    PortLink link = 1;
+}
+
+message PortStatusRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 port_id = 2; // 0-based index. Set to -1 for all ports.
+}
+
+message PortStatusResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 port_id = 3;
+    PortStatus status = 4;
+}
+
+message PortStatsRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    sint32 port_id = 2; // 0-based index. Set to -1 for all ports.
+    StatsFilters filters = 3; // Filters to restrict statistics on get operations.
+                              // Leave unset for all counter statistics.
+}
+
+message PortStatsResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    uint32 port_id = 3;
+    Stats stats = 4;
+}
+
+//--------------------------------------------------------------------------------------------------
+enum SwitchInterfaceType {
+    SW_INTF_UNKNOWN = 0; // Field is unset.
+    SW_INTF_PORT = 1;
+    SW_INTF_HOST = 2;
+}
+
+message SwitchInterfaceId {
+    SwitchInterfaceType itype = 1;
+    uint32 index = 2;
+}
+
+// TODO: Should Processor be Pipeline instead? For consistency with the sn-p4 protobuf?
+enum SwitchProcessorType {
+    SW_PROC_UNKNOWN = 0; // Field is unset.
+    SW_PROC_BYPASS = 1;
+    SW_PROC_DROP = 2;
+    SW_PROC_APP = 3;
+}
+
+message SwitchProcessorId {
+    SwitchProcessorType ptype = 1;
+    uint32 index = 2;
+}
+
+message SwitchIngressSource {
+    SwitchInterfaceId from_intf = 1;
+    SwitchInterfaceId to_intf = 2;
+}
+
+message SwitchIngressConnection {
+    SwitchInterfaceId from_intf = 1;
+    SwitchProcessorId to_proc = 2;
+}
+
+message SwitchEgressConnection {
+    SwitchProcessorId on_proc = 1;
+    SwitchInterfaceId from_intf = 2;
+    SwitchInterfaceId to_intf = 3;
+}
+
+message SwitchConfig {
+    // Array containing one source mapping per ingress interface.
+    repeated SwitchIngressSource ingress_sources = 1;
+
+    // Array containing one connection mapping per ingress interface.
+    repeated SwitchIngressConnection ingress_connections = 2;
+
+    // Array containing one connection mapping per egress interface on each processor.
+    repeated SwitchEgressConnection egress_connections = 3;
+}
+
+message SwitchConfigRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+
+    // Configuration data used for set operations. Leave unset for get operations.
+    SwitchConfig config = 2;
+}
+
+message SwitchConfigResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+
+    // Configuration data returned on get operations. Will be unset for set operations.
+    SwitchConfig config = 3;
+}
+
+message SwitchStatsRequest {
+    sint32 dev_id = 1; // 0-based index. Set to -1 for all devices.
+    StatsFilters filters = 2; // Filters to restrict statistics on get operations.
+                              // Leave unset for all counter statistics.
+}
+
+message SwitchStatsResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    uint32 dev_id = 2;
+    Stats stats = 3;
+}
+
+//--------------------------------------------------------------------------------------------------
+message ServerStatus {
+    google.protobuf.Timestamp start_time = 1; // UTC wall clock.
+    google.protobuf.Duration up_time = 2; // Diff of monotonic system clock.
+}
+
+message ServerStatusRequest {
+}
+
+message ServerStatusResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    ServerStatus status = 2;
+}
+
+enum ServerDebugFlag {
+    DEBUG_FLAG_UNKNOWN = 0;
+    DEBUG_FLAG_BATCH = 1;
+}
+
+message ServerDebug {
+    repeated ServerDebugFlag enables = 1;
+    repeated ServerDebugFlag disables = 2;
+}
+
+enum ServerControlStatsFlag {
+    CTRL_STATS_FLAG_UNKNOWN = 0;
+
+    CTRL_STATS_FLAG_DOMAIN_COUNTERS = 1;
+    CTRL_STATS_FLAG_DOMAIN_MONITORS = 2;
+    CTRL_STATS_FLAG_DOMAIN_MODULES = 3;
+
+    CTRL_STATS_FLAG_ZONE_CARD_MONITORS = 10;
+    CTRL_STATS_FLAG_ZONE_SYSMON_MONITORS = 20;
+    CTRL_STATS_FLAG_ZONE_HOST_COUNTERS = 30;
+    CTRL_STATS_FLAG_ZONE_PORT_COUNTERS = 40;
+    CTRL_STATS_FLAG_ZONE_SWITCH_COUNTERS = 50;
+    CTRL_STATS_FLAG_ZONE_MODULE_MONITORS = 60;
+}
+
+message ServerControlStats {
+    repeated ServerControlStatsFlag enables = 1;
+    repeated ServerControlStatsFlag disables = 2;
+}
+
+message ServerControl {
+    ServerControlStats stats = 1;
+}
+
+message ServerConfig {
+    ServerDebug debug = 1;
+    ServerControl control = 2;
+}
+
+message ServerConfigRequest {
+    // Configuration data used for set operations. Leave unset for get operations.
+    ServerConfig config = 1;
+}
+
+message ServerConfigResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+
+    // Configuration data returned on get operations. Will be unset for set operations.
+    ServerConfig config = 2;
+}
+
+//--------------------------------------------------------------------------------------------------
+enum BatchOperation {
+    BOP_UNKNOWN = 0; // Field is unset.
+    BOP_GET = 1;
+    BOP_SET = 2;
+    BOP_CLEAR = 3;
+}
+
+message BatchRequest {
+    BatchOperation op = 1;
+
+    // Field IDs 2-9 are reserved for future use.
+
+    oneof item {
+        // General device configuration.
+        DeviceInfoRequest device_info = 10;
+        DeviceStatusRequest device_status = 11;
+
+        // Host configuration.
+        HostConfigRequest host_config = 20;
+        HostStatsRequest host_stats = 21;
+
+        // Port configuration.
+        PortConfigRequest port_config = 30;
+        PortStatusRequest port_status = 31;
+        PortStatsRequest port_stats = 32;
+
+        // Switch configuration.
+        SwitchConfigRequest switch_config = 40;
+        SwitchStatsRequest switch_stats = 41;
+
+        // Preset defaults configuration.
+        DefaultsRequest defaults = 50;
+
+        // Statistics configuration.
+        StatsRequest stats = 60;
+
+        // Module configuration.
+        ModuleInfoRequest module_info = 70;
+        ModuleStatusRequest module_status = 71;
+        ModuleMemRequest module_mem = 72;
+        ModuleGpioRequest module_gpio = 73;
+
+        // Server configuration.
+        ServerStatusRequest server_status = 80;
+        ServerConfigRequest server_config = 81;
+    };
+}
+
+message BatchResponse {
+    ErrorCode error_code = 1; // Must be EC_OK before accessing remaining fields.
+    BatchOperation op = 2;
+
+    // Field IDs 2-9 are reserved for future use.
+
+    oneof item {
+        // General device configuration.
+        DeviceInfoResponse device_info = 10;
+        DeviceStatusResponse device_status = 11;
+
+        // Host configuration.
+        HostConfigResponse host_config = 20;
+        HostStatsResponse host_stats = 21;
+
+        // Port configuration.
+        PortConfigResponse port_config = 30;
+        PortStatusResponse port_status = 31;
+        PortStatsResponse port_stats = 32;
+
+        // Switch configuration.
+        SwitchConfigResponse switch_config = 40;
+        SwitchStatsResponse switch_stats = 41;
+
+        // Preset defaults configuration.
+        DefaultsResponse defaults = 50;
+
+        // Statistics configuration.
+        StatsResponse stats = 60;
+
+        // Module configuration.
+        ModuleInfoResponse module_info = 70;
+        ModuleStatusResponse module_status = 71;
+        ModuleMemResponse module_mem = 72;
+        ModuleGpioResponse module_gpio = 73;
+
+        // Server configuration.
+        ServerStatusResponse server_status = 80;
+        ServerConfigResponse server_config = 81;
+    };
+}
+
+//--------------------------------------------------------------------------------------------------
+service SmartnicConfig {
+    // Batching of multiple RPCs.
+    rpc Batch(stream BatchRequest) returns (stream BatchResponse);
+
+    // Preset defaults configuration.
+    rpc SetDefaults(DefaultsRequest) returns (stream DefaultsResponse);
+
+    // General device configuration.
+    rpc GetDeviceInfo(DeviceInfoRequest) returns (stream DeviceInfoResponse);
+    rpc GetDeviceStatus(DeviceStatusRequest) returns (stream DeviceStatusResponse);
+
+    // Host configuration.
+    rpc GetHostConfig(HostConfigRequest) returns (stream HostConfigResponse);
+    rpc SetHostConfig(HostConfigRequest) returns (stream HostConfigResponse);
+    rpc GetHostStats(HostStatsRequest) returns (stream HostStatsResponse);
+    rpc ClearHostStats(HostStatsRequest) returns (stream HostStatsResponse);
+
+    // Module configuration.
+    rpc GetModuleGpio(ModuleGpioRequest) returns (stream ModuleGpioResponse);
+    rpc SetModuleGpio(ModuleGpioRequest) returns (stream ModuleGpioResponse);
+    rpc GetModuleInfo(ModuleInfoRequest) returns (stream ModuleInfoResponse);
+    rpc GetModuleMem(ModuleMemRequest) returns (stream ModuleMemResponse);
+    rpc SetModuleMem(ModuleMemRequest) returns (stream ModuleMemResponse);
+    rpc GetModuleStatus(ModuleStatusRequest) returns (stream ModuleStatusResponse);
+
+    // Port configuration.
+    rpc GetPortConfig(PortConfigRequest) returns (stream PortConfigResponse);
+    rpc SetPortConfig(PortConfigRequest) returns (stream PortConfigResponse);
+    rpc GetPortStatus(PortStatusRequest) returns (stream PortStatusResponse);
+    rpc GetPortStats(PortStatsRequest) returns (stream PortStatsResponse);
+    rpc ClearPortStats(PortStatsRequest) returns (stream PortStatsResponse);
+
+    // Statistics configuration.
+    rpc GetStats(StatsRequest) returns (stream StatsResponse);
+    rpc ClearStats(StatsRequest) returns (stream StatsResponse);
+
+    // Switch configuration.
+    rpc GetSwitchConfig(SwitchConfigRequest) returns (stream SwitchConfigResponse);
+    rpc SetSwitchConfig(SwitchConfigRequest) returns (stream SwitchConfigResponse);
+    rpc GetSwitchStats(SwitchStatsRequest) returns (stream SwitchStatsResponse);
+    rpc ClearSwitchStats(SwitchStatsRequest) returns (stream SwitchStatsResponse);
+
+    // Server configuration.
+    rpc GetServerConfig(ServerConfigRequest) returns (stream ServerConfigResponse);
+    rpc SetServerConfig(ServerConfigRequest) returns (stream ServerConfigResponse);
+    rpc GetServerStatus(ServerStatusRequest) returns (stream ServerStatusResponse);
+}
+

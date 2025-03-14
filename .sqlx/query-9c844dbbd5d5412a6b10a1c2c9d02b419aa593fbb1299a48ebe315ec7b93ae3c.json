@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE loadbalancer\n            SET deleted_at = CURRENT_TIMESTAMP\n            WHERE id = ?1 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9c844dbbd5d5412a6b10a1c2c9d02b419aa593fbb1299a48ebe315ec7b93ae3c"
+}

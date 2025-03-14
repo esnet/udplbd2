@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO epoch (\n                reservation_id,\n                epoch_fpga_id,\n                boundary_event,\n                predicted_at,\n                slots\n            )\n            VALUES (?1, ?2, ?3, ?4, ?5)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c09b00d8105808e4a28d1b7f43abbbbfc6233ecd7d8d96b494c6b4858fc71abf"
+}

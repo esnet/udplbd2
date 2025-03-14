@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT permission FROM token_global_permission WHERE token_id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "permission",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5415d5b3787e823e2fa86a3e876dfb63f919fcf7d65f1e89e8cd1551114662a3"
+}

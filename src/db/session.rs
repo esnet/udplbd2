@@ -1,0 +1,219 @@
+// src/db/session.rs
+
+use crate::db::models::{Session, SessionState};
+use crate::db::{LoadBalancerDB, Result};
+use crate::errors::Error;
+use macaddr::MacAddr6;
+use std::net::SocketAddr;
+use tracing::info;
+
+impl LoadBalancerDB {
+    /// Gets the latest state update for a session
+    pub async fn get_latest_session_state(&self, session_id: i64) -> Result<Option<SessionState>> {
+        let record = sqlx::query!(
+            r#"
+            SELECT timestamp, is_ready, fill_percent, control_signal,
+                   total_events_recv, total_events_reassembled, total_events_reassembly_err,
+                   total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
+                   total_packets_recv
+            FROM session_state
+            WHERE session_id = ?1
+            ORDER BY timestamp DESC
+            LIMIT 1
+            "#,
+            session_id
+        )
+        .fetch_optional(&self.read_pool)
+        .await?;
+
+        Ok(record.map(|r| SessionState {
+            timestamp: r.timestamp.and_utc(),
+            is_ready: r.is_ready,
+            fill_percent: r.fill_percent,
+            control_signal: r.control_signal,
+            total_events_recv: r.total_events_recv as u64,
+            total_events_reassembled: r.total_events_reassembled as u64,
+            total_events_reassembly_err: r.total_events_reassembly_err as u64,
+            total_events_dequeued: r.total_events_dequeued as u64,
+            total_event_enqueue_err: r.total_event_enqueue_err as u64,
+            total_bytes_recv: r.total_bytes_recv as u64,
+            total_packets_recv: r.total_packets_recv as u64,
+        }))
+    }
+
+    /// Soft deletes sessions that haven't been updated in the last 5 seconds,
+    /// excluding sessions created in the last 5 seconds.
+    pub async fn cleanup_stale_sessions(&self) -> Result<()> {
+        let result = sqlx::query!(
+            r#"
+            WITH stale_sessions AS (
+                SELECT s.id
+                FROM session s
+                LEFT JOIN session_state ss ON s.id = ss.session_id
+                WHERE s.deleted_at IS NULL
+                AND s.created_at < datetime('now', '-5 seconds')
+                GROUP BY s.id
+                HAVING MAX(ss.created_at) < datetime('now', '-5 seconds')
+                OR MAX(ss.created_at) IS NULL
+            )
+            UPDATE session
+            SET deleted_at = CURRENT_TIMESTAMP
+            WHERE id IN (SELECT id FROM stale_sessions)
+            RETURNING id
+            "#
+        )
+        .fetch_all(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        let cleaned_session_ids: Vec<i64> = result.into_iter().map(|r| r.id).collect();
+
+        if !cleaned_session_ids.is_empty() {
+            info!("removed stale sessions: {:?}", cleaned_session_ids);
+        }
+
+        Ok(())
+    }
+
+    /// Adds a session to a reservation.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_session(
+        &self,
+        reservation_id: i64,
+        name: &str,
+        weight: f64,
+        addr: SocketAddr,
+        port_range: u16,
+        min_factor: f64,
+        max_factor: f64,
+        mac_address: MacAddr6,
+        keep_lb_header: bool,
+    ) -> Result<Session> {
+        let ip_str = addr.ip().to_string();
+        let mac_str = mac_address.to_string();
+        let port = addr.port();
+        let record = sqlx::query!(
+            r#"
+            INSERT INTO session (
+                reservation_id, name, weight, ip_address, udp_port, port_range,
+                min_factor, max_factor, mac_address, keep_lb_header
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            RETURNING id, reservation_id, name, weight, ip_address, udp_port,
+                      port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
+            "#,
+            reservation_id,
+            name,
+            weight,
+            ip_str,
+            port,
+            port_range,
+            min_factor,
+            max_factor,
+            mac_str,
+            keep_lb_header
+        )
+        .fetch_one(&self.write_pool)
+        .await?;
+
+        let session = Session {
+            id: record.id,
+            reservation_id: record.reservation_id,
+            name: record.name,
+            weight: record.weight,
+            ip_address: record.ip_address.parse().unwrap(),
+            udp_port: record.udp_port as u16,
+            port_range: record.port_range as u16,
+            mac_address: record.mac_address,
+            min_factor: record.min_factor,
+            max_factor: record.max_factor,
+            keep_lb_header: record.keep_lb_header == 1,
+            created_at: record.created_at.and_utc(),
+            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+        };
+
+        Ok(session)
+    }
+
+    /// Helper function to get the loadbalancer_id for a session
+    pub async fn get_loadbalancer_id_for_session(&self, session_id: i64) -> Result<i64> {
+        let record = sqlx::query!(
+            "SELECT lb.id
+             FROM loadbalancer lb
+             JOIN reservation r ON r.loadbalancer_id = lb.id
+             JOIN session s ON s.reservation_id = r.id
+             WHERE s.id = ?1",
+            session_id
+        )
+        .fetch_one(&self.read_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        Ok(record.id)
+    }
+
+    /// Retrieves a session by ID.
+    pub async fn get_session(&self, id: i64) -> Result<Session> {
+        let record = sqlx::query!(
+            r#"
+            SELECT id, reservation_id, name, weight, ip_address, udp_port,
+                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
+            FROM session
+            WHERE id = ?1 AND deleted_at IS NULL
+            "#,
+            id
+        )
+        .fetch_optional(&self.read_pool)
+        .await?;
+
+        let record = record.ok_or_else(|| Error::NotFound(format!("Session {id} not found")))?;
+
+        Ok(Session {
+            id: record.id,
+            reservation_id: record.reservation_id,
+            name: record.name,
+            weight: record.weight,
+            ip_address: record
+                .ip_address
+                .parse()
+                .map_err(|_| Error::Config("Invalid IP address".into()))?,
+            udp_port: record.udp_port as u16,
+            port_range: record.port_range as u16,
+            mac_address: record.mac_address,
+            min_factor: record.min_factor,
+            max_factor: record.max_factor,
+            keep_lb_header: record.keep_lb_header == 1,
+            created_at: record.created_at.and_utc(),
+            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+        })
+    }
+
+    pub async fn delete_session(&self, id: i64) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Hard delete token permissions for the session
+        sqlx::query!(
+            "DELETE FROM token_session_permission WHERE session_id = ?1",
+            id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+        // Soft delete the session
+        sqlx::query!(
+            "UPDATE session SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+        tx.commit().await.map_err(Error::Database)?;
+
+        // Delete tokens with no remaining permissions
+        self.delete_tokens_with_no_permissions().await?;
+
+        Ok(())
+    }
+}

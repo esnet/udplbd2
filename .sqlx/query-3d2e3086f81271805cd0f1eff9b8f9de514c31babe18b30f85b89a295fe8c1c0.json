@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT trp.permission\n                     FROM token_reservation_permission trp\n                     JOIN session s ON s.reservation_id = trp.reservation_id\n                     WHERE trp.token_id = ?1 AND s.id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "permission",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3d2e3086f81271805cd0f1eff9b8f9de514c31babe18b30f85b89a295fe8c1c0"
+}

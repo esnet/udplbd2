@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE session SET deleted_at = CURRENT_TIMESTAMP WHERE reservation_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2c93aa8a8f8e3aea08a1a96c60e9d8ab60e4f81491602c52e35d8fd5dd85e76d"
+}

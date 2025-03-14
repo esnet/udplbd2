@@ -1,0 +1,70 @@
+[package]
+name = "udplbd"
+version = "0.4.0"
+edition = "2021"
+
+[[bin]]
+name = "udplbd"
+path = "src/main.rs"
+
+[lib]
+name = "udplbd"
+path = "src/lib.rs"
+
+[dependencies]
+thiserror = "2.0.12"
+chrono = { version = "0.4.39", features = ["serde"] }
+macaddr = { version = "1.0", features = ["serde"] }
+sqlx = { version = "0.8.3", features = [
+    "sqlite",
+    "runtime-tokio-native-tls",
+    "chrono",
+] }
+tokio = { version = "1.43.0", features = ["full"] }
+serde = { version = "1.0.217", features = ["derive"] }
+sha2 = "0.10"
+hex = "0.4"
+uuid = { version = "1.13.1", features = ["v4"] }
+rand = "0.9.0"
+serde_yaml = "0.9.34"
+log = "0.4.25"
+byteorder = "1.5.0"
+clap = { version = "4.5.28", features = ["derive", "env"] }
+tonic = { version = "0.12.3", features = [
+    "tls",
+    "transport",
+    "gzip",
+    "tls-roots",
+    "tls-webpki-roots",
+] }
+prost = "0.13.3"
+prost-types = "0.13.3"
+async-stream = "0.3.6"
+futures = "0.3.31"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
+serde_json = "1.0.138"
+futures-util = "0.3.31"
+net-route = "0.4.5"
+ipnetwork = { version = "0.21.1", features = ["serde"] }
+zerocopy = { version = "0.8.17", features = ["zerocopy-derive"] }
+tokio-stream = "0.1.17"
+zerocopy-derive = "0.8.17"
+tokio-util = "0.7.13"
+url = { version = "2.5.4", features = ["serde"] }
+turmoil = "0.6.5"
+hyper = "1.6.0"
+tower = "0.5.2"
+hyper-util = "0.1.10"
+tempfile = "3.16.0"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+rtnetlink = "0.14.1"
+netlink-packet-route = "0.19.0"
+
+[build-dependencies]
+tonic-build = "0.12.3"
+
+[profile.release]
+incremental = true
+lto = "thin"

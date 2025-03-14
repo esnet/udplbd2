@@ -1,0 +1,319 @@
+syntax = "proto3";
+package loadbalancer;
+option go_package = "github.com/esnet/udplbd/pkg/pb";
+import "google/protobuf/timestamp.proto";
+
+enum PortRange {
+    PORT_RANGE_1 = 0;
+    PORT_RANGE_2 = 1;
+    PORT_RANGE_4 = 2;
+    PORT_RANGE_8 = 3;
+    PORT_RANGE_16 = 4;
+    PORT_RANGE_32 = 5;
+    PORT_RANGE_64 = 6;
+    PORT_RANGE_128 = 7;
+    PORT_RANGE_256 = 8;
+    PORT_RANGE_512 = 9;
+    PORT_RANGE_1024 = 10;
+    PORT_RANGE_2048 = 11;
+    PORT_RANGE_4096 = 12;
+    PORT_RANGE_8192 = 13;
+    PORT_RANGE_16384 = 14;
+}
+
+// The backend state reporting service definition.
+service LoadBalancer {
+	// Reserves a new load balancer
+	rpc ReserveLoadBalancer (ReserveLoadBalancerRequest) returns (ReserveLoadBalancerReply) {};
+	// Retrieves the reservation details of a load balancer
+	rpc GetLoadBalancer (GetLoadBalancerRequest) returns (ReserveLoadBalancerReply) {};
+	// Retrieves the current state of an LB
+	rpc LoadBalancerStatus (LoadBalancerStatusRequest) returns (LoadBalancerStatusReply) {};
+	// Sends a backend's state to server
+	rpc FreeLoadBalancer (FreeLoadBalancerRequest) returns (FreeLoadBalancerReply) {};
+
+	// Update a sender address for a load balancer
+    rpc AddSenders (AddSendersRequest) returns (AddSendersReply) {};
+    // Delete a sender address from a load balancer
+    rpc RemoveSenders (RemoveSendersRequest) returns (RemoveSendersReply) {};
+
+	// Sends a backend's registration request to server
+	rpc Register (RegisterRequest) returns (RegisterReply) {};
+	// Sends a backend's request to unregister to server
+	rpc Deregister (DeregisterRequest) returns (DeregisterReply) {};
+	// Sends a backend's state to server
+	rpc SendState (SendStateRequest) returns (SendStateReply) {};
+
+	// Returns the name, LoadBalancerStatus data, and GetLoadBalancer data for all LBs
+	rpc Overview (OverviewRequest) returns (OverviewReply) {};
+	// Returns the version of the current LB.
+	rpc Version (VersionRequest) returns (VersionReply) {};
+
+	// Creates a new token with specified permissions
+	rpc CreateToken (CreateTokenRequest) returns (CreateTokenReply) {};
+	// Lists all permissions for a token
+	rpc ListTokenPermissions (ListTokenPermissionsRequest) returns (ListTokenPermissionsReply) {};
+	// Lists all child tokens created by this token
+	rpc ListChildTokens (ListChildTokensRequest) returns (ListChildTokensReply) {};
+	// Revokes a token and all its children
+	rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenReply) {};
+}
+
+
+//
+//  ReserveLoadBalancer
+//
+message ReserveLoadBalancerRequest {
+	string name = 2; // name of the new LB instance
+	google.protobuf.Timestamp until = 4; // when this reservation should end, if UNIX epoch, no expiration
+	repeated string senderAddresses = 5; // allowed ip addresses to send, v4 or v6
+}
+//
+//  GetLoadBalancer will return same as ReserveLoadBalancer but without token
+//
+message GetLoadBalancerRequest {
+	string lbId = 2; // database identifier
+}
+// Reply with session token
+message ReserveLoadBalancerReply {
+	string token = 1; // instance token
+	string lbId = 2; // database identifier, this is what to use as lbId in other gRPCs
+	string syncIpAddress = 3; // backend data receiving IP address
+	uint32 syncUdpPort = 4; // backend data receiving IP address
+	string dataIpv4Address = 5; // backend data receiving IP address
+	string dataIpv6Address = 6; // backend data receiving IP address
+	uint32 fpgaLbId = 7; // FPGA LB ID, for use in correlating logs/metrics
+}
+
+
+//
+//  LoadBalancerStatus
+//
+message LoadBalancerStatusRequest {
+	string lbId = 2; // load balancer instance identifier
+}
+message WorkerStatus {
+	string name = 1;
+	float fillPercent = 2;
+	float controlSignal = 3;
+	uint32 slotsAssigned = 4;
+	google.protobuf.Timestamp lastUpdated = 5; // time that this node was last updated
+}
+message LoadBalancerStatusReply {
+	google.protobuf.Timestamp timestamp = 1; // time that this message was generated
+	uint64 currentEpoch = 2; // current epoch
+	uint64 currentPredictedEventNumber = 3; // Current predicted event number
+	repeated WorkerStatus workers = 4;
+	repeated string senderAddresses = 5;
+	google.protobuf.Timestamp expiresAt = 6; // When this LB expires
+}
+
+
+
+//
+// AddSenders
+//
+message AddSendersRequest {
+    string lbId = 2; // load balancer instance identifier
+    repeated string senderAddresses = 3; // sender IP addresses to add to the whitelist
+}
+message AddSendersReply {}
+
+
+
+//
+// RemoveSenders
+//
+message RemoveSendersRequest {
+    string lbId = 2; // load balancer instance identifier
+    repeated string senderAddresses = 3; // sender IP addresses to delete from the whitelist
+}
+message RemoveSendersReply {}
+
+
+
+//
+// FreeLoadBalancer
+//
+message FreeLoadBalancerRequest {
+	string lbId = 2; // load balancer instance identifier
+}
+message FreeLoadBalancerReply {}
+
+
+
+//
+// Register
+//
+message RegisterRequest {
+	string lbId = 2; // load balancer instance identifier
+	string name = 3; // name of receiver
+	float weight = 4; // relative weight of the node for initial lb calendar
+	string ipAddress = 5; // backend data receiving IP address
+	uint32 udpPort = 6; // backend data receiving UDP port
+	PortRange portRange = 7; // backend "entropy" or range of ports
+
+	// multiplied with the number of slots that would be assigned evenly to determine min number of slots
+	// for example, 4 nodes with a minFactor of 0.5 = (512 slots / 4) * 0.5 = min 64 slots
+	float minFactor = 8;
+
+	// multiplied with the number of slots that would be assigned evenly to determine max number of slots
+	// for example, 4 nodes with a maxFactor of 2 = (512 slots / 4) * 2 = max 256 slots
+	// set to 0 to specify no maximum
+	float maxFactor = 9;
+
+	// if true, this receiver will receive packets with EJFAT headers intact
+	bool keepLbHeader = 10;
+}
+// Reply with session token
+message RegisterReply {
+	string token = 1; // Ssession token
+	string sessionId = 2; // Session identifier to use in subseq uent requests
+}
+
+
+
+//
+// Deregister
+//
+// The message being sent to server when backend is deregistering
+message DeregisterRequest {
+	string lbId = 2; // load balancer instance identifier
+	string sessionId = 3; // session token from RegisterReply
+}
+// DeregisterReply is intentionally blank (in case more data needed in future)
+message DeregisterReply {}
+
+
+
+//
+// SendState
+//
+message SendStateRequest {
+    string lbId = 3; // load balancer instance identifier
+    string sessionId = 2; // session id to update
+    google.protobuf.Timestamp timestamp = 4; // local time when backend state determined (millisec since Epoch, 1970-01-01)
+    float fillPercent = 5; // % of fifo entries that are filled with unprocessed data (0 to 1)
+    float controlSignal = 6; // change to data rate
+    bool isReady = 7; // If true, ready to accept more data, else not ready
+    int64 totalEventsRecv = 8; // how many event ids the receiver has seen
+    int64 totalEventsReassembled = 9; // how many events has the receiver reassembled
+    int64 totalEventsReassemblyErr = 10; // how many events has the receiver dropped before reassembly
+    int64 totalEventsDequeued = 11; // how many events popped off the queue
+    int64 totalEventEnqueueErr = 12; // how many events has the receiver failed to put on the queue because it's full
+    int64 totalBytesRecv = 13; // total bytes received
+    int64 totalPacketsRecv = 14; // total packets received
+}
+// SendStateReply is intentionally blank (in case more data needed in future)
+message SendStateReply {
+
+}
+
+
+
+//
+// Version
+//
+// TODO: add version info from dataplane
+message VersionRequest {
+}
+message VersionReply {
+	string commit = 1;
+	string build = 2;
+	string compatTag = 3;
+}
+
+
+//
+// Overview
+//
+// TODO: add more information about db identifiers for sessions
+message OverviewRequest {
+}
+message Overview {
+	string name = 1;
+	ReserveLoadBalancerReply reservation = 3;
+	LoadBalancerStatusReply status = 4;
+}
+message OverviewReply {
+	repeated Overview loadBalancers = 1;
+}
+
+
+//
+// CreateToken
+//
+// TODO: document some different user stories for how permissions should be delegated for a variety
+// of real-life usecases
+message CreateTokenRequest {
+	string name = 1; // Human readable name for the token
+	repeated TokenPermission permissions = 2;
+}
+
+message TokenPermission {
+	enum ResourceType {
+		ALL = 0;
+		LOAD_BALANCER = 1;
+		RESERVATION = 2;
+		SESSION = 3;
+	}
+
+	enum PermissionType {
+		READ_ONLY = 0;
+		REGISTER = 1;
+		RESERVE = 2;
+		UPDATE = 3;
+	}
+
+	ResourceType resourceType = 1;
+	string resourceId = 2;
+	PermissionType permission = 3;
+}
+
+message CreateTokenReply {
+	string token = 1;
+}
+
+message TokenSelector {
+	oneof token_selector {
+		uint32 id = 1; // if zero, target the token in the request itself
+		string token = 2;
+	}
+}
+
+//
+// ListTokenPermissions
+//
+message ListTokenPermissionsRequest {
+	TokenSelector target = 1;
+}
+
+message TokenDetails {
+	string name = 1;
+	repeated TokenPermission permissions = 2;
+	string created_at = 3;
+}
+
+message ListTokenPermissionsReply {
+	TokenDetails token = 1;
+}
+
+//
+// ListChildTokens
+//
+message ListChildTokensRequest {
+	TokenSelector target = 1;
+}
+
+message ListChildTokensReply {
+	repeated TokenDetails tokens = 1;
+}
+
+//
+// RevokeToken
+//
+message RevokeTokenRequest {
+	TokenSelector target = 1;
+}
+
+message RevokeTokenReply {}

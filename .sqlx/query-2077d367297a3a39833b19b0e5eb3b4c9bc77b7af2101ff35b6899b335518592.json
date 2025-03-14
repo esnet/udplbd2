@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO event_number (\n                reservation_id, event_number, avg_event_rate_hz,\n                local_timestamp, remote_timestamp\n            ) VALUES (?1, ?2, ?3, ?4, ?5)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "2077d367297a3a39833b19b0e5eb3b4c9bc77b7af2101ff35b6899b335518592"
+}

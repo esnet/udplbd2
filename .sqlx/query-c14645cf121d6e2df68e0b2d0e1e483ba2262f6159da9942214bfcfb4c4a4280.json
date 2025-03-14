@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT reservation_id FROM session WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "reservation_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c14645cf121d6e2df68e0b2d0e1e483ba2262f6159da9942214bfcfb4c4a4280"
+}

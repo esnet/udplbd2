@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM token_global_permission WHERE token_id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9b39feef8c43afa2f79e4db3a39419594c639934b0e24e193a290296f99eb926"
+}

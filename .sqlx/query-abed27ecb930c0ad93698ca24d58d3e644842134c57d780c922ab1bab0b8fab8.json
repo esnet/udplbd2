@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO token (token_hash, name, parent_token_id) VALUES (?1, ?2, ?3) RETURNING id",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "abed27ecb930c0ad93698ca24d58d3e644842134c57d780c922ab1bab0b8fab8"
+}

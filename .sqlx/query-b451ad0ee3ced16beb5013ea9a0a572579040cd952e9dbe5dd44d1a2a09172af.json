@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM token_session_permission\n                     WHERE token_id = ?1 AND session_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b451ad0ee3ced16beb5013ea9a0a572579040cd952e9dbe5dd44d1a2a09172af"
+}

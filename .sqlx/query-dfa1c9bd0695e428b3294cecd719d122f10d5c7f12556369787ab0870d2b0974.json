@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM token\n            WHERE id NOT IN (\n                SELECT DISTINCT token_id FROM token_global_permission\n                UNION\n                SELECT DISTINCT token_id FROM token_loadbalancer_permission\n                UNION\n                SELECT DISTINCT token_id FROM token_reservation_permission\n                UNION\n                SELECT DISTINCT token_id FROM token_session_permission\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "dfa1c9bd0695e428b3294cecd719d122f10d5c7f12556369787ab0870d2b0974"
+}

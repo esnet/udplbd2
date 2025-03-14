@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                event_number,\n                avg_event_rate_hz,\n                local_timestamp,\n                remote_timestamp\n            FROM event_number\n            WHERE reservation_id = ?1\n            ORDER BY created_at DESC\n            LIMIT 10\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "event_number",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "avg_event_rate_hz",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "local_timestamp",
+        "ordinal": 2,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "remote_timestamp",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b5270081e8ad7b837f6d2dafeb0e826b703c58e28304021c6226b148bee06213"
+}

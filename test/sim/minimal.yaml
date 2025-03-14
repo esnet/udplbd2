@@ -1,0 +1,13 @@
+timeline:
+  - time: 0
+    event:
+      !ReserveLoadBalancer {
+        name: "lb",
+        addresses: ["127.0.0.1", "192.168.0.6"],
+      }
+  - time: 500
+    event: !RegisterReceiver { name: "receiver1", rate: 10 }
+  - time: 20000
+    event: !SpawnSender { rate: 10, event_count: 100 }
+  - time: 30000
+    event: !SimulationExit

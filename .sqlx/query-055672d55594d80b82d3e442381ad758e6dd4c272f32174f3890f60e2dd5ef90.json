@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at,\n                   lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,\n                   lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,\n                   lb.created_at lb_created_at\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "res_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reserved_until",
+        "ordinal": 2,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "res_created_at",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "lb_id",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "unicast_mac_address",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "broadcast_mac_address",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "unicast_ipv4_address",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "unicast_ipv6_address",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "event_number_udp_port",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "lb_created_at",
+        "ordinal": 11,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "055672d55594d80b82d3e442381ad758e6dd4c272f32174f3890f60e2dd5ef90"
+}

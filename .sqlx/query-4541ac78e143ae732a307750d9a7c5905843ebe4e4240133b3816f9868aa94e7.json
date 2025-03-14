@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                id, reservation_id, name, weight, ip_address, udp_port, port_range,\n                mac_address, min_factor, max_factor, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "weight",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "ip_address",
+        "ordinal": 4,
+        "type_info": "Text"
+      },
+      {
+        "name": "udp_port",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "port_range",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mac_address",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "min_factor",
+        "ordinal": 8,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_factor",
+        "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "keep_lb_header",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 11,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 12,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4541ac78e143ae732a307750d9a7c5905843ebe4e4240133b3816f9868aa94e7"
+}

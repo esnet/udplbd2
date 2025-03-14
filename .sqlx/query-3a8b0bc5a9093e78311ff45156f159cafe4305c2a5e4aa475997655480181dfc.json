@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT ip_address FROM sender\n             WHERE reservation_id = ?1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "ip_address",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "3a8b0bc5a9093e78311ff45156f159cafe4305c2a5e4aa475997655480181dfc"
+}

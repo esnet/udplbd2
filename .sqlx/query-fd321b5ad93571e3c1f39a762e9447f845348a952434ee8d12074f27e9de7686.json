@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at\n             FROM reservation\n             WHERE deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reserved_until",
+        "ordinal": 2,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 3,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 4,
+        "type_info": "Datetime"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "fd321b5ad93571e3c1f39a762e9447f845348a952434ee8d12074f27e9de7686"
+}

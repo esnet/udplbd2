@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            WITH RECURSIVE token_tree AS (\n                SELECT id FROM token WHERE id = ?1\n                UNION ALL\n                SELECT t.id FROM token t\n                INNER JOIN token_tree tt ON t.parent_token_id = tt.id\n            )\n            DELETE FROM token WHERE id IN (SELECT id FROM token_tree)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "4bb7ec5936bcd076c8cef988c4b67b92077bafdb7b03bc181e414b9b930b7b41"
+}

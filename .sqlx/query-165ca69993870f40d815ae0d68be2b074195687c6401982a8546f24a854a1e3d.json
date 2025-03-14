@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO token_loadbalancer_permission (token_id, loadbalancer_id, permission)\n                         VALUES (?1, ?2, ?3)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "165ca69993870f40d815ae0d68be2b074195687c6401982a8546f24a854a1e3d"
+}

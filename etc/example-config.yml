@@ -1,0 +1,36 @@
+lb:
+  instances:
+    - ipv4: "192.0.2.1"
+      ipv6: "2001:DB8::1"
+      event_number_port: 19531
+    - ipv4: "192.0.2.2"
+      ipv6: "2001:DB8::2"
+      event_number_port: 19532
+    - ipv4: "192.0.2.3"
+      ipv6: "2001:DB8::3"
+      event_number_port: 19533
+    - ipv4: "192.0.2.4"
+      ipv6: "2001:DB8::4"
+      event_number_port: 19534
+  mac_unicast: "AB:CD:DE:F1:23:45"
+  mac_broadcast: "33:33:ff:00:00:16"
+database:
+  file: "/tmp/udplbd.db"
+event_numbers:
+  addresses:
+    - "127.0.0.1"
+    - "::1"
+controller:
+  duration: 1s
+  offset: 800ms
+server:
+  listen:
+    - "127.0.0.1:18347"
+  auth_token: "udplbd_default_change_me"
+  tls:
+    enable: false
+    certFile: "x509/server_cert.pem"
+    keyFile: "x509/server_key.pem"
+log:
+  level: debug
+smartnic: []

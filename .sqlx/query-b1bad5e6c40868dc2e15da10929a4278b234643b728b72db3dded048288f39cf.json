@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT permission\n                     FROM token_session_permission\n                     WHERE token_id = ?1 AND session_id = ?2",
+  "describe": {
+    "columns": [
+      {
+        "name": "permission",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b1bad5e6c40868dc2e15da10929a4278b234643b728b72db3dded048288f39cf"
+}

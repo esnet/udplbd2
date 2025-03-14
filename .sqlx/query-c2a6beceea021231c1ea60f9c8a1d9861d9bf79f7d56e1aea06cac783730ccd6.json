@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT timestamp, is_ready, fill_percent, control_signal,\n                   total_events_recv, total_events_reassembled, total_events_reassembly_err,\n                   total_events_dequeued, total_event_enqueue_err, total_bytes_recv,\n                   total_packets_recv\n            FROM session_state\n            WHERE session_id = ?1\n            ORDER BY timestamp DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "timestamp",
+        "ordinal": 0,
+        "type_info": "Datetime"
+      },
+      {
+        "name": "is_ready",
+        "ordinal": 1,
+        "type_info": "Bool"
+      },
+      {
+        "name": "fill_percent",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "control_signal",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "total_events_recv",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembled",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembly_err",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_dequeued",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_event_enqueue_err",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_bytes_recv",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_packets_recv",
+        "ordinal": 10,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "c2a6beceea021231c1ea60f9c8a1d9861d9bf79f7d56e1aea06cac783730ccd6"
+}

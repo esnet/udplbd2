@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO token_global_permission (token_id, permission)\n                         VALUES (?1, ?2)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "52e57de2f093a6313cf933623dde9fc8c834a86d6d9d0e9376a27c25b14cd11e"
+}

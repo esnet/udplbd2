@@ -1,0 +1,46 @@
+timelines:
+  - id: 0
+    events:
+      - time: 100
+        event: !SpawnDataplane
+    end_condition: !TCPHostReady { host: "dataplane", port: 50051 }
+
+  - id: 1
+    events:
+      - time: 100
+        event: !SpawnServer
+    end_condition: !TCPHostReady { host: "server", port: 19523 }
+
+  - id: 2
+    events:
+      - time: 0
+        event: !ReserveLoadBalancer { name: "lb1", addresses: ["192.168.0.8"] }
+    end_condition: !UDPHostReady { host: "dataplane", port: 19522 }
+
+  - id: 3
+    events:
+      - time: 100
+        event:
+          !RegisterReceiver {
+            config:
+              {
+                name: "receiver1",
+                kp: 0.1,
+                ki: 0.01,
+                kd: 0.001,
+                sp: 0,
+                min_factor: 0.5,
+                max_factor: 1.5,
+                rate: 50,
+              },
+            lb: "lb1",
+          }
+      - time: 2000
+        event:
+          !SpawnSender {
+            config: { rate: 10, event_size: 300, event_count: 100 },
+            lb: "lb1",
+          }
+      - time: 15000
+        event: !SimulationExit
+    end_condition: !Tick { tick: 15000 }
