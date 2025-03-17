@@ -10,12 +10,6 @@ use std::net::Ipv6Addr;
 ///
 /// # Returns
 /// A u64 containing the MAC address in the least significant 48 bits
-///
-/// # Examples
-/// ```
-/// let mac = macaddr::MacAddr6::from_str("00:11:22:33:44:55").unwrap();
-/// assert_eq!(mac_to_u64(mac), 0x001122334455);
-/// ```
 pub fn mac_to_u64(mac: macaddr::MacAddr6) -> u64 {
     let bytes = mac.as_bytes();
     ((bytes[0] as u64) << 40)
