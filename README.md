@@ -86,13 +86,13 @@ udplbd mock --db /path/to/in-memory.db
 #### gRPC API Commands
 
 ```bash
-udplbd client --url "ejfat://your_auth_token@0.0.0.0:50051" reserve --name "my_lb" --sender "192.168.1.1" --after "1hour"
+udplbd client --url "ejfats://your_auth_token@0.0.0.0:50051" reserve --name "my_lb" --sender "192.168.1.123" --after "1hour"
 ```
 
 #### Dataplane Testing Commands
 
 ```bash
-udplbd dataplane --url "ejfat://your_auth_token@0.0.0.0:50051" recv --address "0.0.0.0" --port 50052 --command "cat"
+udplbd dataplane --url "ejfats://your_auth_token@0.0.0.0:50051" recv --address "192.168.1.123" --port 50052 --command "cat"
 ```
 
 ### API Commands
@@ -130,7 +130,7 @@ The `client` subcommand provides several commands for interacting with the gRPC 
   udplbd client tokens create --name "admin" --resource-type "ALL" --permission "READ"
   udplbd client tokens list-permissions
   udplbd client tokens list-children
-  udplbd client tokens revoke --token "your_token_here"
+  udplbd client tokens revoke --token 123
   ```
 
 - **Display Version**

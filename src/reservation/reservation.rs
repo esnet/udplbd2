@@ -102,6 +102,7 @@ impl ReservationManager {
             .smartnic_clients
             .bulk_update(&[initial_update.clone()])
             .await;
+
         if let Err(insert_error) = result {
             warn!("failed to insert rules, attempting update: {insert_error:#?}");
             let update_only = TableUpdate {
