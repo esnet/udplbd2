@@ -7,12 +7,14 @@ tests:
   stage: test
   image: rust
   script:
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler
     - cargo test
 
 build:amd64:
   stage: build
   image: rust
   script:
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler
     - cargo build --release
   artifacts:
     paths:
@@ -22,6 +24,7 @@ rustdoc:
   stage: build
   image: rust
   script:
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler
     - cargo doc
   artifacts:
     paths:
