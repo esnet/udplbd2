@@ -9,7 +9,7 @@ tests:
   script:
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
     - cargo install sqlx-cli
-    - export "DATABASE_URL=sqlite://tmp/udplbd.db"
+    - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - sqlx database setup
     - cargo test
 
@@ -19,7 +19,7 @@ build:amd64:
   script:
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
     - cargo install sqlx-cli
-    - export "DATABASE_URL=sqlite://tmp/udplbd.db"
+    - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - sqlx database setup    - cargo build --release
   artifacts:
     paths:
@@ -31,7 +31,7 @@ rustdoc:
   script:
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
     - cargo install sqlx-cli
-    - export "DATABASE_URL=sqlite://tmp/udplbd.db"
+    - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - sqlx database setup    - cargo doc
   artifacts:
     paths:
