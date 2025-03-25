@@ -20,7 +20,7 @@ use udplbd::{
 /// Currently supports starting the daemon with a specified configuration file.
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
-struct Cli {
+pub struct Cli {
     /// Path to the configuration file.
     #[arg(
         short,
@@ -73,7 +73,6 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-
     let config = Config::from_file(&cli.config)?;
     let log_level = if cli.log_level.is_empty() {
         config.log.level.clone()
@@ -81,7 +80,10 @@ async fn main() -> Result<()> {
         cli.log_level.clone()
     };
     setup_logging(&log_level)?;
+    cli_main(cli, config).await
+}
 
+pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
     match cli.command {
         Commands::Start => start(config).await?,
         Commands::Static {
@@ -100,7 +102,6 @@ async fn main() -> Result<()> {
             dp_cli.run(&config).await?;
         }
     }
-
     Ok(())
 }
 
@@ -131,4 +132,32 @@ fn setup_logging(level: &str) -> Result<()> {
         .expect("invalid log level in udplbd.cfg");
     tracing_subscriber::fmt().with_env_filter(filter).init();
     Ok(())
+}
+
+#[cfg(test)]
+mod test {
+    use super::{cli_main, Cli};
+    use clap::Parser;
+    use udplbd::config::Config;
+
+    #[tokio::test]
+    async fn end_to_end() {
+        tokio::spawn(async move {
+            let config = Config::turmoil();
+            let cli = Cli::parse_from(vec!["udplbd", "mock"]);
+            let _ = cli_main(cli, config).await;
+        });
+        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        let config = Config::turmoil();
+        let cli = Cli::parse_from(vec![
+            "udplbd",
+            "dataplane",
+            "doctor",
+            "-a",
+            "127.0.0.1",
+            "-p",
+            "33851",
+        ]);
+        assert!(cli_main(cli, config).await.is_ok())
+    }
 }

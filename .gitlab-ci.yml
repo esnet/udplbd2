@@ -26,16 +26,12 @@ x86-64:
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - echo "Setting up database"
     - $CARGO_HOME/bin/sqlx database setup
-    - echo "Running tests"
     - cargo test --release
-    - echo "Building release"
     - cargo build --release
-    - echo "Generating documentation"
-    - cargo doc
-    - echo "Preparing artifacts"
+    - cargo doc --no-deps
     - mkdir -p public
     - mv target/doc public/doc
-    - mv target/release/udplbd public/udplbd-amd64
+    - mv target/release/udplbd public/udplbd-linux-amd64
   artifacts:
     paths:
       - public
