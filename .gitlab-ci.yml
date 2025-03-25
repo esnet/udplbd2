@@ -25,7 +25,7 @@ x86-64:
   script:
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - echo "Setting up database"
-    - sqlx database setup
+    - $CARGO_HOME/bin/sqlx database setup
     - echo "Running tests"
     - cargo test --release
     - echo "Building release"
