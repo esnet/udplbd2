@@ -645,3 +645,21 @@ pub mod connector {
         })
     }
 }
+
+#[cfg(test)]
+pub mod test {
+    use super::tester::{run_turmoil_test, TurmoilConfig};
+    use crate::{
+        api::client::ControlPlaneClient,
+        dataplane::{meta_events::MetaEventManager, turmoil::receiver::Receiver},
+    };
+
+    #[test]
+    fn test_minimal_scenario() {
+        let test_config = include_str!("../../test/sim/minimal.yaml");
+        let (meta_event_manager, _) = MetaEventManager::new(false);
+        let config: TurmoilConfig = serde_yaml::from_str(test_config).unwrap();
+        let result = run_turmoil_test(&meta_event_manager, None, config);
+        assert!(result.is_ok());
+    }
+}

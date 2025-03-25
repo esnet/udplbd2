@@ -1,56 +1,41 @@
 stages:
-  - test
   - build
-  - publish
 
-tests:
-  stage: test
-  image: rust
-  script:
-    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
-    - cargo install sqlx-cli
-    - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
-    - sqlx database setup
-    - cargo test
+variables:
+  # Set CARGO_HOME within the project directory to cache it persistently
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
 
-build:amd64:
+x86-64:
   stage: build
   image: rust
-  script:
+  cache:
+    key: "persistent-cache" # Use a constant key for persistent caching
+    policy: pull-push # Ensure cache is pulled at job start and pushed at job end
+    paths:
+      # Cache Debian package downloads (note: runner permissions might be needed)
+      - /var/cache/apt/archives/
+      # Cache Rust build artifacts and dependencies
+      - target/
+      - .cargo/registry/
+      - .cargo/git/
+  before_script:
+    - echo "Installing dependencies"
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
     - cargo install sqlx-cli
+  script:
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
+    - echo "Setting up database"
     - sqlx database setup
+    - echo "Running tests"
+    - cargo test --release
+    - echo "Building release"
     - cargo build --release
-  artifacts:
-    paths:
-      - target/release/udplbd
-
-rustdoc:
-  stage: build
-  image: rust
-  script:
-    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
-    - cargo install sqlx-cli
-    - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
-    - sqlx database setup
+    - echo "Generating documentation"
     - cargo doc
-  artifacts:
-    paths:
-      - target/doc
-
-pages:
-  stage: publish
-  image: alpine
-  dependencies:
-    - build:amd64
-    - rustdoc
-  script:
+    - echo "Preparing artifacts"
     - mkdir -p public
     - mv target/doc public/doc
     - mv target/release/udplbd public/udplbd-amd64
   artifacts:
     paths:
       - public
-  only:
-    - master

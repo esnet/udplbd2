@@ -12,24 +12,35 @@ name = "udplbd"
 path = "src/lib.rs"
 
 [dependencies]
-thiserror = "2.0.12"
+async-stream = "0.3.6"
+byteorder = "1.5.0"
 chrono = { version = "0.4.39", features = ["serde"] }
+clap = { version = "4.5.28", features = ["derive", "env"] }
+futures = "0.3.31"
+futures-util = "0.3.31"
+hex = "0.4"
+hyper = "1.6.0"
+hyper-util = "0.1.10"
+ipnetwork = { version = "0.21.1", features = ["serde"] }
+log = "0.4.25"
 macaddr = { version = "1.0", features = ["serde"] }
+prost = "0.13.3"
+prost-types = "0.13.3"
+rand = "0.9.0"
+serde = { version = "1.0.217", features = ["derive"] }
+serde_json = "1.0.138"
+serde_yaml = "0.9.34"
+sha2 = "0.10"
 sqlx = { version = "0.8.3", features = [
     "sqlite",
     "runtime-tokio-native-tls",
     "chrono",
 ] }
+tempfile = "3.16.0"
+thiserror = "2.0.12"
 tokio = { version = "1.43.0", features = ["full"] }
-serde = { version = "1.0.217", features = ["derive"] }
-sha2 = "0.10"
-hex = "0.4"
-uuid = { version = "1.13.1", features = ["v4"] }
-rand = "0.9.0"
-serde_yaml = "0.9.34"
-log = "0.4.25"
-byteorder = "1.5.0"
-clap = { version = "4.5.28", features = ["derive", "env"] }
+tokio-stream = "0.1.17"
+tokio-util = "0.7.13"
 tonic = { version = "0.12.3", features = [
     "tls",
     "transport",
@@ -37,30 +48,19 @@ tonic = { version = "0.12.3", features = [
     "tls-roots",
     "tls-webpki-roots",
 ] }
-prost = "0.13.3"
-prost-types = "0.13.3"
-async-stream = "0.3.6"
-futures = "0.3.31"
+tower = "0.5.2"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", features = ["env-filter"] }
-serde_json = "1.0.138"
-futures-util = "0.3.31"
-net-route = "0.4.5"
-ipnetwork = { version = "0.21.1", features = ["serde"] }
-zerocopy = { version = "0.8.17", features = ["zerocopy-derive"] }
-tokio-stream = "0.1.17"
-zerocopy-derive = "0.8.17"
-tokio-util = "0.7.13"
-url = { version = "2.5.4", features = ["serde"] }
 turmoil = "0.6.5"
-hyper = "1.6.0"
-tower = "0.5.2"
-hyper-util = "0.1.10"
-tempfile = "3.16.0"
+url = { version = "2.5.4", features = ["serde"] }
+uuid = { version = "1.13.1", features = ["v4"] }
+zerocopy = { version = "0.8.17", features = ["zerocopy-derive"] }
+zerocopy-derive = "0.8.17"
+
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rtnetlink = "0.14.1"
-netlink-packet-route = "0.19.0"
+rtnetlink = "0.16.0"
+netlink-packet-route = "0.22.0"
 
 [build-dependencies]
 tonic-build = "0.12.3"
