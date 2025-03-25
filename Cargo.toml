@@ -61,6 +61,7 @@ zerocopy-derive = "0.8.17"
 [target.'cfg(target_os = "linux")'.dependencies]
 rtnetlink = "0.16.0"
 netlink-packet-route = "0.22.0"
+net-route = "0.4.5"
 
 [build-dependencies]
 tonic-build = "0.12.3"

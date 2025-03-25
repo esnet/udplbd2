@@ -649,10 +649,7 @@ pub mod connector {
 #[cfg(test)]
 pub mod test {
     use super::tester::{run_turmoil_test, TurmoilConfig};
-    use crate::{
-        api::client::ControlPlaneClient,
-        dataplane::{meta_events::MetaEventManager, turmoil::receiver::Receiver},
-    };
+    use crate::dataplane::meta_events::MetaEventManager;
 
     #[test]
     fn test_minimal_scenario() {
