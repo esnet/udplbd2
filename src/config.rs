@@ -8,6 +8,9 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
+use tracing::warn;
+
+const DEFAULT_CONFIG_STR: &str = include_str!("../etc/example-config.yml");
 
 #[derive(Debug, Error)]
 pub enum ConfigError {
@@ -182,11 +185,20 @@ impl Config {
         }
     }
 
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, ConfigError> {
-        let contents = std::fs::read_to_string(path)?;
-        let config: Config = serde_yaml::from_str(&contents)?;
+    pub fn from_yaml_str(s: &str) -> Result<Self, ConfigError> {
+        let config: Config = serde_yaml::from_str(s)?;
         config.validate()?;
         Ok(config)
+    }
+
+    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, ConfigError> {
+        match std::fs::read_to_string(path) {
+            Ok(contents) => Self::from_yaml_str(&contents),
+            Err(e) => {
+                warn!("could not open config ({e}), using default config");
+                Self::from_yaml_str(DEFAULT_CONFIG_STR)
+            }
+        }
     }
 
     fn validate(&self) -> Result<(), ConfigError> {

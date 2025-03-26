@@ -146,7 +146,7 @@ The `dataplane` subcommand provides several commands for testing the dataplane. 
 - **Receive EJFAT Events**
 
   ```bash
-  udplbd dataplane recv --address "0.0.0.0" --port 50052 --command "cat"
+  udplbd dataplane recv --address "<public IP>" --port 12345 -- /bin/cat
   ```
 
 - **Send a File**
@@ -158,13 +158,13 @@ The `dataplane` subcommand provides several commands for testing the dataplane. 
 - **Perform Tests**
 
   ```bash
-  udplbd dataplane test --address "0.0.0.0" --port 50052 --config /path/to/test_config.json
+  udplbd dataplane test --address "<public IP>" --port 12345 /path/to/test_config.json
   ```
 
 - **Run Turmoil Network Simulation Tests**
 
   ```bash
-  udplbd dataplane sim --config /path/to/turmoil_config.json
+  udplbd dataplane sim /path/to/turmoil_config.json
   ```
 
 - **Pretty Print Received UDP Payloads**
