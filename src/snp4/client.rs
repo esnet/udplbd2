@@ -75,7 +75,19 @@ impl SNP4Client {
             pipeline_id: self.pipeline_id,
         });
 
-        let mut stream = self.api.get_pipeline_info(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["get_pipeline_info"])
+            .inc();
+        let mut stream = self
+            .api
+            .get_pipeline_info(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["get_pipeline_info"])
+                    .inc();
+            })?
+            .into_inner();
         let mut responses = Vec::new();
 
         while let Some(response) = stream.message().await? {
@@ -92,7 +104,19 @@ impl SNP4Client {
             table_name: String::new(), // Empty for all tables
         });
 
-        let mut stream = self.api.clear_table(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["clear_table"])
+            .inc();
+        let mut stream = self
+            .api
+            .clear_table(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["clear_table"])
+                    .inc();
+            })?
+            .into_inner();
         let mut responses = Vec::new();
 
         while let Some(response) = stream.message().await? {
@@ -109,7 +133,21 @@ impl SNP4Client {
             table_name: table_name.to_string(),
         });
 
-        let mut stream = self.api.clear_table(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["clear_table"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .clear_table(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["clear_table"])
+                    .inc();
+            })?
+            .into_inner();
+
         let mut responses = Vec::new();
 
         while let Some(response) = stream.message().await? {
@@ -179,12 +217,18 @@ impl SNP4Client {
             }
         }
 
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["batch"])
+            .inc();
+
         if !failed_rules.is_empty() {
             warn!(
                 "Batch operation completed with errors. Failed rules:\n{}",
                 failed_rules.join("\n")
             );
-
+            crate::metrics::SMARTNIC_GRPC_ERRORS
+                .with_label_values(&["batch"])
+                .inc();
             return Err(BatchError::Incomplete(responses));
         }
 
@@ -262,7 +306,21 @@ impl SNP4Client {
             dev_id: self.device_id,
         });
 
-        let mut stream = self.api.get_device_info(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["get_device_info"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .get_device_info(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["get_device_info"])
+                    .inc();
+            })?
+            .into_inner();
+
         let mut device_infos = Vec::new();
 
         while let Some(response) = stream.message().await? {
@@ -281,7 +339,21 @@ impl SNP4Client {
             filters: None,
         });
 
-        let mut stream = self.api.get_pipeline_stats(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["get_pipeline_stats"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .get_pipeline_stats(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["get_pipeline_stats"])
+                    .inc();
+            })?
+            .into_inner();
+
         let mut stats = Vec::new();
 
         while let Some(response) = stream.message().await? {
@@ -300,7 +372,21 @@ impl SNP4Client {
             filters: None,
         });
 
-        let mut stream = self.api.clear_pipeline_stats(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["clear_pipeline_stats"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .clear_pipeline_stats(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["clear_pipeline_stats"])
+                    .inc();
+            })?
+            .into_inner();
+
         while stream.message().await?.is_some() {}
 
         Ok(())
@@ -309,7 +395,21 @@ impl SNP4Client {
     pub async fn get_server_config(&mut self) -> Result<ServerConfig, Status> {
         let request = Request::new(ServerConfigRequest { config: None });
 
-        let mut stream = self.api.get_server_config(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["get_server_config"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .get_server_config(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["get_server_config"])
+                    .inc();
+            })?
+            .into_inner();
+
         let mut config = None;
 
         while let Some(response) = stream.message().await? {
@@ -333,7 +433,21 @@ impl SNP4Client {
             }),
         });
 
-        let mut stream = self.api.set_server_config(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["set_server_config"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .set_server_config(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["set_server_config"])
+                    .inc();
+            })?
+            .into_inner();
+
         while stream.message().await?.is_some() {}
 
         Ok(())
@@ -342,7 +456,21 @@ impl SNP4Client {
     pub async fn get_server_status(&mut self) -> Result<ServerStatus, Status> {
         let request = Request::new(ServerStatusRequest {});
 
-        let mut stream = self.api.get_server_status(request).await?.into_inner();
+        crate::metrics::SMARTNIC_GRPC
+            .with_label_values(&["get_server_status"])
+            .inc();
+
+        let mut stream = self
+            .api
+            .get_server_status(request)
+            .await
+            .inspect_err(|_| {
+                crate::metrics::SMARTNIC_GRPC_ERRORS
+                    .with_label_values(&["get_server_status"])
+                    .inc();
+            })?
+            .into_inner();
+
         let mut status = None;
 
         while let Some(response) = stream.message().await? {

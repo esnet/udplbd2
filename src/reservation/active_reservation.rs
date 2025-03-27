@@ -1,4 +1,9 @@
-use crate::db::{LoadBalancerDB, Result};
+use crate::db::{Epoch, LoadBalancerDB, Result};
+use crate::metrics::{
+    EPOCHS_PROCESSED, LB_ACTIVE_SESSIONS, LB_EPOCH_BOUNDARY, LB_FILL_PERCENT_AVG,
+    LB_FILL_PERCENT_MAX, LB_FILL_PERCENT_MIN, LB_FILL_PERCENT_STDDEV, LB_SLOTS_AVG, LB_SLOTS_MAX,
+    LB_SLOTS_MIN, LB_SLOTS_STDDEV,
+};
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::rules::*;
 use crate::util::{
@@ -245,5 +250,118 @@ impl ActiveReservation {
         }
 
         Ok(rules)
+    }
+
+    /// Updates metrics related to slot assignment, epoch processing, and fill percentages.
+    pub async fn update_metrics(&self, db: &LoadBalancerDB, epoch: Epoch) -> Result<()> {
+        EPOCHS_PROCESSED.inc();
+
+        let lb_id = self.lb_fpga_id.to_string();
+
+        // Count how many slots are assigned to each host
+        let mut host_slot_counts = std::collections::HashMap::new();
+        for &host_id in &epoch.slots {
+            *host_slot_counts.entry(host_id).or_insert(0) += 1;
+        }
+
+        // If no hosts have slots, return early
+        if host_slot_counts.is_empty() {
+            return Ok(());
+        }
+        LB_ACTIVE_SESSIONS
+            .with_label_values(&[&lb_id])
+            .set(host_slot_counts.len() as f64);
+
+        // Get the slot counts as a vector for statistics calculation
+        let slot_counts: Vec<f64> = host_slot_counts
+            .values()
+            .map(|&count| count as f64)
+            .collect();
+        let num_hosts = slot_counts.len() as f64;
+
+        // Calculate sum, max, and min in a single loop
+        let mut sum: f64 = 0.0;
+        let mut max: f64 = f64::MIN;
+        let mut min: f64 = f64::MAX;
+
+        for &count in &slot_counts {
+            sum += count;
+
+            if count > max {
+                max = count;
+            }
+            if count < min {
+                min = count;
+            }
+        }
+
+        // Calculate average
+        let avg = sum / num_hosts;
+
+        // Calculate variance and standard deviation
+        let mut variance: f64 = 0.0;
+        for &count in &slot_counts {
+            variance += (count - avg).powi(2);
+        }
+        variance /= num_hosts;
+        let stddev = variance.sqrt();
+
+        LB_SLOTS_AVG.with_label_values(&[&lb_id]).set(avg);
+        LB_SLOTS_STDDEV.with_label_values(&[&lb_id]).set(stddev);
+        LB_SLOTS_MAX.with_label_values(&[&lb_id]).set(max);
+        LB_SLOTS_MIN.with_label_values(&[&lb_id]).set(min);
+
+        LB_EPOCH_BOUNDARY
+            .with_label_values(&[&lb_id])
+            .set(epoch.boundary_event as f64);
+
+        // Get the latest session states to update fill metrics
+        if let Ok(session_states) = db.get_latest_session_states(self.reservation_id).await {
+            if !session_states.is_empty() {
+                // Calculate fill percentage statistics
+                let mut fill_sum = 0.0;
+                let mut fill_max = 0.0;
+                let mut fill_min = 1.0;
+                let num_sessions = session_states.len() as f64;
+
+                for (_, state) in &session_states {
+                    let fill = state.fill_percent;
+                    fill_sum += fill;
+
+                    if fill > fill_max {
+                        fill_max = fill;
+                    }
+                    if fill < fill_min {
+                        fill_min = fill;
+                    }
+                }
+
+                let fill_avg = fill_sum / num_sessions;
+
+                // Calculate fill percentage standard deviation
+                let mut fill_variance = 0.0;
+                for (_, state) in &session_states {
+                    fill_variance += (state.fill_percent - fill_avg).powi(2);
+                }
+                fill_variance /= num_sessions;
+                let fill_stddev = fill_variance.sqrt();
+
+                // Update fill metrics
+                LB_FILL_PERCENT_AVG
+                    .with_label_values(&[&lb_id])
+                    .set(fill_avg);
+                LB_FILL_PERCENT_STDDEV
+                    .with_label_values(&[&lb_id])
+                    .set(fill_stddev);
+                LB_FILL_PERCENT_MAX
+                    .with_label_values(&[&lb_id])
+                    .set(fill_max);
+                LB_FILL_PERCENT_MIN
+                    .with_label_values(&[&lb_id])
+                    .set(fill_min);
+            }
+        }
+
+        Ok(())
     }
 }

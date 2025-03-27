@@ -1,12 +1,15 @@
-use crate::proto::loadbalancer::v1::{
-    load_balancer_server, AddSendersReply, AddSendersRequest, CreateTokenReply, CreateTokenRequest,
-    DeregisterReply, DeregisterRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
-    GetLoadBalancerRequest, ListChildTokensReply, ListChildTokensRequest,
-    ListTokenPermissionsReply, ListTokenPermissionsRequest, LoadBalancerStatusReply,
-    LoadBalancerStatusRequest, OverviewReply, OverviewRequest, RegisterReply, RegisterRequest,
-    RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest,
-    RevokeTokenReply, RevokeTokenRequest, SendStateReply, SendStateRequest, VersionReply,
-    VersionRequest,
+use crate::{
+    metrics::INBOUND_GRPC,
+    proto::loadbalancer::v1::{
+        load_balancer_server, AddSendersReply, AddSendersRequest, CreateTokenReply,
+        CreateTokenRequest, DeregisterReply, DeregisterRequest, FreeLoadBalancerReply,
+        FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensReply,
+        ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest,
+        LoadBalancerStatusReply, LoadBalancerStatusRequest, OverviewReply, OverviewRequest,
+        RegisterReply, RegisterRequest, RemoveSendersReply, RemoveSendersRequest,
+        ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
+        SendStateReply, SendStateRequest, VersionReply, VersionRequest,
+    },
 };
 use tonic::{Request, Response, Status};
 
@@ -16,6 +19,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<ReserveLoadBalancerRequest>,
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_reserve_load_balancer(request).await
     }
 
@@ -23,6 +27,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<GetLoadBalancerRequest>,
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_get_load_balancer(request).await
     }
 
@@ -30,6 +35,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<LoadBalancerStatusRequest>,
     ) -> Result<Response<LoadBalancerStatusReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_load_balancer_status(request).await
     }
 
@@ -37,6 +43,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<FreeLoadBalancerRequest>,
     ) -> Result<Response<FreeLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_free_load_balancer(request).await
     }
 
@@ -44,6 +51,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<AddSendersRequest>,
     ) -> Result<Response<AddSendersReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_add_senders(request).await
     }
 
@@ -51,6 +59,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<RemoveSendersRequest>,
     ) -> Result<Response<RemoveSendersReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_remove_senders(request).await
     }
 
@@ -58,6 +67,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<RegisterRequest>,
     ) -> Result<Response<RegisterReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_register(request).await
     }
 
@@ -65,6 +75,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<DeregisterRequest>,
     ) -> Result<Response<DeregisterReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_deregister(request).await
     }
 
@@ -72,6 +83,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<SendStateRequest>,
     ) -> Result<Response<SendStateReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_send_state(request).await
     }
 
@@ -79,6 +91,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<OverviewRequest>,
     ) -> Result<Response<OverviewReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_overview(request).await
     }
 
@@ -86,6 +99,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<VersionRequest>,
     ) -> Result<Response<VersionReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_version(request).await
     }
 
@@ -93,6 +107,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<CreateTokenRequest>,
     ) -> Result<Response<CreateTokenReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_create_token(request).await
     }
 
@@ -100,6 +115,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<ListTokenPermissionsRequest>,
     ) -> Result<Response<ListTokenPermissionsReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_list_token_permissions(request).await
     }
 
@@ -107,6 +123,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<ListChildTokensRequest>,
     ) -> Result<Response<ListChildTokensReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_list_child_tokens(request).await
     }
 
@@ -114,6 +131,7 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         &self,
         request: Request<RevokeTokenRequest>,
     ) -> Result<Response<RevokeTokenReply>, Status> {
+        INBOUND_GRPC.inc();
         self.handle_revoke_token(request).await
     }
 }

@@ -9,6 +9,8 @@ use rand::seq::SliceRandom;
 use tracing::trace;
 use uuid::Uuid;
 
+use super::SessionState;
+
 pub const NUM_SLOTS: usize = 512;
 
 impl LoadBalancerDB {
@@ -394,5 +396,76 @@ impl LoadBalancerDB {
             deleted_at: epoch_record.deleted_at.map(|dt| dt.and_utc()),
             slots,
         })
+    }
+
+    /// Gets the latest session states for a reservation
+    pub async fn get_latest_session_states(
+        &self,
+        reservation_id: i64,
+    ) -> Result<Vec<(u16, SessionState)>> {
+        let session_states = sqlx::query!(
+            r#"
+            SELECT
+                s.id as session_id,
+                ss.timestamp,
+                ss.is_ready,
+                ss.fill_percent,
+                ss.control_signal,
+                ss.total_events_recv,
+                ss.total_events_reassembled,
+                ss.total_events_reassembly_err,
+                ss.total_events_dequeued,
+                ss.total_event_enqueue_err,
+                ss.total_bytes_recv,
+                ss.total_packets_recv
+            FROM session s
+            LEFT JOIN (
+                SELECT
+                    ss1.*
+                FROM session_state ss1
+                JOIN (
+                    SELECT
+                        session_id,
+                        MAX(created_at) as max_created_at
+                    FROM session_state
+                    GROUP BY session_id
+                ) ss2 ON ss1.session_id = ss2.session_id AND ss1.created_at = ss2.max_created_at
+            ) ss ON s.id = ss.session_id
+            WHERE s.reservation_id = ?1
+            AND s.deleted_at IS NULL
+            "#,
+            reservation_id
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        let mut result = Vec::new();
+        for state in session_states {
+            let member_id = (state.session_id % (u16::MAX as i64)) as u16;
+
+            // Only include sessions that have state data
+            if let (Some(timestamp), Some(is_ready), Some(fill_percent)) =
+                (state.timestamp, state.is_ready, state.fill_percent)
+            {
+                let session_state = SessionState {
+                    timestamp: timestamp.and_utc(),
+                    is_ready,
+                    fill_percent,
+                    control_signal: state.control_signal.unwrap_or(0.0),
+                    total_events_recv: state.total_events_recv.unwrap_or(0) as u64,
+                    total_events_reassembled: state.total_events_reassembled.unwrap_or(0) as u64,
+                    total_events_reassembly_err: state.total_events_reassembly_err.unwrap_or(0)
+                        as u64,
+                    total_events_dequeued: state.total_events_dequeued.unwrap_or(0) as u64,
+                    total_event_enqueue_err: state.total_event_enqueue_err.unwrap_or(0) as u64,
+                    total_bytes_recv: state.total_bytes_recv.unwrap_or(0) as u64,
+                    total_packets_recv: state.total_packets_recv.unwrap_or(0) as u64,
+                };
+
+                result.push((member_id, session_state));
+            }
+        }
+
+        Ok(result)
     }
 }

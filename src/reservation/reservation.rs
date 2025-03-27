@@ -1,5 +1,6 @@
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
+use crate::metrics::LB_IS_ACTIVE;
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::client::MultiSNP4Client;
 use crate::snp4::rules::{compare_rule_sets, Layer2InputPacketFilterRule, TableUpdate};
@@ -205,25 +206,37 @@ impl ReservationManager {
             let mut reservations = active_reservations.lock().await;
             for reservation in reservations.values_mut() {
                 // Advance the reservation’s epoch.
-                if let Err(e) = db.advance_epoch(reservation.reservation_id).await {
-                    error!(
-                        "failed to advance epoch for reservation {}: {}",
-                        reservation.reservation_id, e
-                    );
-                    continue;
-                }
-                // Generate reservation-specific rules.
-                match reservation.generate_all_rules(db).await {
-                    Ok(rules) => {
-                        desired_rules.extend(rules.clone());
-                        // Update the reservation’s own internal state (informational only).
-                        reservation.set_current_rules(rules);
+                match db.advance_epoch(reservation.reservation_id).await {
+                    Ok(epoch) => {
+                        // Update metrics
+                        if let Err(e) = reservation.update_metrics(db, epoch).await {
+                            error!(
+                                "failed to update metrics for reservation {}: {}",
+                                reservation.reservation_id, e
+                            );
+                        }
+
+                        // Generate reservation-specific rules.
+                        match reservation.generate_all_rules(db).await {
+                            Ok(rules) => {
+                                desired_rules.extend(rules.clone());
+                                // Update the reservation’s own internal state (informational only).
+                                reservation.set_current_rules(rules);
+                            }
+                            Err(e) => {
+                                error!(
+                                    "failed to generate rules for reservation {}: {}",
+                                    reservation.reservation_id, e
+                                );
+                            }
+                        }
                     }
                     Err(e) => {
                         error!(
-                            "failed to generate rules for reservation {}: {}",
+                            "failed to advance epoch for reservation {}: {}",
                             reservation.reservation_id, e
                         );
+                        continue;
                     }
                 }
             }
@@ -398,6 +411,9 @@ impl ReservationManager {
         // Do not apply reservation rules directly – let update_rules handle it.
         reservations.insert(reservation_id, reservation);
 
+        let lb_id_str = lb_id.to_string();
+        LB_IS_ACTIVE.with_label_values(&[&lb_id_str]).set(1.0);
+
         Ok(())
     }
 
@@ -444,6 +460,9 @@ impl ReservationManager {
             // Do not directly remove rules; update_rules will compute the new desired state.
             reservation.stop_event_sync().await;
             self.release_lb_id(lb_id).await;
+
+            let lb_id_str = lb_id.to_string();
+            LB_IS_ACTIVE.with_label_values(&[&lb_id_str]).set(0.0);
 
             info!(
                 "Stopped reservation {} with load balancer ID {}",

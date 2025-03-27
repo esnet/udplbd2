@@ -4,6 +4,8 @@ use prometheus::{
 };
 use std::sync::LazyLock;
 
+use crate::constants::MAX_LB_INSTANCES;
+
 // Counters
 pub static EPOCHS_PROCESSED: LazyLock<Counter> = LazyLock::new(|| {
     register_counter!(Opts::new(
@@ -186,28 +188,6 @@ pub static LB_FILL_PERCENT_MIN: LazyLock<GaugeVec> = LazyLock::new(|| {
     .unwrap()
 });
 
-pub static LB_EVENT_NUMBER_VARIANCE: LazyLock<GaugeVec> = LazyLock::new(|| {
-    register_gauge_vec!(
-        Opts::new(
-            "udplbd_lb_event_number_variance",
-            "Variance of event numbers for the load balancer"
-        ),
-        &["fpga_lb_id"]
-    )
-    .unwrap()
-});
-
-pub static LB_CURRENT_PREDICTED_EVENT_NUMBER: LazyLock<GaugeVec> = LazyLock::new(|| {
-    register_gauge_vec!(
-        Opts::new(
-            "udplbd_lb_current_predicted_event_number",
-            "Current predicted event number for the load balancer"
-        ),
-        &["fpga_lb_id"]
-    )
-    .unwrap()
-});
-
 /// Initialize all metrics with default values
 pub fn init_metrics() {
     let operations = [
@@ -232,7 +212,7 @@ pub fn init_metrics() {
         SMARTNIC_GRPC_ERRORS.with_label_values(&[op]).inc_by(0.0);
     }
 
-    for i in 0..8 {
+    for i in 0..MAX_LB_INSTANCES {
         let lb_id = i.to_string();
         LB_TICK_DURATION.with_label_values(&[&lb_id]).set(0.0);
         LB_IS_ACTIVE.with_label_values(&[&lb_id]).set(0.0);
@@ -246,11 +226,5 @@ pub fn init_metrics() {
         LB_FILL_PERCENT_STDDEV.with_label_values(&[&lb_id]).set(0.0);
         LB_FILL_PERCENT_MAX.with_label_values(&[&lb_id]).set(0.0);
         LB_FILL_PERCENT_MIN.with_label_values(&[&lb_id]).set(0.0);
-        LB_EVENT_NUMBER_VARIANCE
-            .with_label_values(&[&lb_id])
-            .set(0.0);
-        LB_CURRENT_PREDICTED_EVENT_NUMBER
-            .with_label_values(&[&lb_id])
-            .set(0.0);
     }
 }
