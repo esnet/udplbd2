@@ -31,6 +31,8 @@ server:
     enable: false
     certFile: "x509/server_cert.pem"
     keyFile: "x509/server_key.pem"
+rest:
+  enable: true
 log:
   level: debug
 smartnic: []

@@ -28,6 +28,7 @@ pub struct Config {
     pub database: DatabaseConfig,
     pub controller: ControllerConfig,
     pub server: ServerConfig,
+    pub rest: RestServerConfig,
     pub log: LogConfig,
     pub smartnic: Vec<SmartNICConfig>,
 }
@@ -125,6 +126,16 @@ pub struct LogConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RestServerConfig {
+    #[serde(default = "default_rest_enabled")]
+    pub enable: bool,
+}
+
+fn default_rest_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsClientOptions {
     pub enable: bool,
     pub verify: bool,
@@ -169,6 +180,7 @@ impl Config {
                     key_file: None,
                 },
             },
+            rest: RestServerConfig { enable: true },
             log: LogConfig {
                 level: "debug".to_string(),
             },
@@ -283,5 +295,23 @@ pub fn parse_duration(duration_str: &str) -> Result<Duration, ConfigError> {
         Err(ConfigError::Invalid(format!(
             "invalid suffix in duration: {duration_str}"
         )))
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::Config;
+
+    #[test]
+    fn test_default_config() {
+        let res = Config::from_file("/nonexistent_file_path");
+
+        match res {
+            Ok(_) => (),
+            Err(e) => {
+                eprintln!("{e}");
+                panic!("could not parse default config")
+            }
+        };
     }
 }

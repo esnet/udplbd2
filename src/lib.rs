@@ -5,6 +5,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 use tokio::time::sleep;
+use tonic::service::Routes;
+use tonic::transport::server::Router;
 use tonic::transport::Server;
 use tracing::{error, info};
 
@@ -15,8 +17,10 @@ pub mod dataplane;
 pub mod db;
 pub mod errors;
 pub mod macaddr;
+pub mod metrics;
 pub mod proto;
 pub mod reservation;
+pub mod rest;
 pub mod snp4;
 pub mod util;
 
@@ -27,6 +31,7 @@ use crate::db::LoadBalancerDB;
 use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
+use crate::rest::rest_endpoint_router;
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 use std::net::SocketAddr;
 use tonic::transport::Server as TonicServer;
@@ -81,6 +86,9 @@ pub async fn apply_static_config(
 }
 
 pub async fn start_server(config: Config) -> Result<()> {
+    // Initialize metrics
+    metrics::init_metrics();
+
     // Initialize database
     let db = Arc::new(LoadBalancerDB::new(&config.database.file).await?);
     db.sync_config(&config).await?;
@@ -164,7 +172,17 @@ pub async fn start_server(config: Config) -> Result<()> {
         let lb_service =
             LoadBalancerService::new(db.clone(), manager_arc.clone(), config.server.listen[0]);
         let svc = LoadBalancerServer::new(lb_service);
-        let router = server.add_service(svc);
+        let mut router: Router;
+
+        // Start REST server if enabled
+        if config.rest.enable {
+            let rest_routes = rest_endpoint_router();
+            let routes = Routes::from(rest_routes);
+            router = server.add_routes(routes);
+            router = router.add_service(svc);
+        } else {
+            router = server.add_service(svc);
+        }
 
         let server_future = async move {
             info!("gRPC server starting on {}", addr);
@@ -174,7 +192,7 @@ pub async fn start_server(config: Config) -> Result<()> {
         server_futures.push(server_future);
     }
 
-    // Run all servers concurrently
+    // Run all gRPC servers concurrently
     futures::future::try_join_all(server_futures).await?;
 
     Ok(())
@@ -184,6 +202,9 @@ pub async fn start_mocked_server(
     config: Config,
     db_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
+    // Initialize metrics
+    metrics::init_metrics();
+
     // Initialize in-memory database if no db path is provided
     let db = if let Some(path) = db_path {
         Arc::new(LoadBalancerDB::new(&path).await?)
@@ -270,7 +291,18 @@ pub async fn start_mocked_server(
 
         let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
         let svc = LoadBalancerServer::new(lb_service);
-        let router = server.add_service(svc);
+        let mut router: Router;
+
+        // Start REST server if enabled
+        if config.rest.enable {
+            let mut builder = Server::builder().accept_http1(true);
+            let rest_routes = rest_endpoint_router();
+            let routes = Routes::from(rest_routes);
+            router = builder.add_routes(routes);
+            router = router.add_service(svc);
+        } else {
+            router = server.add_service(svc);
+        }
 
         let server_future = async move {
             info!("gRPC server starting on {}", addr);
@@ -280,7 +312,7 @@ pub async fn start_mocked_server(
         server_futures.push(server_future);
     }
 
-    // Run all servers concurrently
+    // Run all gRPC servers concurrently
     futures::future::try_join_all(server_futures).await?;
 
     Ok(())
