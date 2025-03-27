@@ -176,9 +176,10 @@ pub async fn start_server(config: Config) -> Result<()> {
 
         // Start REST server if enabled
         if config.rest.enable {
+            let mut builder = Server::builder().accept_http1(true);
             let rest_routes = rest_endpoint_router();
             let routes = Routes::from(rest_routes);
-            router = server.add_routes(routes);
+            router = builder.add_routes(routes);
             router = router.add_service(svc);
         } else {
             router = server.add_service(svc);
