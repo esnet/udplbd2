@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM reservation\n             WHERE deleted_at IS NULL\n             AND reserved_until < CURRENT_TIMESTAMP",
+  "query": "SELECT id FROM reservation\n             WHERE deleted_at IS NULL\n             AND reserved_until < unixepoch('subsec') * 1000",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "c18222b8c982a1a1c5a6ad761deab81212b02dbf86d513c0e25e363e2d11940f"
+  "hash": "91d4a51a93ddb88fd16b712e5ddd5338af50864be2fb9de99fbf4d8f86090105"
 }

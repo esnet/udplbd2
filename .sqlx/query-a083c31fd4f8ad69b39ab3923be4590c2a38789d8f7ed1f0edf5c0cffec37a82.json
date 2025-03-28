@@ -61,12 +61,12 @@
       {
         "name": "created_at",
         "ordinal": 11,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "deleted_at",
         "ordinal": 12,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       }
     ],
     "parameters": {

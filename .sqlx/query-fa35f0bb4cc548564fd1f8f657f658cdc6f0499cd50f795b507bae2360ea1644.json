@@ -26,17 +26,17 @@
       {
         "name": "predicted_at",
         "ordinal": 4,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "created_at",
         "ordinal": 5,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "deleted_at",
         "ordinal": 6,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "slots",

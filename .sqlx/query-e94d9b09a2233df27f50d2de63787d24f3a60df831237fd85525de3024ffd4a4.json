@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                s.id as session_id,\n                ss.timestamp,\n                ss.is_ready,\n                ss.fill_percent,\n                ss.control_signal,\n                ss.total_events_recv,\n                ss.total_events_reassembled,\n                ss.total_events_reassembly_err,\n                ss.total_events_dequeued,\n                ss.total_event_enqueue_err,\n                ss.total_bytes_recv,\n                ss.total_packets_recv\n            FROM session s\n            LEFT JOIN (\n                SELECT\n                    ss1.*\n                FROM session_state ss1\n                JOIN (\n                    SELECT\n                        session_id,\n                        MAX(created_at) as max_created_at\n                    FROM session_state\n                    GROUP BY session_id\n                ) ss2 ON ss1.session_id = ss2.session_id AND ss1.created_at = ss2.max_created_at\n            ) ss ON s.id = ss.session_id\n            WHERE s.reservation_id = ?1\n            AND s.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "timestamp",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_ready",
+        "ordinal": 2,
+        "type_info": "Bool"
+      },
+      {
+        "name": "fill_percent",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "control_signal",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "total_events_recv",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembled",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembly_err",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_dequeued",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_event_enqueue_err",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_bytes_recv",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_packets_recv",
+        "ordinal": 11,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  },
+  "hash": "e94d9b09a2233df27f50d2de63787d24f3a60df831237fd85525de3024ffd4a4"
+}

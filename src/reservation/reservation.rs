@@ -306,7 +306,7 @@ impl ReservationManager {
         let expired = match sqlx::query!(
             "SELECT id FROM reservation
              WHERE deleted_at IS NULL
-             AND reserved_until < CURRENT_TIMESTAMP"
+             AND reserved_until < unixepoch('subsec') * 1000"
         )
         .fetch_all(&db.read_pool)
         .await

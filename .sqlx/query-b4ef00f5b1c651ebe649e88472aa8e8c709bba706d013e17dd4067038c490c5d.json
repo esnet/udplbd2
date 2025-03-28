@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT id\n                FROM reservation\n                WHERE loadbalancer_id = ?1\n                AND deleted_at IS NULL\n                AND reserved_until > unixepoch('subsec') * 1000\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "b4ef00f5b1c651ebe649e88472aa8e8c709bba706d013e17dd4067038c490c5d"
+}

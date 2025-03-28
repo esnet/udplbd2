@@ -3,13 +3,13 @@
 use crate::db::models::Reservation;
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
-use chrono::{Duration, Utc};
+use chrono::{DateTime, Duration, Utc};
 use std::net::IpAddr;
 
 impl LoadBalancerDB {
     /// Creates a new reservation.
     pub async fn create_reservation(&self, lb_id: i64, duration: Duration) -> Result<Reservation> {
-        let reserved_until = Utc::now() + duration;
+        let reserved_until = (Utc::now() + duration).timestamp_millis();
 
         let record = sqlx::query!(
             "INSERT INTO reservation (loadbalancer_id, reserved_until)
@@ -24,9 +24,14 @@ impl LoadBalancerDB {
         Ok(Reservation {
             id: record.id,
             loadbalancer_id: record.loadbalancer_id,
-            reserved_until: record.reserved_until.and_utc(),
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
+                .ok_or(Error::Parse("reserved_until out of range".to_string()))?,
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -45,9 +50,16 @@ impl LoadBalancerDB {
         Ok(Reservation {
             id: reservation_record.id,
             loadbalancer_id: reservation_record.loadbalancer_id,
-            reserved_until: reservation_record.reserved_until.and_utc(),
-            created_at: reservation_record.created_at.and_utc(),
-            deleted_at: reservation_record.deleted_at.map(|dt| dt.and_utc()),
+            reserved_until: DateTime::<Utc>::from_timestamp_millis(
+                reservation_record.reserved_until,
+            )
+            .ok_or(Error::Parse("reserved_until out of range".to_string()))?,
+            created_at: DateTime::<Utc>::from_timestamp_millis(reservation_record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: reservation_record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -82,7 +94,8 @@ impl LoadBalancerDB {
                 min_factor: record.min_factor,
                 max_factor: record.max_factor,
                 keep_lb_header: record.keep_lb_header == 1,
-                created_at: record.created_at.and_utc(),
+                created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                    .expect("created_at out of range"),
                 deleted_at: None,
             })
         })
@@ -148,7 +161,7 @@ impl LoadBalancerDB {
     pub async fn remove_sender(&self, reservation_id: i64, addr: IpAddr) -> Result<()> {
         let addr_str = addr.to_string();
         sqlx::query!(
-            "UPDATE sender SET deleted_at = CURRENT_TIMESTAMP
+            "UPDATE sender SET deleted_at = unixepoch('subsec') * 1000
              WHERE reservation_id = ?1 AND ip_address = ?2",
             reservation_id,
             addr_str
@@ -199,9 +212,14 @@ impl LoadBalancerDB {
             reservations.push(Reservation {
                 id: record.id,
                 loadbalancer_id: record.loadbalancer_id,
-                reserved_until: record.reserved_until.and_utc(),
-                created_at: record.created_at.and_utc(),
-                deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+                reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
+                    .ok_or(Error::Parse("reserved_until out of range".to_string()))?,
+                created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                    .ok_or(Error::Parse("created_at out of range".to_string()))?,
+                deleted_at: record.deleted_at.map(|dt| {
+                    DateTime::<Utc>::from_timestamp_millis(dt)
+                        .expect("deleted_at set but out of range!")
+                }),
             });
         }
 
@@ -231,8 +249,12 @@ impl LoadBalancerDB {
                 Reservation {
                     id: record.res_id,
                     loadbalancer_id: record.loadbalancer_id,
-                    reserved_until: record.reserved_until.and_utc(),
-                    created_at: record.res_created_at.and_utc(),
+                    reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
+                        .ok_or(Error::Parse(
+                        "reserved_until out of range".to_string(),
+                    ))?,
+                    created_at: DateTime::<Utc>::from_timestamp_millis(record.res_created_at)
+                        .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,
                 },
                 crate::db::models::LoadBalancer {
@@ -255,7 +277,8 @@ impl LoadBalancerDB {
                         .parse()
                         .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
                     event_number_udp_port: record.event_number_udp_port as u16,
-                    created_at: record.lb_created_at.and_utc(),
+                    created_at: DateTime::<Utc>::from_timestamp_millis(record.lb_created_at)
+                        .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,
                 },
             ));
@@ -290,7 +313,7 @@ impl LoadBalancerDB {
 
         // Soft delete associated sessions
         sqlx::query!(
-            "UPDATE session SET deleted_at = CURRENT_TIMESTAMP WHERE reservation_id = ?1",
+            "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1",
             reservation_id
         )
         .execute(&mut *tx)
@@ -299,7 +322,7 @@ impl LoadBalancerDB {
 
         // Soft delete the reservation
         sqlx::query!(
-            "UPDATE reservation SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            "UPDATE reservation SET deleted_at = unixepoch('subsec') * 1000 WHERE id = ?1",
             reservation_id
         )
         .execute(&mut *tx)

@@ -16,12 +16,12 @@
       {
         "name": "local_timestamp",
         "ordinal": 2,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "remote_timestamp",
         "ordinal": 3,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       }
     ],
     "parameters": {

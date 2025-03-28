@@ -44,7 +44,9 @@ impl LoadBalancerDB {
         if latest_sample.avg_event_rate_hz > 0 {
             let rate = latest_sample.avg_event_rate_hz as f64;
             let last_event = latest_sample.event_number;
-            let last_timestamp = latest_sample.local_timestamp.and_utc();
+            let last_timestamp =
+                DateTime::<Utc>::from_timestamp_millis(latest_sample.local_timestamp)
+                    .ok_or(Error::Parse("timestamp out of range".to_string()))?;
             let prediction_time: DateTime<Utc> = Utc::now();
 
             if prediction_time < last_timestamp {
@@ -66,8 +68,7 @@ impl LoadBalancerDB {
                 .iter()
                 .map(|s| s.local_timestamp.min(s.remote_timestamp))
                 .min()
-                .unwrap()
-                .and_utc();
+                .unwrap();
 
             let smallest_event = samples
                 .iter()
@@ -85,9 +86,7 @@ impl LoadBalancerDB {
 
             for sample in &samples {
                 if sample.event_number > 0 {
-                    let x = (sample.local_timestamp.and_utc() - min_timestamp)
-                        .num_microseconds()
-                        .unwrap() as f64;
+                    let x = (sample.local_timestamp - min_timestamp) as f64;
                     let y = (sample.event_number - smallest_event) as f64;
                     sum_x += x;
                     sum_y += y;
@@ -111,8 +110,8 @@ impl LoadBalancerDB {
             let intercept = (sum_y - slope * sum_x) / n;
 
             // Predict using regression
-            let current_time = Utc::now();
-            let x = (current_time - min_timestamp).num_microseconds().unwrap() as f64;
+            let current_time = Utc::now().timestamp_millis();
+            let x = (current_time - min_timestamp) as f64;
             let predicted_y = slope * x + intercept;
             let predicted_event = smallest_event + predicted_y.round() as i64;
 
@@ -355,9 +354,14 @@ impl LoadBalancerDB {
             reservation_id: epoch_record.reservation_id,
             epoch_fpga_id: epoch_record.epoch_fpga_id,
             boundary_event: epoch_record.boundary_event as u64,
-            predicted_at: epoch_record.predicted_at.and_utc(),
-            created_at: epoch_record.created_at.and_utc(),
-            deleted_at: epoch_record.deleted_at.map(|dt| dt.and_utc()),
+            predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)
+                .ok_or(Error::Parse("timestamp out of range".to_string()))?,
+            created_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.created_at)
+                .ok_or(Error::Parse("timestamp out of range".to_string()))?,
+            deleted_at: epoch_record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
             slots,
         })
     }
@@ -391,9 +395,14 @@ impl LoadBalancerDB {
             reservation_id: epoch_record.reservation_id,
             epoch_fpga_id: epoch_record.epoch_fpga_id,
             boundary_event: epoch_record.boundary_event as u64,
-            predicted_at: epoch_record.predicted_at.and_utc(),
-            created_at: epoch_record.created_at.and_utc(),
-            deleted_at: epoch_record.deleted_at.map(|dt| dt.and_utc()),
+            predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)
+                .ok_or(Error::Parse("timestamp out of range".to_string()))?,
+            created_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: epoch_record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
             slots,
         })
     }
@@ -448,7 +457,8 @@ impl LoadBalancerDB {
                 (state.timestamp, state.is_ready, state.fill_percent)
             {
                 let session_state = SessionState {
-                    timestamp: timestamp.and_utc(),
+                    timestamp: DateTime::<Utc>::from_timestamp_millis(timestamp)
+                        .ok_or(Error::Parse("timestamp out of range".to_string()))?,
                     is_ready,
                     fill_percent,
                     control_signal: state.control_signal.unwrap_or(0.0),

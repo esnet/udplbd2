@@ -229,7 +229,8 @@ impl LoadBalancerDB {
             id: token_record.id,
             name: token_record.name,
             permissions,
-            created_at: DateTime::<Utc>::from_naive_utc_and_offset(token_record.created_at, Utc),
+            created_at: DateTime::<Utc>::from_timestamp_millis(token_record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
         }))
     }
 

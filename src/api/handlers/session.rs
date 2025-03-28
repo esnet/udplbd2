@@ -102,7 +102,7 @@ impl LoadBalancerService {
         }
 
         sqlx::query!(
-            "UPDATE session SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?1 AND deleted_at IS NULL",
+            "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE id = ?1 AND deleted_at IS NULL",
             session_id
         )
         .execute(&self.db.write_pool)

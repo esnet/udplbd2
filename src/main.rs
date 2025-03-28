@@ -55,9 +55,9 @@ enum Commands {
         reservation_file: PathBuf,
     },
 
-    /// Start the gRPC server with a simulated dataplane
+    /// Start the gRPC server with a software dataplane (for testing only)
     Mock {
-        /// Path to the in-memory database file (optional)
+        /// Path to the database file (optional)
         #[arg(short, long, value_name = "FILE")]
         db: Option<PathBuf>,
     },
@@ -85,7 +85,7 @@ async fn main() -> Result<()> {
 
 pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
     match cli.command {
-        Commands::Start => start(config).await?,
+        Commands::Start => start_server(config).await?,
         Commands::Static {
             apply,
             reservation_file,
@@ -93,7 +93,7 @@ pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
             apply_static_config(&config, reservation_file, apply).await?;
         }
         Commands::Mock { db } => {
-            start_mocked(config, db).await?;
+            start_mocked_server(config, db).await?;
         }
         Commands::Client(api_cli) => {
             api_cli.run(&config).await?;
@@ -103,23 +103,6 @@ pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
         }
     }
     Ok(())
-}
-
-/// Set up logging and start the server
-///
-/// # Arguments
-/// * `config` - Loaded configuration
-async fn start(config: Config) -> Result<()> {
-    start_server(config).await
-}
-
-/// Set up logging and start the simulated server
-///
-/// # Arguments
-/// * `config` - Loaded configuration
-/// * `db` - Path to the in-memory database file (optional)
-async fn start_mocked(config: Config, db: Option<PathBuf>) -> Result<()> {
-    start_mocked_server(config, db).await
 }
 
 /// Configures the logging subsystem based on the specified log level. Filters out noisy modules.
@@ -144,7 +127,8 @@ mod test {
     async fn end_to_end() {
         tokio::spawn(async move {
             let config = Config::turmoil();
-            let cli = Cli::parse_from(vec!["udplbd", "mock"]);
+            let cli = Cli::parse_from(vec!["udplbd", "mock", "--db", "/tmp/udplbd-test.db"]);
+            let _ = std::fs::remove_file("/tmp/udplbd-test.db");
             let _ = cli_main(cli, config).await;
         });
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;

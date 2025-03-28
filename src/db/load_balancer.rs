@@ -3,6 +3,7 @@
 use crate::db::models::LoadBalancer;
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
+use chrono::{DateTime, Utc};
 use macaddr::MacAddr6;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
@@ -66,8 +67,12 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -109,8 +114,12 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -151,8 +160,12 @@ impl LoadBalancerDB {
                     .parse()
                     .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
                 event_number_udp_port: record.event_number_udp_port as u16,
-                created_at: record.created_at.and_utc(),
-                deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+                created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                    .ok_or(Error::Parse("created_at out of range".to_string()))?,
+                deleted_at: record.deleted_at.map(|dt| {
+                    DateTime::<Utc>::from_timestamp_millis(dt)
+                        .expect("deleted_at set but out of range!")
+                }),
             });
         }
         Ok(loadbalancers)
@@ -213,8 +226,12 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -223,7 +240,7 @@ impl LoadBalancerDB {
         let result = sqlx::query!(
             r#"
             UPDATE loadbalancer
-            SET deleted_at = CURRENT_TIMESTAMP
+            SET deleted_at = unixepoch('subsec') * 1000
             WHERE id = ?1 AND deleted_at IS NULL
             "#,
             id

@@ -16,17 +16,17 @@
       {
         "name": "reserved_until",
         "ordinal": 2,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "created_at",
         "ordinal": 3,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       },
       {
         "name": "deleted_at",
         "ordinal": 4,
-        "type_info": "Datetime"
+        "type_info": "Integer"
       }
     ],
     "parameters": {

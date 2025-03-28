@@ -51,7 +51,7 @@ impl LoadBalancerService {
                 FROM reservation
                 WHERE loadbalancer_id = ?1
                 AND deleted_at IS NULL
-                AND reserved_until > CURRENT_TIMESTAMP
+                AND reserved_until > unixepoch('subsec') * 1000
                 "#,
                 lb.id
             )

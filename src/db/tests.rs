@@ -229,7 +229,7 @@ async fn test_slot_generation() {
         reservation_id, event_number, avg_event_rate_hz,
         local_timestamp, remote_timestamp
     )
-    VALUES (?1, ?2, ?3, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+    VALUES (?1, ?2, ?3, unixepoch('subsec') * 1000, unixepoch('subsec') * 1000)
     "#,
         reservation.id,
         1000_i64, // event_number
@@ -248,7 +248,7 @@ async fn test_slot_generation() {
         total_events_reassembly_err, total_events_dequeued,
         total_event_enqueue_err, total_bytes_recv, total_packets_recv
     )
-    VALUES (?1, CURRENT_TIMESTAMP, false, 0, 0, 0, 0, 0, 0, 0, 0, 0)
+    VALUES (?1, unixepoch('subsec') * 1000, false, 0, 0, 0, 0, 0, 0, 0, 0, 0)
     "#,
         sessions[0].id
     )

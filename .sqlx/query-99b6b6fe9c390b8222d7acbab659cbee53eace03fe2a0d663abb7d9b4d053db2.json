@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE id = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "99b6b6fe9c390b8222d7acbab659cbee53eace03fe2a0d663abb7d9b4d053db2"
+}

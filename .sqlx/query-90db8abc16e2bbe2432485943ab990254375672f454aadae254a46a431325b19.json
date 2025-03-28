@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE sender SET deleted_at = unixepoch('subsec') * 1000\n             WHERE reservation_id = ?1 AND ip_address = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "90db8abc16e2bbe2432485943ab990254375672f454aadae254a46a431325b19"
+}

@@ -173,6 +173,7 @@ impl LoadBalancerDB {
     pub async fn cleanup_soft_deleted(&self, older_than: DateTime<Utc>) -> Result<()> {
         let mut tx = self.write_pool.begin().await?;
         let mut total_deleted = 0;
+        let older_than_ms = older_than.timestamp_millis();
 
         // Tables with deleted_at column
         let tables_with_deleted_at = ["loadbalancer", "reservation", "sender", "session", "epoch"];
@@ -180,7 +181,7 @@ impl LoadBalancerDB {
         // Delete old soft-deleted records
         for table in &tables_with_deleted_at {
             let result = sqlx::query(&format!("DELETE FROM {table} WHERE deleted_at < ?1"))
-                .bind(older_than)
+                .bind(older_than_ms)
                 .execute(&mut *tx)
                 .await
                 .map_err(Error::Database)?;
@@ -204,7 +205,7 @@ impl LoadBalancerDB {
                 )
              )",
         )
-        .bind(older_than)
+        .bind(older_than_ms)
         .execute(&mut *tx)
         .await
         .map_err(Error::Database)?;
@@ -227,7 +228,7 @@ impl LoadBalancerDB {
                 )
              )",
         )
-        .bind(older_than)
+        .bind(older_than_ms)
         .execute(&mut *tx)
         .await
         .map_err(Error::Database)?;

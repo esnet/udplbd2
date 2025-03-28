@@ -3,6 +3,7 @@
 use crate::db::models::{Session, SessionState};
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
+use chrono::{DateTime, Utc};
 use macaddr::MacAddr6;
 use std::net::SocketAddr;
 use tracing::info;
@@ -27,7 +28,8 @@ impl LoadBalancerDB {
         .await?;
 
         Ok(record.map(|r| SessionState {
-            timestamp: r.timestamp.and_utc(),
+            timestamp: DateTime::<Utc>::from_timestamp_millis(r.timestamp)
+                .expect("timestamp out of range"),
             is_ready: r.is_ready,
             fill_percent: r.fill_percent,
             control_signal: r.control_signal,
@@ -51,13 +53,13 @@ impl LoadBalancerDB {
                 FROM session s
                 LEFT JOIN session_state ss ON s.id = ss.session_id
                 WHERE s.deleted_at IS NULL
-                AND s.created_at < datetime('now', '-5 seconds')
+                AND s.created_at < strftime('%s', 'now', '-5 seconds') * 1000
                 GROUP BY s.id
-                HAVING MAX(ss.created_at) < datetime('now', '-5 seconds')
+                HAVING MAX(ss.created_at) < strftime('%s', 'now', '-5 seconds') * 1000
                 OR MAX(ss.created_at) IS NULL
             )
             UPDATE session
-            SET deleted_at = CURRENT_TIMESTAMP
+            SET deleted_at = unixepoch('subsec') * 1000
             WHERE id IN (SELECT id FROM stale_sessions)
             RETURNING id
             "#
@@ -128,8 +130,12 @@ impl LoadBalancerDB {
             min_factor: record.min_factor,
             max_factor: record.max_factor,
             keep_lb_header: record.keep_lb_header == 1,
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         };
 
         Ok(session)
@@ -183,8 +189,12 @@ impl LoadBalancerDB {
             min_factor: record.min_factor,
             max_factor: record.max_factor,
             keep_lb_header: record.keep_lb_header == 1,
-            created_at: record.created_at.and_utc(),
-            deleted_at: record.deleted_at.map(|dt| dt.and_utc()),
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
         })
     }
 
@@ -202,7 +212,7 @@ impl LoadBalancerDB {
 
         // Soft delete the session
         sqlx::query!(
-            "UPDATE session SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?1",
+            "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE id = ?1",
             id
         )
         .execute(&mut *tx)
