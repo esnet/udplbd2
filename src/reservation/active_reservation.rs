@@ -88,7 +88,9 @@ impl ActiveReservation {
     /// Generates L2 filter rule for IPv6 neighbor discovery
     fn generate_l2_filter_rules(&self, lb: &crate::db::models::LoadBalancer) -> Vec<TableRule> {
         vec![Layer2InputPacketFilterRule {
-            match_dest_mac_addr: generate_solicited_node_multicast_mac(&lb.unicast_ipv6_address),
+            match_dest_mac_addr: generate_solicited_node_multicast_mac(
+                &generate_solicited_node_multicast_ipv6(&lb.unicast_ipv6_address),
+            ),
             set_src_mac_addr: mac_to_u64(lb.unicast_mac_address),
         }
         .into()]

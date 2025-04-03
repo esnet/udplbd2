@@ -35,7 +35,7 @@ pub fn mac_to_u64(mac: macaddr::MacAddr6) -> u64 {
 /// - RFC 2464: Transmission of IPv6 Packets over Ethernet Networks
 pub fn generate_solicited_node_multicast_mac(ipv6: &Ipv6Addr) -> u64 {
     let octets = ipv6.octets();
-    0x333300000000 | ((octets[13] as u64) << 16) | ((octets[14] as u64) << 8) | (octets[15] as u64)
+    0x3333ff000000 | ((octets[13] as u64) << 16) | ((octets[14] as u64) << 8) | (octets[15] as u64)
 }
 
 /// Generates the IPv6 Solicited-Node multicast address for a given IPv6 address.
@@ -135,7 +135,7 @@ mod tests {
     fn test_solicited_node_multicast() {
         let ipv6 = Ipv6Addr::from_str("2001:db8::1:2:3").unwrap();
         let mac = generate_solicited_node_multicast_mac(&ipv6);
-        assert_eq!(mac & 0xFFFFFF000000, 0x333300000000);
+        assert_eq!(mac & 0xFFFFFF000000, 0x3333FF000000);
 
         let multicast = generate_solicited_node_multicast_ipv6(&ipv6);
         assert_eq!(multicast.segments()[0], 0xff02);
