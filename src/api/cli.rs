@@ -2,7 +2,7 @@
 use chrono::{TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};
 
-use prost_types::Timestamp;
+use prost_wkt_types::Timestamp;
 
 // Assume these are defined in your API modules.
 use crate::api::client::{ControlPlaneClient, EjfatUrl};
@@ -36,7 +36,7 @@ pub struct ApiCli {
 
 #[derive(Subcommand, Debug)]
 pub enum ApiCommand {
-    /// Reserve an LB and print the EJFAT_URL with sync and data query parameters.
+    /// Reserve an LB and print the EJFAT_URI with sync and data query parameters.
     Reserve(ReserveArgs),
     /// Free the reserved load balancer.
     Free,

@@ -2,6 +2,7 @@ syntax = "proto3";
 package loadbalancer;
 option go_package = "github.com/esnet/udplbd/pkg/pb";
 import "google/protobuf/timestamp.proto";
+import "google/protobuf/struct.proto";
 
 enum PortRange {
     PORT_RANGE_1 = 0;
@@ -46,6 +47,8 @@ service LoadBalancer {
 
 	// Returns the name, LoadBalancerStatus data, and GetLoadBalancer data for all LBs
 	rpc Overview (OverviewRequest) returns (OverviewReply) {};
+	// Returns timeseries
+	rpc Timeseries (TimeseriesRequest) returns (TimeseriesResponse) {};
 	// Returns the version of the current LB.
 	rpc Version (VersionRequest) returns (VersionReply) {};
 
@@ -93,11 +96,24 @@ message LoadBalancerStatusRequest {
 	string lbId = 2; // load balancer instance identifier
 }
 message WorkerStatus {
-	string name = 1;
-	float fillPercent = 2;
-	float controlSignal = 3;
-	uint32 slotsAssigned = 4;
-	google.protobuf.Timestamp lastUpdated = 5; // time that this node was last updated
+	string name = 1;  // from Register
+	float fillPercent = 2; // from latest SendState
+	float controlSignal = 3; // from latest SendState
+	uint32 slotsAssigned = 4; // from latest epoch
+	google.protobuf.Timestamp lastUpdated = 5;  // when last SendState was received
+	string ipAddress = 6; // from Register
+	uint32 udpPort = 7; // from Register
+	PortRange portRange = 8; // from Register
+	float minFactor = 9; // from Register
+	float maxFactor = 10; // from Register
+	bool keepLbHeader = 11; // from Register
+	int64 totalEventsRecv = 12; // how many event ids the receiver has seen
+    int64 totalEventsReassembled = 13; // from latest SendState
+    int64 totalEventsReassemblyErr = 14;  // from latest SendState
+    int64 totalEventsDequeued = 15; // from latest SendState
+    int64 totalEventEnqueueErr = 16; // from latest SendState
+    int64 totalBytesRecv = 17; // from latest SendState
+    int64 totalPacketsRecv = 18;  // from latest SendState
 }
 message LoadBalancerStatusReply {
 	google.protobuf.Timestamp timestamp = 1; // time that this message was generated
@@ -237,6 +253,50 @@ message Overview {
 }
 message OverviewReply {
 	repeated Overview loadBalancers = 1;
+}
+
+
+//
+// Timeseries
+//
+// Exact path or wildcard:
+//  - /lb/1/* (all timeseries for lb 1)
+//  - /lb/1/session/2/totalEventsReassembled (totalEventsReassembled for session 2 of lb 1)
+message TimeseriesRequest {
+	repeated string seriesSelector = 1;
+	google.protobuf.Timestamp since = 2;
+}
+
+message FloatSample {
+	int64 timestamp = 1; // ms since epoch
+	float value = 2;
+	optional google.protobuf.Struct meta = 3;
+}
+message FloatTimeseries {
+	repeated FloatSample data = 4;
+}
+
+message IntegerSample {
+	int64 timestamp = 1;  // ms since epoch
+	int64 value = 2;
+	optional google.protobuf.Struct meta = 3;
+}
+message IntegerTimeseries {
+	repeated IntegerTimeseries data = 4;
+}
+
+message Timeseries {
+	string name = 1; // The full path of the timeseries
+	string unit = 2; // The unit of each value in the sample, or an empty string for dimensionless
+	oneof timeseries {
+		IntegerTimeseries integer_samples = 3;
+		FloatTimeseries float_samples = 4;
+	}
+}
+
+message TimeseriesResponse {
+	repeated Timeseries timeseries = 1;
+	google.protobuf.Timestamp since = 2; // Will match request unless since > retention period, in which case will be the oldest ts availiable
 }
 
 

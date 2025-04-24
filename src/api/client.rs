@@ -9,7 +9,7 @@ use crate::proto::loadbalancer::v1::{
     RevokeTokenRequest, SendStateReply, SendStateRequest, TokenPermission, TokenSelector,
     VersionReply, VersionRequest,
 };
-use prost_types::Timestamp;
+use prost_wkt_types::Timestamp;
 use std::fmt;
 use std::str::FromStr;
 use tonic::service::interceptor::InterceptedService;
@@ -229,7 +229,7 @@ impl ControlPlaneClient {
                 .session_id
                 .clone()
                 .expect("cannot send_state when session_id is None (did you call send_state before registering?)"),
-            timestamp: Some(prost_types::Timestamp::from(std::time::SystemTime::now())),
+            timestamp: Some(prost_wkt_types::Timestamp::from(std::time::SystemTime::now())),
             fill_percent,
             control_signal,
             is_ready,

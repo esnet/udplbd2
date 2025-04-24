@@ -7,6 +7,9 @@ mod session {
 mod system {
     include!("system.rs");
 }
+mod timeseries {
+    include!("timeseries.rs");
+}
 mod token {
     include!("token.rs");
 }

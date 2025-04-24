@@ -77,7 +77,7 @@ pub enum Error {
     URLParseError(#[from] url::ParseError),
 
     #[error("invalid timestamp: {0}")]
-    ProstTimestampError(#[from] prost_types::TimestampError),
+    ProstTimestampError(#[from] prost_wkt_types::TimestampError),
 
     #[error("event reassembly error: {0}")]
     ReassemblyError(#[from] crate::dataplane::receiver::ReassemblyError),

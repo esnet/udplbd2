@@ -8,7 +8,8 @@ use crate::{
         LoadBalancerStatusReply, LoadBalancerStatusRequest, OverviewReply, OverviewRequest,
         RegisterReply, RegisterRequest, RemoveSendersReply, RemoveSendersRequest,
         ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
-        SendStateReply, SendStateRequest, VersionReply, VersionRequest,
+        SendStateReply, SendStateRequest, TimeseriesRequest, TimeseriesResponse, VersionReply,
+        VersionRequest,
     },
 };
 use tonic::{Request, Response, Status};
@@ -133,5 +134,13 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     ) -> Result<Response<RevokeTokenReply>, Status> {
         INBOUND_GRPC.inc();
         self.handle_revoke_token(request).await
+    }
+
+    async fn timeseries(
+        &self,
+        request: Request<TimeseriesRequest>,
+    ) -> Result<Response<TimeseriesResponse>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_timeseries(request).await
     }
 }

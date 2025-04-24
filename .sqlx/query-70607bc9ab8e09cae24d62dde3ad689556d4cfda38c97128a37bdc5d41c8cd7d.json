@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            WITH RankedEpochs AS (\n                SELECT id, ROW_NUMBER() OVER (ORDER BY created_at DESC) as rn\n                FROM epoch\n                WHERE reservation_id = ?1 AND deleted_at IS NULL\n            )\n            UPDATE epoch\n            SET deleted_at = unixepoch('subsec') * 1000\n            WHERE id IN (\n                SELECT id FROM RankedEpochs WHERE rn > 4\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "70607bc9ab8e09cae24d62dde3ad689556d4cfda38c97128a37bdc5d41c8cd7d"
+}

@@ -23,6 +23,14 @@ pub static INBOUND_GRPC: LazyLock<Counter> = LazyLock::new(|| {
     .unwrap()
 });
 
+pub static INBOUND_REST: LazyLock<Counter> = LazyLock::new(|| {
+    register_counter!(Opts::new(
+        "udplbd_inbound_rest_total",
+        "The total number of inbound control plane REST requests"
+    ))
+    .unwrap()
+});
+
 pub static SMARTNIC_GRPC: LazyLock<CounterVec> = LazyLock::new(|| {
     register_counter_vec!(
         Opts::new(

@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS reservation (
     loadbalancer_id INTEGER NOT NULL REFERENCES loadbalancer(id) ON DELETE CASCADE,
     reserved_until INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
-    deleted_at INTEGER
+    deleted_at INTEGER,
+    fpga_lb_id INTEGER NOT NULL
 );
 CREATE INDEX idx_reservation_reserved_until ON reservation(reserved_until);
 CREATE INDEX idx_reservation_created_at ON reservation(created_at);

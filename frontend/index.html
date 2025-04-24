@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Load Balancer Dashboard</title>
+    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="https://unpkg.com/uplot/dist/uPlot.min.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+</head>
+
+<body>
+    <div class="container">
+        <aside class="sidebar left-sidebar">
+            <div class="sidebar-section load-balancers-list">
+                <h2>Load Balancers</h2>
+                <ul id="lb-list">
+                    <li class="loading">Loading...</li>
+                </ul>
+            </div>
+            <div class="sidebar-section tools-section">
+                <h2>Tools</h2>
+                <ul id="tools-list">
+                    <li><button id="token-mgmt-btn" class="tool-button" data-target-path="/tools/tokens"><i
+                                class="fas fa-key"></i> Token Management</button></li>
+                    <li><button id="sys-info-btn" class="tool-button" data-target-path="/tools/system"><i
+                                class="fas fa-info-circle"></i> System Information</button></li>
+                </ul>
+            </div>
+        </aside>
+
+        <main class="main-content" id="main-content-area">
+            <div id="placeholder-view" class="content-view active">
+                <h1>udplbd</h1>
+                <p>Select a Load Balancer or Tool from the left sidebar.</p>
+                <p class="loading" id="initial-load-indicator" style="display: none;">Loading requested view...</p>
+            </div>
+
+            <div id="dashboard-view" class="content-view">
+                <h2 id="dashboard-lb-title">Load Balancer Dashboard</h2>
+                <div class="dashboard-grid">
+                    <div class="chart-container">
+                        <h3>Queue Fill / Receiver</h3>
+                        <div id="queue-fill-chart"></div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Mean Cluster Queue Fill</h3>
+                        <div id="mean-queue-chart"></div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Event Prediction Accuracy</h3>
+                        <div id="prediction-accuracy-chart"></div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Latency</h3>
+                        <div id="latency-chart"></div>
+                    </div>
+                    <div class="chart-container">
+                        <h3>Slot Assignments</h3>
+                        <div id="slot-assignments-chart"></div>
+                    </div>
+
+                    <div class="management-tools card">
+                        <h3>Management</h3>
+                        <div class="tool-actions">
+                            <button id="add-sender-btn" class="action-button"><i class="fas fa-plus-circle"></i> Add
+                                Sender</button>
+                            <button id="remove-sender-btn" class="action-button"><i class="fas fa-minus-circle"></i>
+                                Remove Sender</button>
+                            <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
+                                Generate Child Token</button>
+                            <button id="full-reset-btn" class="action-button danger-button"><i
+                                    class="fas fa-exclamation-triangle"></i> FULL RESET</button>
+                        </div>
+                        <div id="sender-list" class="sender-list">
+                            <h4>Allowed Senders:</h4>
+                            <ul>
+                            </ul>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="token-management-view" class="content-view">
+                <h2>Token Management</h2>
+                <p>Manage authentication tokens and permissions.</p>
+                <div class="loading" id="token-view-loading" style="display: none;">Loading token data...</div>
+                <div id="token-view-content">
+                    <div class="card">
+                        <h3>Create New Token</h3>
+                        <button id="create-token-btn" class="action-button">Create Token (WIP)</button>
+                    </div>
+                    <div class="card">
+                        <h3>Your Token Details</h3>
+                        <div id="current-token-details" class="formatted-data"></div>
+                    </div>
+                    <div class="card">
+                        <h3>Child Tokens</h3>
+                        <ul id="child-tokens-list" class="formatted-list"></ul>
+                    </div>
+                </div>
+            </div>
+
+            <div id="system-info-view" class="content-view">
+                <h2>System Information</h2>
+                <div class="loading" id="system-view-loading" style="display: none;">Loading system info...</div>
+                <div id="system-view-content">
+                    <div class="card">
+                        <h3>Version Details</h3>
+                        <div id="version-details" class="formatted-data"></div>
+                    </div>
+                </div>
+            </div>
+        </main>
+
+        <aside class="sidebar right-sidebar">
+            <h2>Receivers</h2>
+            <ul id="receiver-list">
+                <li class="no-receivers">Select an LB to see receivers.</li>
+            </ul>
+        </aside>
+    </div>
+
+    <div id="add-sender-modal" class="modal">
+        <div class="modal-content">
+            <span class="close-button">&times;</span>
+            <h2>Add Sender IP</h2>
+            <input type="text" id="new-sender-ip" placeholder="Enter Sender IP Address">
+            <button id="confirm-add-sender-btn" class="action-button">Add Sender</button>
+        </div>
+    </div>
+    <div id="auth-modal" class="modal">
+        <div class="modal-content auth-modal-content">
+            <h2>Authentication Required</h2>
+            <p>Please paste your API token or EJFAT URL below.</p>
+            <form id="auth-form">
+                <div class="input-group">
+                    <label for="auth-input">Token or EJFAT URL:</label>
+                    <input type="text" id="auth-input" placeholder="Paste token or ejfats://token@host..." required>
+                    <small>EJFAT URL Example: ejfats://YOUR_TOKEN@host/lb/id?params...</small>
+                </div>
+                <div id="auth-error" class="error-message"></div>
+                <button type="submit" id="auth-submit-btn" class="action-button">Authenticate</button>
+            </form>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- Toast container for notifications -->
+    <div id="toast-container"></div>
+
+    <!-- Load Balancer Alert container -->
+    <div id="lb-alert-area"></div>
+
+    <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js"></script>
+    <script src="/app.js"></script>
+</body>
+
+</html>

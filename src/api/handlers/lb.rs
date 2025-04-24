@@ -137,7 +137,7 @@ impl LoadBalancerService {
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb.unicast_ipv4_address.to_string(),
             data_ipv6_address: lb.unicast_ipv6_address.to_string(),
-            fpga_lb_id: reservation.id as u32,
+            fpga_lb_id: reservation.fpga_lb_id as u32,
         }))
     }
 
@@ -182,7 +182,7 @@ impl LoadBalancerService {
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb.unicast_ipv4_address.to_string(),
             data_ipv6_address: lb.unicast_ipv6_address.to_string(),
-            fpga_lb_id: reservation.id as u32,
+            fpga_lb_id: reservation.fpga_lb_id as u32,
         }))
     }
 
@@ -254,18 +254,37 @@ impl LoadBalancerService {
                 fill_percent: state.as_ref().map_or(0.0, |s| s.fill_percent) as f32,
                 control_signal: state.as_ref().map_or(0.0, |s| s.control_signal) as f32,
                 slots_assigned: *slots_assigned as u32,
+                ip_address: session.ip_address.to_string(),
+                udp_port: session.udp_port as u32,
+                port_range: session.port_range.into(),
+                min_factor: session.min_factor as f32,
+                max_factor: session.max_factor as f32,
                 last_updated: state
-                    .map(|s| prost_types::Timestamp::from(SystemTime::from(s.timestamp))),
+                    .as_ref()
+                    .map(|s| prost_wkt_types::Timestamp::from(SystemTime::from(s.timestamp))),
+                keep_lb_header: session.keep_lb_header,
+                total_events_recv: state.as_ref().map_or(0, |s| s.total_events_recv) as i64,
+                total_events_reassembled: state.as_ref().map_or(0, |s| s.total_events_reassembled)
+                    as i64,
+                total_events_reassembly_err: state
+                    .as_ref()
+                    .map_or(0, |s| s.total_events_reassembly_err)
+                    as i64,
+                total_events_dequeued: state.as_ref().map_or(0, |s| s.total_events_dequeued) as i64,
+                total_event_enqueue_err: state.as_ref().map_or(0, |s| s.total_event_enqueue_err)
+                    as i64,
+                total_bytes_recv: state.as_ref().map_or(0, |s| s.total_bytes_recv) as i64,
+                total_packets_recv: state.as_ref().map_or(0, |s| s.total_packets_recv) as i64,
             });
         }
 
         Ok(Response::new(LoadBalancerStatusReply {
-            timestamp: Some(prost_types::Timestamp::from(SystemTime::now())),
+            timestamp: Some(prost_wkt_types::Timestamp::from(SystemTime::now())),
             current_epoch: latest_epoch.id as u64,
             current_predicted_event_number: latest_epoch.boundary_event,
             workers,
             sender_addresses: senders.into_iter().map(|addr| addr.to_string()).collect(),
-            expires_at: Some(prost_types::Timestamp::from(SystemTime::from(
+            expires_at: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
                 reservation.reserved_until,
             ))),
         }))

@@ -20,10 +20,10 @@ pub mod macaddr;
 pub mod metrics;
 pub mod proto;
 pub mod reservation;
-pub mod rest;
 pub mod snp4;
 pub mod util;
 
+use crate::api::rest::rest_endpoint_router;
 use crate::api::service::LoadBalancerService;
 use crate::config::{parse_duration, Config};
 use crate::dataplane::mock::MockDataplane;
@@ -31,7 +31,6 @@ use crate::db::LoadBalancerDB;
 use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
-use crate::rest::rest_endpoint_router;
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 use std::net::SocketAddr;
 use tonic::transport::Server as TonicServer;
@@ -171,13 +170,15 @@ pub async fn start_server(config: Config) -> Result<()> {
 
         let lb_service =
             LoadBalancerService::new(db.clone(), manager_arc.clone(), config.server.listen[0]);
+        let http_lb_service =
+            LoadBalancerService::new(db.clone(), manager_arc.clone(), config.server.listen[0]);
         let svc = LoadBalancerServer::new(lb_service);
         let mut router: Router;
 
         // Start REST server if enabled
         if config.rest.enable {
             let mut builder = Server::builder().accept_http1(true);
-            let rest_routes = rest_endpoint_router();
+            let rest_routes = rest_endpoint_router(Arc::new(http_lb_service));
             let routes = Routes::from(rest_routes);
             router = builder.add_routes(routes);
             router = router.add_service(svc);
@@ -291,22 +292,33 @@ pub async fn start_mocked_server(
         }
 
         let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
+        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
         let svc = LoadBalancerServer::new(lb_service);
         let mut router: Router;
 
         // Start REST server if enabled
         if config.rest.enable {
-            let mut builder = Server::builder().accept_http1(true);
-            let rest_routes = rest_endpoint_router();
+            let rest_routes = rest_endpoint_router(Arc::new(http_lb_service));
             let routes = Routes::from(rest_routes);
-            router = builder.add_routes(routes);
+            server = server.accept_http1(true);
+            router = server.add_routes(routes);
             router = router.add_service(svc);
         } else {
             router = server.add_service(svc);
         }
 
         let server_future = async move {
-            info!("gRPC server starting on {}", addr);
+            if config.rest.enable {
+                if config.server.tls.enable {
+                    info!("gRPC and REST server starting on https://{}", addr);
+                } else {
+                    info!("gRPC and REST server starting on http://{}", addr);
+                }
+            } else if config.server.tls.enable {
+                info!("gRPC server starting on https://{}", addr);
+            } else {
+                info!("gRPC server starting on http://{}", addr);
+            }
             router.serve(*addr).await
         };
 

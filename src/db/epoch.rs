@@ -260,7 +260,7 @@ impl LoadBalancerDB {
         slot_assignments: &[u16],
     ) -> Result<Epoch> {
         let epoch_fpga_id = Uuid::new_v4().to_string();
-        let now = Utc::now().naive_utc();
+        let now = Utc::now().timestamp_millis();
 
         let mut tx = self.write_pool.begin().await?;
 
@@ -273,7 +273,7 @@ impl LoadBalancerDB {
                 WHERE reservation_id = ?1 AND deleted_at IS NULL
             )
             UPDATE epoch
-            SET deleted_at = CURRENT_TIMESTAMP
+            SET deleted_at = unixepoch('subsec') * 1000
             WHERE id IN (
                 SELECT id FROM RankedEpochs WHERE rn > 4
             )

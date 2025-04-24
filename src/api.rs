@@ -2,6 +2,7 @@
 //! This API is the primary interface to udplbd in typical circumstances.
 pub mod cli;
 pub mod client;
+pub mod rest;
 mod types;
 
 #[cfg(test)]

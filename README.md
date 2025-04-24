@@ -97,7 +97,7 @@ udplbd dataplane --url "ejfats://your_auth_token@0.0.0.0:50051" recv --address "
 
 ### API Commands
 
-The `client` subcommand provides several commands for interacting with the gRPC control plane. Client commands require an `EJFAT_URL` environment variable OR the specified config file to actually be running with `udplbd start` or `udplbd mock`.
+The `client` subcommand provides several commands for interacting with the gRPC control plane. Client commands require an `EJFAT_URI` environment variable OR the specified config file to actually be running with `udplbd start` or `udplbd mock`.
 
 - **Reserve a Load Balancer**
 
@@ -141,7 +141,7 @@ The `client` subcommand provides several commands for interacting with the gRPC 
 
 ### Dataplane Commands
 
-The `dataplane` subcommand provides several commands for testing the dataplane. Most dataplane commands require an `EJFAT_URL` environment variable OR the specified config file to actually be running with `udplbd start` or `udplbd mock`.
+The `dataplane` subcommand provides several commands for testing the dataplane. Most dataplane commands require an `EJFAT_URI` environment variable OR the specified config file to actually be running with `udplbd start` or `udplbd mock`.
 
 - **Receive EJFAT Events**
 

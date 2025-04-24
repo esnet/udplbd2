@@ -22,6 +22,7 @@ pub struct LoadBalancer {
 pub struct Reservation {
     pub id: i64,
     pub loadbalancer_id: i64,
+    pub fpga_lb_id: u16,
     pub reserved_until: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

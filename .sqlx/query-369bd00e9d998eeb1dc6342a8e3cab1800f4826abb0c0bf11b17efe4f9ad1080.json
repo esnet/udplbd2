@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT s.name, s.reservation_id, r.loadbalancer_id\n             FROM session s\n             JOIN reservation r ON s.reservation_id = r.id\n             WHERE s.id = ? AND s.deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "name",
+        "ordinal": 0,
+        "type_info": "Text"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "369bd00e9d998eeb1dc6342a8e3cab1800f4826abb0c0bf11b17efe4f9ad1080"
+}

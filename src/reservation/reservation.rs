@@ -7,7 +7,7 @@ use crate::snp4::rules::{compare_rule_sets, Layer2InputPacketFilterRule, TableUp
 use crate::util::mac_to_u64;
 use chrono::Utc;
 use macaddr::MacAddr6;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -17,15 +17,11 @@ use tokio::task::JoinHandle;
 use tokio::time::{self, MissedTickBehavior};
 use tracing::{debug, error, info, warn};
 
-/// Maximum number of concurrent load balancers supported by the system
-const MAX_LOAD_BALANCERS: u8 = 8;
-
 /// Manages the lifecycle of load balancer reservations and their associated resources.
 pub struct ReservationManager {
     db: Arc<LoadBalancerDB>,
     smartnic_clients: MultiSNP4Client,
     active_reservations: Arc<Mutex<HashMap<i64, ActiveReservation>>>,
-    active_lb_ids: Arc<Mutex<HashSet<u8>>>,
     tick_interval: Duration,
     tick_offset: Duration,
     mac_address: MacAddr6,
@@ -52,7 +48,6 @@ impl ReservationManager {
             db,
             smartnic_clients,
             active_reservations: Arc::new(Mutex::new(HashMap::new())),
-            active_lb_ids: Arc::new(Mutex::new(HashSet::new())),
             tick_interval,
             tick_offset,
             mac_address,
@@ -367,22 +362,6 @@ impl ReservationManager {
         }
     }
 
-    async fn acquire_lb_id(&self) -> Option<u8> {
-        let mut active_lb_ids = self.active_lb_ids.lock().await;
-        for id in 0..MAX_LOAD_BALANCERS {
-            if !active_lb_ids.contains(&id) {
-                active_lb_ids.insert(id);
-                return Some(id);
-            }
-        }
-        None
-    }
-
-    async fn release_lb_id(&self, lb_id: u8) {
-        let mut active_lb_ids = self.active_lb_ids.lock().await;
-        active_lb_ids.remove(&lb_id);
-    }
-
     /// Starts a new reservation.
     ///
     /// Note that the new reservation is added to the active reservations list
@@ -398,9 +377,8 @@ impl ReservationManager {
             return Ok(());
         }
 
-        let lb_id = self.acquire_lb_id().await.ok_or(Error::ResourceExhausted(
-            "maximum number of active reservations reached".to_string(),
-        ))?;
+        let reservation_record = self.db.get_reservation(reservation_id).await?;
+        let lb_id = reservation_record.fpga_lb_id as u8;
         let mut reservation = ActiveReservation::new(reservation_id, lb_id);
 
         // Start the event sync server.
@@ -441,7 +419,7 @@ impl ReservationManager {
         for (id, mut reservation) in reservations.drain() {
             info!("Stopping reservation {}", id);
             reservation.stop_event_sync().await;
-            self.release_lb_id(reservation.lb_fpga_id).await;
+            // self.release_lb_id(reservation.lb_fpga_id).await;
         }
 
         debug!("Reservation manager shut down");
@@ -459,7 +437,6 @@ impl ReservationManager {
 
             // Do not directly remove rules; update_rules will compute the new desired state.
             reservation.stop_event_sync().await;
-            self.release_lb_id(lb_id).await;
 
             let lb_id_str = lb_id.to_string();
             LB_IS_ACTIVE.with_label_values(&[&lb_id_str]).set(0.0);

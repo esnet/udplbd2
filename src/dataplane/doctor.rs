@@ -10,7 +10,7 @@ use std::time::{Duration, Instant, SystemTime};
 use tokio::time::timeout;
 use tokio_util::sync::CancellationToken;
 
-use prost_types::Timestamp;
+use prost_wkt_types::Timestamp;
 
 pub struct DoctorOutput {
     responsivity_duration: Duration,

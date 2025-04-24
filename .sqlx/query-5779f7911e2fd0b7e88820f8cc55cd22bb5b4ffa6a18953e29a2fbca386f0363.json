@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT\n                timestamp,\n                fill_percent,\n                control_signal,\n                is_ready,\n                total_events_recv,\n                total_events_reassembled,\n                total_events_reassembly_err,\n                total_events_dequeued,\n                total_event_enqueue_err,\n                total_bytes_recv,\n                total_packets_recv\n             FROM session_state\n             WHERE session_id = ? AND timestamp >= ?\n             ORDER BY timestamp ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "timestamp",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "fill_percent",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "control_signal",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "is_ready",
+        "ordinal": 3,
+        "type_info": "Bool"
+      },
+      {
+        "name": "total_events_recv",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembled",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembly_err",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_dequeued",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_event_enqueue_err",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_bytes_recv",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_packets_recv",
+        "ordinal": 10,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5779f7911e2fd0b7e88820f8cc55cd22bb5b4ffa6a18953e29a2fbca386f0363"
+}

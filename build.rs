@@ -1,6 +1,5 @@
-use std::error::Error;
-use std::fmt;
-use std::process::Command;
+use prost_wkt_build::*;
+use std::{env, error::Error, fmt, path::PathBuf, process::Command};
 
 // Custom error type
 #[derive(Debug)]
@@ -101,6 +100,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Tell cargo to regenerate if any proto files change
     println!("cargo:rerun-if-changed=proto/");
 
+    let out = PathBuf::from(env::var("OUT_DIR").unwrap());
+    let descriptor_file = out.join("descriptors.bin");
+
     // Compile SmartNIC protos
     tonic_build::configure()
         .build_client(true)
@@ -119,10 +121,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_client(true)
         .build_server(true)
         .out_dir("src/proto/loadbalancer")
+        .type_attribute(".", "#[derive(serde::Serialize,serde::Deserialize)]")
+        .extern_path(".google.protobuf.Any", "::prost_wkt_types::Any")
+        .extern_path(".google.protobuf.Timestamp", "::prost_wkt_types::Timestamp")
+        .extern_path(".google.protobuf.Value", "::prost_wkt_types::Value")
+        .extern_path(".google.protobuf.Struct", "::prost_wkt_types::Struct")
+        .file_descriptor_set_path(&descriptor_file)
         .compile_protos(
             &["proto/loadbalancer/loadbalancer.proto"],
             &["proto/loadbalancer/"],
         )?;
+
+    let descriptor_bytes = std::fs::read(descriptor_file).unwrap();
+    let descriptor = FileDescriptorSet::decode(&descriptor_bytes[..]).unwrap();
+
+    prost_wkt_build::add_serde(out, descriptor);
 
     println!("cargo:rustc-env=UDPLBD_BUILD={}", get_git_version()?);
 

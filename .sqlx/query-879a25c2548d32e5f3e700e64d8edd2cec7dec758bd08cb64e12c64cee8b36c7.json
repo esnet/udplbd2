@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT loadbalancer_id FROM reservation\n             WHERE id = ? AND deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "879a25c2548d32e5f3e700e64d8edd2cec7dec758bd08cb64e12c64cee8b36c7"
+}

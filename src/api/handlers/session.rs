@@ -152,6 +152,7 @@ impl LoadBalancerService {
         if let Some(ts) = request.timestamp {
             dt = chrono::DateTime::from_timestamp(ts.seconds, ts.nanos as u32).unwrap();
         }
+        let dt_ms = dt.timestamp_millis();
 
         // Update session state
         sqlx::query!(
@@ -164,7 +165,7 @@ impl LoadBalancerService {
             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
             "#,
             session_id,
-            dt,
+            dt_ms,
             request.is_ready,
             request.fill_percent,
             request.control_signal,

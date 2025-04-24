@@ -114,9 +114,7 @@ where
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TlsConfig {
     pub enable: bool,
-    #[serde(rename = "certFile")]
     pub cert_file: Option<PathBuf>,
-    #[serde(rename = "keyFile")]
     pub key_file: Option<PathBuf>,
 }
 

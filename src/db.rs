@@ -1,5 +1,6 @@
 //! Provides the queries and pools needed to manipulate the state of the control plane and its LBs.
 //! The core functions like epoch prediction and slot assignments are implemented in this module.
+pub mod csv;
 pub mod epoch;
 pub mod load_balancer;
 pub mod models;
@@ -7,6 +8,7 @@ pub mod reservation;
 pub mod session;
 #[cfg(test)]
 pub mod tests;
+pub mod timeseries;
 pub mod token;
 
 use crate::config::Config;
