@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT fpga_lb_id FROM reservation WHERE deleted_at IS NULL",
+  "describe": {
+    "columns": [
+      {
+        "name": "fpga_lb_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2040c229779c7cb59ab8ed095381b4b6d5c05dbdbb54b9e24abd93715e8d8030"
+}

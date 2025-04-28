@@ -270,7 +270,7 @@ message TimeseriesRequest {
 message FloatSample {
 	int64 timestamp = 1; // ms since epoch
 	float value = 2;
-	optional google.protobuf.Struct meta = 3;
+	google.protobuf.Struct meta = 3;
 }
 message FloatTimeseries {
 	repeated FloatSample data = 4;
@@ -279,7 +279,7 @@ message FloatTimeseries {
 message IntegerSample {
 	int64 timestamp = 1;  // ms since epoch
 	int64 value = 2;
-	optional google.protobuf.Struct meta = 3;
+	google.protobuf.Struct meta = 3;
 }
 message IntegerTimeseries {
 	repeated IntegerTimeseries data = 4;

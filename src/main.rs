@@ -80,6 +80,7 @@ async fn main() -> Result<()> {
         cli.log_level.clone()
     };
     setup_logging(&log_level)?;
+    let _ = rustls::crypto::ring::default_provider().install_default();
     cli_main(cli, config).await
 }
 
