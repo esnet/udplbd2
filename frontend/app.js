@@ -10,6 +10,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let activeView = 'placeholder-view';
     let uPlotCharts = {};
     let currentPath = window.location.pathname; // Store current path for comparison
+    let chartMetrics = {}; // Store available metrics for chart generation
 
     // Mapping for rendering permissions
     const ResourceTypeMap = { 0: 'All', 1: 'Load Balancer', 2: 'Reservation', 3: 'Session', default: 'Unknown Resource' };
@@ -26,6 +27,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const systemInfoView = document.getElementById('system-info-view');
     const dashboardTitle = document.getElementById('dashboard-lb-title');
     const senderListUl = document.querySelector('#sender-list ul');
+    const dynamicChartsArea = document.getElementById('dynamic-charts-area');
+    const newSenderIpInput = document.getElementById('new-sender-ip');
 
     // Tool View Content/Loading Elements
     const tokenViewLoading = document.getElementById('token-view-loading');
@@ -40,23 +43,25 @@ document.addEventListener('DOMContentLoaded', () => {
     const tokenMgmtBtn = document.getElementById('token-mgmt-btn');
     const sysInfoBtn = document.getElementById('sys-info-btn');
     const addSenderBtn = document.getElementById('add-sender-btn');
-    const removeSenderBtn = document.getElementById('remove-sender-btn');
     const generateChildTokenBtn = document.getElementById('generate-child-token-btn');
     const fullResetBtn = document.getElementById('full-reset-btn');
-    const createTokenBtn = document.getElementById('create-token-btn'); // Added
+
+    // --- Token Creation UI Elements ---
+    const createTokenCard = document.getElementById('create-token-card');
+    const createTokenForm = document.getElementById('create-token-form');
+    const newTokenNameInput = document.getElementById('new-token-name');
+    const permissionsListDiv = document.getElementById('permissions-list');
+    const addPermissionBtn = document.getElementById('add-permission-btn');
+    const createTokenResultDiv = document.getElementById('create-token-result');
 
     // Modals
-    const addSenderModal = document.getElementById('add-sender-modal');
-    const closeModalBtn = addSenderModal.querySelector('.close-button');
-    const confirmAddSenderBtn = document.getElementById('confirm-add-sender-btn');
-    const newSenderIpInput = document.getElementById('new-sender-ip');
     const authModal = document.getElementById('auth-modal');
     const authForm = document.getElementById('auth-form');
     const authInput = document.getElementById('auth-input');
     const authError = document.getElementById('auth-error');
     const authSubmitBtn = document.getElementById('auth-submit-btn');
 
-    // --- Cookie Functions (Unchanged) ---
+    // --- Cookie Functions ---
     const setCookie = (name, value, days) => {
         let expires = "";
         if (days) {
@@ -81,7 +86,7 @@ document.addEventListener('DOMContentLoaded', () => {
         document.cookie = `${name}=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT; SameSite=Lax; Secure`; // Assume HTTPS -> Secure
     };
 
-    // --- API Call Function (Unchanged from previous step) ---
+    // --- API Call Function ---
     const apiFetch = async (endpoint, options = {}) => {
         if (!AUTH_TOKEN) {
             console.error("API call attempted without AUTH_TOKEN.");
@@ -125,8 +130,8 @@ document.addEventListener('DOMContentLoaded', () => {
         document.getElementById(activeView)?.classList.remove('active');
         document.getElementById(viewId)?.classList.add('active');
         activeView = viewId;
-         // Clear right sidebar if not showing dashboard
-         if (viewId !== 'dashboard-view') {
+        // Clear right sidebar if not showing dashboard
+        if (viewId !== 'dashboard-view') {
             receiverList.innerHTML = '<li class="no-receivers">Select an LB to see receivers.</li>';
         }
     };
@@ -135,11 +140,11 @@ document.addEventListener('DOMContentLoaded', () => {
         document.querySelectorAll('.left-sidebar li.active, .left-sidebar .tool-button.active').forEach(el => {
             el.classList.remove('active');
         });
-         if (targetPath?.startsWith('/lb/')) {
+        if (targetPath?.startsWith('/lb/')) {
             const lbId = targetPath.split('/')[2];
             document.querySelector(`.left-sidebar li[data-lb-id="${lbId}"]`)?.classList.add('active');
         } else if (targetPath?.startsWith('/tools/')) {
-             document.querySelector(`.left-sidebar .tool-button[data-target-path="${targetPath}"]`)?.classList.add('active');
+            document.querySelector(`.left-sidebar .tool-button[data-target-path="${targetPath}"]`)?.classList.add('active');
         }
     };
 
@@ -253,7 +258,14 @@ document.addEventListener('DOMContentLoaded', () => {
                     <span>Last Update: ${lastUpdated}</span>
                 </div>
             `;
-            // Listener added via event delegation
+            // Attach direct event listener to the deregister button
+            const deregBtn = li.querySelector('.deregister-btn[data-receiver-id]');
+            if (deregBtn) {
+                deregBtn.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    handleDeregisterSession(receiverId);
+                });
+            }
             receiverList.appendChild(li);
         });
     };
@@ -263,7 +275,20 @@ document.addEventListener('DOMContentLoaded', () => {
         if (senderAddresses?.length) {
             senderAddresses.forEach(ip => {
                 const li = document.createElement('li');
-                li.textContent = ip;
+                li.innerHTML = `
+                    <span>${ip}</span>
+                    <button class="delete-sender" data-ip="${ip}" title="Remove sender">
+                        <i class="fas fa-trash"></i>
+                    </button>
+                `;
+                // Attach direct event listener to the delete sender button
+                const deleteBtn = li.querySelector('.delete-sender[data-ip]');
+                if (deleteBtn) {
+                    deleteBtn.addEventListener('click', (e) => {
+                        e.stopPropagation();
+                        handleRemoveSender(ip);
+                    });
+                }
                 senderListUl.appendChild(li);
             });
         } else {
@@ -271,42 +296,87 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-     const renderChildTokens = (data) => {
-         childTokensListUl.innerHTML = ''; // Clear previous
-         if (!data?.tokens?.length) {
-             childTokensListUl.innerHTML = '<li>No child tokens found.</li>';
-             return;
-         }
+    const renderChildTokens = (data) => {
+        childTokensListUl.innerHTML = ''; // Clear previous
+        if (!data?.tokens?.length) {
+            childTokensListUl.innerHTML = '<li>No child tokens found.</li>';
+            return;
+        }
 
-         data.tokens.forEach(token => {
-             const { name, permissions, created_at, id, token: tokenValue } = token; // Get potential identifiers
-             const createdAtDate = created_at ? new Date(created_at).toLocaleString() : 'N/A';
-             // Prefer numeric ID if available, otherwise use token string itself for revoke target
-             const revokeTarget = id || tokenValue || 'unknown';
+        data.tokens.forEach(token => {
+            const { name, permissions, created_at, id, token: tokenValue } = token; // Get potential identifiers
+            const createdAtDate = created_at ? new Date(created_at).toLocaleString() : 'N/A';
+            // Prefer numeric ID if available, otherwise use token string itself for revoke target
+            const revokeTarget = id || tokenValue || 'unknown';
 
-             let permissionsHtml = '<span>No specific permissions found.</span>';
-             if (permissions?.length) {
-                 permissionsHtml = permissions.map(p => {
-                     const resource = ResourceTypeMap[p.resource_type] || ResourceTypeMap.default;
-                     const permission = PermissionTypeMap[p.permission] || PermissionTypeMap.default;
-                     const resourceId = p.resource_id ? ` (ID: <code>${p.resource_id}</code>)` : '';
-                      return `<span><strong>${permission}</strong> on <strong>${resource}</strong>${resourceId}</span>`;
-                 }).join('');
-             }
+            let permissionsHtml = '<span>No specific permissions found.</span>';
+            if (permissions?.length) {
+                permissionsHtml = permissions.map(p => {
+                    const resource = ResourceTypeMap[p.resource_type] || ResourceTypeMap.default;
+                    const permission = PermissionTypeMap[p.permission] || PermissionTypeMap.default;
+                    const resourceId = p.resource_id ? ` (ID: <code>${p.resource_id}</code>)` : '';
+                    return `<span><strong>${permission}</strong> on <strong>${resource}</strong>${resourceId}</span>`;
+                }).join('');
+            }
 
-             const li = document.createElement('li');
-             li.innerHTML = `
-                 <h4>${name || 'Unnamed Token'}</h4>
-                 <button class="revoke-child-btn danger-button" data-token-id="${revokeTarget}" ${revokeTarget === 'unknown' ? 'disabled title="Cannot revoke unknown token"' : 'title="Revoke this token"'}>Revoke</button>
-                 <p><small>Created: ${createdAtDate}</small></p>
-                 <div class="permissions-list">
-                     ${permissionsHtml}
-                 </div>
-             `;
-             childTokensListUl.appendChild(li);
-         });
-         // Add revoke listeners via delegation later
-     };
+            const li = document.createElement('li');
+            li.innerHTML = `
+                <h4>${name || 'Unnamed Token'}</h4>
+                <button class="revoke-child-btn danger-button" data-token-id="${revokeTarget}" ${revokeTarget === 'unknown' ? 'disabled title="Cannot revoke unknown token"' : 'title="Revoke this token"'}>Revoke</button>
+                <p><small>Created: ${createdAtDate}</small></p>
+                <div class="permissions-list">
+                    ${permissionsHtml}
+                </div>
+            `;
+            // Attach direct event listener to the revoke button
+            const revokeBtn = li.querySelector('.revoke-child-btn[data-token-id]');
+            if (revokeBtn && revokeTarget !== 'unknown') {
+                revokeBtn.addEventListener('click', () => {
+                    handleRevokeToken(revokeTarget);
+                });
+            }
+            childTokensListUl.appendChild(li);
+        });
+    };
+
+    const renderVersionInfo = (data) => {
+        if (!data) {
+            versionDetailsDiv.innerHTML = '<p>Error loading version info.</p>';
+            return;
+        }
+        versionDetailsDiv.innerHTML = `
+            <p><strong>Build:</strong> ${data.build || 'N/A'}</p>
+            <p><strong>Commit:</strong> <code>${data.commit || 'N/A'}</code></p>
+            <p><strong>Compatible With:</strong> ${data.compat_tag || data.compatTag || 'N/A'}</p>
+        `;
+    };
+
+    const renderTokenPermissions = (data) => {
+        if (!data?.token) {
+            currentTokenDetailsDiv.innerHTML = '<p>Error loading token details.</p>';
+            return;
+        }
+        const { name, permissions, created_at } = data.token;
+        const createdAtDate = created_at ? new Date(created_at).toLocaleString() : 'N/A';
+
+        let permissionsHtml = '<p>No specific permissions found.</p>';
+        if (permissions?.length) {
+            permissionsHtml = permissions.map(p => {
+                const resource = ResourceTypeMap[p.resource_type] || ResourceTypeMap.default;
+                const permission = PermissionTypeMap[p.permission] || PermissionTypeMap.default;
+                const resourceId = p.resource_id ? ` (ID: <code>${p.resource_id}</code>)` : '';
+                return `<li><strong>${permission}</strong> on <strong>${resource}</strong>${resourceId}</li>`;
+            }).join('');
+            permissionsHtml = `<ul class="permissions-list">${permissionsHtml}</ul>`;
+        }
+
+        currentTokenDetailsDiv.innerHTML = `
+            <p><strong>Name:</strong> ${name || 'Unnamed'}</p>
+            <p><strong>Created:</strong> ${createdAtDate}</p>
+            <h4>Permissions:</h4>
+            ${permissionsHtml}
+        `;
+    };
 
     // --- Charting Functions ---
     const destroyAllCharts = () => {
@@ -359,7 +429,10 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             let url = `/timeseries?series=*`;
             if (lastTimestamp) {
-                url += `&since=${lastTimestamp}`;
+                // Convert timestamp from ms since epoch to RFC3339 format
+                const date = new Date(lastTimestamp);
+                const rfc3339Timestamp = date.toISOString();
+                url += `&since=${rfc3339Timestamp}`;
             }
             const data = await apiFetch(url);
             // Update lastTimestamp if new data present
@@ -414,6 +487,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 // If timeseries is empty, show alert but keep charts visible
                 if (!data.timeseries || data.timeseries.length === 0) {
                     showLbAlert(`Load Balancer ${lbId} disappeared or no data available.`);
+                    if (chartUpdateInterval) {
+                        clearInterval(chartUpdateInterval);
+                    }
                     // Do not clear charts, keep last known data visible
                     return;
                 }
@@ -432,47 +508,167 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    // Function to render charts with timeseries data
-    const renderCharts = (timeseriesData) => {
-        destroyAllCharts();
-
+    // Function to organize timeseries data by type
+    const organizeTimeseriesData = (timeseriesData) => {
         if (!timeseriesData || !timeseriesData.timeseries || !timeseriesData.timeseries.length) {
-            console.warn("No timeseries data available for charts");
-            return;
+            return null;
         }
 
-        // Map to store series data by session ID
-        const sessionDataMap = new Map();
+        // Reset chart metrics
+        chartMetrics = {
+            sessions: new Map(), // Session metrics by session ID
+            reservation: new Map(), // Reservation metrics
+            prediction: {
+                boundary_event: null,
+                event_number: null
+            }
+        };
 
         // Process timeseries data
         timeseriesData.timeseries.forEach(series => {
             const name = series.name;
             const data = series.timeseries?.FloatSamples?.data || [];
 
+            // Skip empty series
+            if (!data.length) return;
+
             // Extract session ID from the series name if it contains session info
             const sessionMatch = name.match(/\/session\/(\d+)\//);
-            const sessionId = sessionMatch ? sessionMatch[1] : null;
+            if (sessionMatch) {
+                const sessionId = sessionMatch[1];
 
-            if (sessionId) {
                 // Group data by session ID
-                if (!sessionDataMap.has(sessionId)) {
-                    sessionDataMap.set(sessionId, new Map());
+                if (!chartMetrics.sessions.has(sessionId)) {
+                    chartMetrics.sessions.set(sessionId, new Map());
                 }
 
                 // Store the series data under the appropriate metric name
                 const metricName = name.split('/').pop(); // Get the last part of the path
                 if (metricName) {
-                    sessionDataMap.get(sessionId).set(metricName, data);
+                    chartMetrics.sessions.get(sessionId).set(metricName, data);
+                }
+            } else if (name.includes('/epoch/boundary_event')) {
+                // Store epoch boundary event data for prediction accuracy
+                chartMetrics.prediction.boundary_event = data;
+            } else if (name.includes('/event_number')) {
+                // Store event number data for prediction accuracy
+                chartMetrics.prediction.event_number = data;
+            } else if (name.includes('/reservation/')) {
+                // Store reservation metrics
+                const metricName = name.split('/').pop();
+                if (metricName) {
+                    chartMetrics.reservation.set(metricName, data);
                 }
             }
         });
 
-        // Create charts
-        createQueueFillChart(sessionDataMap);
-        createEventRateChart(sessionDataMap);
-        createLatencyChart(sessionDataMap);
-        createBytesReceivedChart(sessionDataMap);
-        createPacketsReceivedChart(sessionDataMap);
+        return chartMetrics;
+    };
+
+    // Create a chart container
+    const createChartContainer = (title, id) => {
+        const container = document.createElement('div');
+        container.className = 'chart-container';
+        container.innerHTML = `
+            <h3>${title}</h3>
+            <div id="${id}"></div>
+        `;
+        dynamicChartsArea.appendChild(container);
+        return document.getElementById(id);
+    };
+
+    // Get a color for a session (for consistent coloring across charts)
+    const getSessionColor = (sessionId) => {
+        // Extended color palette for more sessions
+        const colors = [
+            '#4285F4', '#EA4335', '#FBBC05', '#34A853', // Google colors
+            '#FF6D01', '#46BDC6', '#7BAAF7', '#F07B72', // Additional colors
+            '#00C9A7', '#C355F5', '#FF5A5F', '#FFCF44', // More colors
+            '#0072B5', '#E54C21', '#8A2BE2', '#00BFFF', // Even more colors
+            '#32CD32', '#FF8C00', '#1E90FF', '#FF1493'  // Yet more colors
+        ];
+        return colors[parseInt(sessionId) % colors.length];
+    };
+
+    // Function to render charts with timeseries data
+    const renderCharts = (timeseriesData) => {
+        destroyAllCharts();
+        dynamicChartsArea.innerHTML = ''; // Clear previous charts
+
+        if (!timeseriesData || !timeseriesData.timeseries || !timeseriesData.timeseries.length) {
+            console.warn("No timeseries data available for charts");
+            dynamicChartsArea.innerHTML = '<div class="no-data-message">No timeseries data available</div>';
+            return;
+        }
+
+        // Group timeseries by type
+        const sessionSeries = new Map(); // Map of session ID -> Map of metric name -> data
+        const reservationSeries = new Map(); // Map of metric name -> data
+        const predictionData = {
+            boundary_event: null,
+            event_number: null
+        };
+
+        // Process all timeseries
+        timeseriesData.timeseries.forEach(series => {
+            const name = series.name;
+            const data = series.timeseries?.FloatSamples?.data || [];
+
+            // Skip empty series
+            if (!data.length) return;
+
+            // Extract session ID from the series name if it contains session info
+            const sessionMatch = name.match(/\/session\/(\d+)\//);
+            if (sessionMatch) {
+                const sessionId = sessionMatch[1];
+                const metricName = name.split('/').pop(); // Get the last part of the path
+
+                if (!sessionSeries.has(sessionId)) {
+                    sessionSeries.set(sessionId, new Map());
+                }
+
+                if (metricName) {
+                    sessionSeries.get(sessionId).set(metricName, data);
+                }
+            }
+            // Check for prediction-related series
+            else if (name.includes('/epoch/boundary_event')) {
+                predictionData.boundary_event = data;
+            }
+            else if (name.includes('/event_number')) {
+                predictionData.event_number = data;
+            }
+            // Check for reservation metrics
+            else if (name.includes('/reservation/')) {
+                const metricName = name.split('/').pop();
+                if (metricName && !metricName.includes('session')) {
+                    reservationSeries.set(metricName, data);
+                }
+            }
+        });
+
+        // Create prediction accuracy chart if we have both boundary_event and event_number data
+        if (predictionData.boundary_event && predictionData.event_number) {
+            createPredictionAccuracyChart(predictionData);
+        }
+
+        // Create charts for all session metrics
+        const sessionMetrics = new Set();
+        sessionSeries.forEach(metrics => {
+            metrics.forEach((_, metricName) => {
+                sessionMetrics.add(metricName);
+            });
+        });
+
+        // Create a chart for each session metric
+        sessionMetrics.forEach(metricName => {
+            createSessionMetricChart(metricName, sessionSeries);
+        });
+
+        // Create charts for reservation metrics
+        reservationSeries.forEach((data, metricName) => {
+            createReservationMetricChart(metricName, data);
+        });
 
         // Resize charts after rendering
         setTimeout(() => requestAnimationFrame(() => {
@@ -486,8 +682,17 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Helper function to create a chart with session data
-    const createChart = (chartId, title, sessionDataMap, metricKey, options = {}) => {
-        const chartContainer = document.getElementById(chartId);
+    const createSessionMetricChart = (metricKey, sessionDataMap) => {
+        // Format the metric name for display
+        const formattedMetricName = metricKey
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+
+        // Create a unique ID for this chart
+        const chartId = `chart-${metricKey}`;
+
+        // Create the chart container
+        const chartContainer = createChartContainer(formattedMetricName, chartId);
         if (!chartContainer) return;
 
         // Prepare data for uPlot
@@ -541,19 +746,26 @@ document.addEventListener('DOMContentLoaded', () => {
         // Default chart options
         const defaultOptions = {
             width: chartContainer.clientWidth,
-            height: 300,
+            height: 350,
             series: seriesLabels.map((label, i) => ({
                 label,
                 stroke: seriesColors[i],
-                width: i > 0 ? 2 : 0,
-                points: { show: false }
+                width: i > 0 ? 2.5 : 0, // Thicker lines
+                points: { show: false },
+                spanGaps: true // Connect across gaps to avoid disconnected lines
             })),
             axes: [
-                {}, // x-axis (time)
                 {
-                    label: title,
+                    stroke: "white",
+                    grid: { stroke: "#444444" }
+                }, // x-axis (time)
+                {
+                    label: formattedMetricName,
                     labelSize: 20,
-                    grid: { show: true }
+                    stroke: "white",
+                    grid: { stroke: "#444444" },
+                    font: "14px Arial",
+                    color: "white"
                 }
             ],
             scales: {
@@ -566,8 +778,18 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         };
 
+        // Special options for specific metrics
+        const specialOptions = {};
+        if (metricKey === 'fill_percent') {
+            specialOptions.scales = {
+                y: {
+                    range: [0, 1]
+                }
+            };
+        }
+
         // Merge with custom options
-        const chartOptions = { ...defaultOptions, ...options };
+        const chartOptions = { ...defaultOptions, ...specialOptions };
 
         // Create the chart
         const chart = new uPlot(chartOptions, seriesData, chartContainer);
@@ -579,40 +801,181 @@ document.addEventListener('DOMContentLoaded', () => {
         return chart;
     };
 
-    // Get a color for a session (for consistent coloring across charts)
-    const getSessionColor = (sessionId) => {
-        const colors = [
-            '#4285F4', '#EA4335', '#FBBC05', '#34A853',
-            '#FF6D01', '#46BDC6', '#7BAAF7', '#F07B72'
-        ];
-        return colors[parseInt(sessionId) % colors.length];
+    // Create a chart for reservation metrics
+    const createReservationMetricChart = (metricKey, data) => {
+        // Format the metric name for display
+        const formattedMetricName = metricKey
+            .replace(/_/g, ' ')
+            .replace(/\b\w/g, l => l.toUpperCase());
+
+        // Create a unique ID for this chart
+        const chartId = `chart-reservation-${metricKey}`;
+
+        // Create the chart container
+        const chartContainer = createChartContainer(`Reservation ${formattedMetricName}`, chartId);
+        if (!chartContainer) return;
+
+        // Extract timestamps and values
+        const timestamps = data.map(point => point.timestamp);
+        const values = data.map(point => point.value);
+
+        // Prepare data for uPlot
+        const seriesData = [timestamps, values];
+        const seriesLabels = ['Time', formattedMetricName];
+        const seriesColors = ['transparent', '#4285F4']; // First series is time (x-axis)
+
+        // Chart options
+        const chartOptions = {
+            width: chartContainer.clientWidth,
+            height: 350,
+            series: seriesLabels.map((label, i) => ({
+                label,
+                stroke: seriesColors[i],
+                width: i > 0 ? 2.5 : 0, // Thicker lines
+                points: { show: false },
+                spanGaps: true // Connect across gaps to avoid disconnected lines
+            })),
+            axes: [
+                {
+                    stroke: "white",
+                    grid: { stroke: "#444444" }
+                }, // x-axis (time)
+                {
+                    label: formattedMetricName,
+                    labelSize: 20,
+                    stroke: "white",
+                    grid: { stroke: "#444444" },
+                    font: "14px Arial",
+                    color: "white"
+                }
+            ],
+            scales: {
+                x: {
+                    time: true
+                }
+            },
+            legend: {
+                show: true
+            }
+        };
+
+        // Create the chart
+        const chart = new uPlot(chartOptions, seriesData, chartContainer);
+        uPlotCharts[chartId] = chart;
+
+        return chart;
     };
 
-    // Create specific charts
-    const createQueueFillChart = (sessionDataMap) => {
-        return createChart('queue-fill-chart', 'Queue Fill %', sessionDataMap, 'fill_percent', {
-            scales: {
-                y: {
-                    range: [0, 1]
-                }
+    // Create prediction accuracy chart comparing epoch/boundary_event with event_number
+    const createPredictionAccuracyChart = (predictionData) => {
+        // Create a unique ID for this chart
+        const chartId = 'chart-prediction-accuracy';
+
+        // Create the chart container
+        const chartContainer = createChartContainer('Prediction Accuracy', chartId);
+        if (!chartContainer) return;
+
+        const boundaryEventData = predictionData.boundary_event;
+        const eventNumberData = predictionData.event_number;
+
+        // Collect all timestamps from both datasets
+        const allTimestamps = new Set();
+        boundaryEventData.forEach(point => allTimestamps.add(point.timestamp));
+        eventNumberData.forEach(point => allTimestamps.add(point.timestamp));
+
+        // Convert to array and sort
+        const timestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+
+        // Create value arrays for both datasets
+        const boundaryValues = new Array(timestamps.length).fill(null);
+        const eventNumberValues = new Array(timestamps.length).fill(null);
+        const differenceValues = new Array(timestamps.length).fill(null);
+
+        // Map boundary event values to timestamps
+        boundaryEventData.forEach(point => {
+            const idx = timestamps.indexOf(point.timestamp);
+            if (idx !== -1) {
+                boundaryValues[idx] = point.value;
             }
         });
-    };
 
-    const createEventRateChart = (sessionDataMap) => {
-        return createChart('mean-queue-chart', 'Event Rate', sessionDataMap, 'avg_event_rate_hz');
-    };
+        // Map event number values to timestamps
+        eventNumberData.forEach(point => {
+            const idx = timestamps.indexOf(point.timestamp);
+            if (idx !== -1) {
+                eventNumberValues[idx] = point.value;
+            }
+        });
 
-    const createLatencyChart = (sessionDataMap) => {
-        return createChart('latency-chart', 'Latency', sessionDataMap, 'control_signal');
-    };
+        // Calculate differences where both values exist
+        for (let i = 0; i < timestamps.length; i++) {
+            if (boundaryValues[i] !== null && eventNumberValues[i] !== null) {
+                differenceValues[i] = Math.abs(boundaryValues[i] - eventNumberValues[i]);
+            }
+        }
 
-    const createBytesReceivedChart = (sessionDataMap) => {
-        return createChart('prediction-accuracy-chart', 'Bytes Received', sessionDataMap, 'total_bytes_recv');
-    };
+        // Prepare data for uPlot
+        const seriesData = [
+            timestamps,
+            boundaryValues,
+            eventNumberValues,
+            differenceValues
+        ];
 
-    const createPacketsReceivedChart = (sessionDataMap) => {
-        return createChart('slot-assignments-chart', 'Packets Received', sessionDataMap, 'total_packets_recv');
+        const seriesLabels = [
+            'Time',
+            'Boundary Event',
+            'Event Number',
+            'Difference'
+        ];
+
+        const seriesColors = [
+            'transparent',
+            '#4285F4', // Blue for boundary event
+            '#34A853', // Green for event number
+            '#EA4335'  // Red for difference
+        ];
+
+        // Chart options
+        const chartOptions = {
+            width: chartContainer.clientWidth,
+            height: 350,
+            series: seriesLabels.map((label, i) => ({
+                label,
+                stroke: seriesColors[i],
+                width: i > 0 ? 2.5 : 0, // Thicker lines
+                points: { show: false },
+                spanGaps: true // Connect across gaps to avoid disconnected lines
+            })),
+            axes: [
+                {
+                    stroke: "white",
+                    grid: { stroke: "#444444" }
+                }, // x-axis (time)
+                {
+                    label: "Event Number",
+                    labelSize: 20,
+                    stroke: "white",
+                    grid: { stroke: "#444444" },
+                    font: "14px Arial",
+                    color: "white"
+                }
+            ],
+            scales: {
+                x: {
+                    time: true
+                }
+            },
+            legend: {
+                show: true
+            }
+        };
+
+        // Create the chart
+        const chart = new uPlot(chartOptions, seriesData, chartContainer);
+        uPlotCharts[chartId] = chart;
+
+        return chart;
     };
 
     // Highlight session in charts when hovering over a session in the sidebar
@@ -631,7 +994,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 // Reset all series to normal width
                 allSeries.forEach((s, i) => {
                     if (i > 0) { // Skip time series
-                        s.width = 2;
+                        s.width = 2.5;
                         s.stroke = getSessionColor(chart.sessionIds[i-1]);
                     }
                 });
@@ -647,66 +1010,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     };
 
-    // Add event listeners for session highlighting
-    document.addEventListener('mouseover', (event) => {
-        const receiverItem = event.target.closest('#receiver-list li');
-        if (receiverItem) {
-            const receiverName = receiverItem.querySelector('.receiver-name')?.textContent;
-            if (receiverName) {
-                // Extract session ID from name if possible
-                const sessionMatch = receiverName.match(/(\d+)/);
-                if (sessionMatch && sessionMatch[1]) {
-                    highlightSession(sessionMatch[1]);
-                }
-            }
-        }
-    });
-
-    const renderVersionInfo = (data) => {
-         if (!data) {
-            versionDetailsDiv.innerHTML = '<p>Error loading version info.</p>';
-            return;
-        }
-         versionDetailsDiv.innerHTML = `
-            <p><strong>Build:</strong> ${data.build || 'N/A'}</p>
-            <p><strong>Commit:</strong> <code>${data.commit || 'N/A'}</code></p>
-            <p><strong>Compatible With:</strong> ${data.compat_tag || data.compatTag || 'N/A'}</p>
-        `; // Check both snake_case and camelCase if API response varies
-    };
-
-     const renderTokenPermissions = (data) => {
-         if (!data?.token) {
-             currentTokenDetailsDiv.innerHTML = '<p>Error loading token details.</p>';
-             return;
-         }
-         const { name, permissions, created_at } = data.token;
-         const createdAtDate = created_at ? new Date(created_at).toLocaleString() : 'N/A'; // Assuming ISO string
-
-         let permissionsHtml = '<p>No specific permissions found.</p>';
-         if (permissions?.length) {
-             permissionsHtml = permissions.map(p => {
-                 const resource = ResourceTypeMap[p.resource_type] || ResourceTypeMap.default;
-                 const permission = PermissionTypeMap[p.permission] || PermissionTypeMap.default;
-                 const resourceId = p.resource_id ? ` (ID: <code>${p.resource_id}</code>)` : '';
-                 return `<li><strong>${permission}</strong> on <strong>${resource}</strong>${resourceId}</li>`;
-             }).join('');
-             permissionsHtml = `<ul class="permissions-list">${permissionsHtml}</ul>`;
-         }
-
-         currentTokenDetailsDiv.innerHTML = `
-            <p><strong>Name:</strong> ${name || 'Unnamed'}</p>
-            <p><strong>Created:</strong> ${createdAtDate}</p>
-            <h4>Permissions:</h4>
-            ${permissionsHtml}
-        `;
-     };
-
-
-    // Update the showDashboardView function to use the new chart polling
-
-
-    // --- View Loading Functions (Handle showing/hiding loading indicators) ---
-
+    // --- View Loading Functions ---
     const showDashboardView = async (lbId) => {
         // Stop any existing chart polling
         stopChartPolling();
@@ -718,19 +1022,21 @@ document.addEventListener('DOMContentLoaded', () => {
         receiverList.innerHTML = '<li class="loading">Loading receivers...</li>';
         senderListUl.innerHTML = '<li class="loading">Loading senders...</li>';
         destroyAllCharts();
+        dynamicChartsArea.innerHTML = '<div class="loading">Loading charts...</div>';
 
         try {
-             const statusData = await apiFetch(`/lb/${lbId}/status`);
-             dashboardTitle.textContent = `Dashboard: ${lbId}`;
-             renderSessions(statusData.workers);
-             renderSenders(statusData.senderAddresses);
+            const statusData = await apiFetch(`/lb/${lbId}/status`);
+            dashboardTitle.textContent = `Dashboard: ${lbId}`;
+            renderSessions(statusData.workers);
+            renderSenders(statusData.senderAddresses);
 
-             // Start polling for chart updates
-             startChartPolling(lbId);
+            // Start polling for chart updates
+            startChartPolling(lbId);
         } catch (error) {
             dashboardTitle.textContent = `Error loading dashboard for ${lbId}`;
             receiverList.innerHTML = '<li class="no-receivers">Error loading receivers.</li>';
             senderListUl.innerHTML = '<li>Error loading senders.</li>';
+            dynamicChartsArea.innerHTML = '<div class="error-message">Error loading chart data.</div>';
         }
     };
 
@@ -755,12 +1061,12 @@ document.addEventListener('DOMContentLoaded', () => {
             currentTokenDetailsDiv.innerHTML = '<p>Error loading token details.</p>';
             childTokensListUl.innerHTML = '<li>Error loading child tokens.</li>';
         } finally {
-             tokenViewLoading.style.display = 'none';
-             tokenViewContent.style.display = 'block';
+            tokenViewLoading.style.display = 'none';
+            tokenViewContent.style.display = 'block';
         }
     };
 
-     const showSystemInfoView = async () => {
+    const showSystemInfoView = async () => {
         currentSelectedLbId = null;
         switchView('system-info-view');
         systemViewLoading.style.display = 'block';
@@ -779,203 +1085,524 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-
     // --- Event Handlers ---
-    // Note: Specific data loading moved to show*View functions
 
-    // Event delegation for dynamically added items
+    // --- Token Creation UI Logic ---
+    // Permission type and resource type mappings
+    const ResourceTypeOptions = [
+        { value: 0, label: "All" },
+        { value: 1, label: "Load Balancer" },
+        { value: 2, label: "Reservation" },
+        { value: 3, label: "Session" }
+    ];
+    const PermissionTypeOptions = [
+        { value: 0, label: "Read Only" },
+        { value: 1, label: "Register" },
+        { value: 2, label: "Reserve" },
+        { value: 3, label: "Update" }
+    ];
+
+    // Helper to create a permission row
+    function createPermissionRow(initial = {}) {
+        const row = document.createElement('div');
+        row.className = 'permission-row';
+        row.style.display = 'flex';
+        row.style.gap = '8px';
+        row.style.marginBottom = '8px';
+        // Resource Type
+        const resourceTypeSelect = document.createElement('select');
+        resourceTypeSelect.className = 'perm-resource-type';
+        resourceTypeSelect.name = 'resource_type';
+        ResourceTypeOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            resourceTypeSelect.appendChild(option);
+        });
+        resourceTypeSelect.value = initial.resource_type !== undefined ? initial.resource_type : 0;
+
+        // Resource ID
+        const resourceIdInput = document.createElement('input');
+        resourceIdInput.type = 'text';
+        resourceIdInput.className = 'perm-resource-id';
+        resourceIdInput.name = 'resource_id';
+        resourceIdInput.placeholder = 'Resource ID';
+        resourceIdInput.style.width = '120px';
+        resourceIdInput.value = initial.resource_id || '';
+        // Hide for "All"
+        if (parseInt(resourceTypeSelect.value) === 0) {
+            resourceIdInput.style.display = 'none';
+        }
+
+        // Permission Type
+        const permissionTypeSelect = document.createElement('select');
+        permissionTypeSelect.className = 'perm-permission-type';
+        permissionTypeSelect.name = 'permission';
+        PermissionTypeOptions.forEach(opt => {
+            const option = document.createElement('option');
+            option.value = opt.value;
+            option.textContent = opt.label;
+            permissionTypeSelect.appendChild(option);
+        });
+        permissionTypeSelect.value = initial.permission !== undefined ? initial.permission : 0;
+
+        // Remove button
+        const removeBtn = document.createElement('button');
+        removeBtn.type = 'button';
+        removeBtn.className = 'remove-permission-btn danger-button';
+        removeBtn.innerHTML = '<i class="fas fa-trash"></i>';
+        removeBtn.title = 'Remove permission';
+
+        // Only show remove if more than one row
+        removeBtn.style.display = permissionsListDiv.childElementCount > 0 ? 'inline-block' : 'none';
+
+        // Show/hide resource id input based on resource type
+        resourceTypeSelect.addEventListener('change', () => {
+            if (parseInt(resourceTypeSelect.value) === 0) {
+                resourceIdInput.style.display = 'none';
+                resourceIdInput.value = '';
+            } else {
+                resourceIdInput.style.display = 'inline-block';
+            }
+        });
+
+        removeBtn.addEventListener('click', () => {
+            row.remove();
+            // If only one row left, hide its remove button
+            if (permissionsListDiv.childElementCount === 1) {
+                permissionsListDiv.querySelector('.remove-permission-btn').style.display = 'none';
+            }
+        });
+
+        row.appendChild(resourceTypeSelect);
+        row.appendChild(resourceIdInput);
+        row.appendChild(permissionTypeSelect);
+        row.appendChild(removeBtn);
+
+        return row;
+    }
+
+    // Add a permission row (at least one by default)
+    function ensureAtLeastOnePermissionRow() {
+        if (!permissionsListDiv.querySelector('.permission-row')) {
+            permissionsListDiv.appendChild(createPermissionRow());
+        }
+        // Hide remove button if only one row
+        const removeBtns = permissionsListDiv.querySelectorAll('.remove-permission-btn');
+        removeBtns.forEach(btn => btn.style.display = removeBtns.length > 1 ? 'inline-block' : 'none');
+    }
+
+    if (addPermissionBtn) {
+        addPermissionBtn.addEventListener('click', () => {
+            permissionsListDiv.appendChild(createPermissionRow());
+            // Show all remove buttons if more than one row
+            const removeBtns = permissionsListDiv.querySelectorAll('.remove-permission-btn');
+            removeBtns.forEach(btn => btn.style.display = removeBtns.length > 1 ? 'inline-block' : 'none');
+        });
+    }
+
+    // On form load, ensure at least one permission row
+    if (permissionsListDiv) {
+        ensureAtLeastOnePermissionRow();
+    }
+
+    // Handle form submit
+    if (createTokenForm) {
+        createTokenForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            createTokenResultDiv.textContent = '';
+            createTokenResultDiv.className = 'create-token-result';
+
+            const name = newTokenNameInput.value.trim();
+            if (!name) {
+                createTokenResultDiv.textContent = 'Token name is required.';
+                createTokenResultDiv.classList.add('error-message');
+                return;
+            }
+
+            // Gather permissions
+            const permissionRows = permissionsListDiv.querySelectorAll('.permission-row');
+            const permissions = [];
+            let hasError = false;
+            permissionRows.forEach(row => {
+                const resourceType = parseInt(row.querySelector('.perm-resource-type').value);
+                const resourceId = row.querySelector('.perm-resource-id').value.trim();
+                const permission = parseInt(row.querySelector('.perm-permission-type').value);
+
+                // For resource types other than "All", require resource id
+                if (resourceType !== 0 && !resourceId) {
+                    hasError = true;
+                    row.querySelector('.perm-resource-id').style.borderColor = 'var(--danger-color)';
+                } else {
+                    row.querySelector('.perm-resource-id').style.borderColor = '';
+                }
+
+                permissions.push({
+                    resource_type: resourceType,
+                    resource_id: resourceType === 0 ? '' : resourceId,
+                    permission: permission
+                });
+            });
+
+            if (hasError) {
+                createTokenResultDiv.textContent = 'Please fill in all required Resource IDs.';
+                createTokenResultDiv.classList.add('error-message');
+                return;
+            }
+
+            // POST to /api/v1/tokens
+            try {
+                createTokenResultDiv.textContent = 'Creating token...';
+                createTokenResultDiv.classList.remove('error-message');
+                const reply = await apiFetch('/tokens', {
+                    method: 'POST',
+                    body: JSON.stringify({ name, permissions })
+                });
+                createTokenResultDiv.innerHTML = `<span style="color:var(--success-color);">Token created:</span><br><code>${reply.token}</code><br><small>Store this token securely. It will not be shown again.</small>`;
+                createTokenResultDiv.classList.remove('error-message');
+                createTokenResultDiv.classList.add('success-message');
+                createTokenForm.reset();
+                permissionsListDiv.innerHTML = '';
+                ensureAtLeastOnePermissionRow();
+
+                // Refresh child tokens list
+                if (activeView === 'token-management-view') {
+                    const childrenData = await apiFetch('/tokens/self/children');
+                    renderChildTokens(childrenData);
+                }
+            } catch (error) {
+                createTokenResultDiv.textContent = 'Failed to create token: ' + (error?.message || 'Unknown error');
+                createTokenResultDiv.classList.add('error-message');
+            }
+        });
+    }
+    if (tokenMgmtBtn) {
+        tokenMgmtBtn.addEventListener('click', () => {
+            navigateTo('/tools/tokens');
+        });
+    }
+    if (sysInfoBtn) {
+        sysInfoBtn.addEventListener('click', () => {
+            navigateTo('/tools/system');
+        });
+    }
+
+    // Event delegation only for sidebar navigation
     document.addEventListener('click', (event) => {
         // Left Sidebar LB items
         const lbItem = event.target.closest('.left-sidebar li[data-target-path]');
         if (lbItem && lbItem.dataset.targetPath) {
-             event.preventDefault();
-             navigateTo(lbItem.dataset.targetPath);
-             return; // Handled
+            event.preventDefault();
+            navigateTo(lbItem.dataset.targetPath);
+            return; // Handled
         }
 
         // Left Sidebar Tool buttons
-         const toolButton = event.target.closest('.left-sidebar button[data-target-path]');
-         if (toolButton && toolButton.dataset.targetPath) {
+        const toolButton = event.target.closest('.left-sidebar button[data-target-path]');
+        if (toolButton && toolButton.dataset.targetPath) {
             event.preventDefault();
-             navigateTo(toolButton.dataset.targetPath);
+            navigateTo(toolButton.dataset.targetPath);
             return; // Handled
-        }
-
-        // Deregister Session buttons
-        const deregisterBtn = event.target.closest('.deregister-btn[data-receiver-id]');
-        if (deregisterBtn) {
-            event.stopPropagation(); // Prevent other clicks
-            handleDeregisterSession(deregisterBtn.dataset.receiverId);
-            return; // Handled
-        }
-
-         // Revoke Child Token buttons
-        const revokeBtn = event.target.closest('.revoke-child-btn[data-token-id]');
-        if (revokeBtn) {
-             handleRevokeToken(revokeBtn.dataset.tokenId);
-            return; // Handled
-        }
-
-        // Add Sender Button
-        if (event.target.closest('#add-sender-btn')) {
-            handleAddSender();
-            return;
-        }
-         // Remove Sender Button
-        if (event.target.closest('#remove-sender-btn')) {
-            handleRemoveSender();
-            return;
-        }
-        // Generate Child Token Button
-        if (event.target.closest('#generate-child-token-btn')) {
-            handleGenerateChildToken();
-            return;
-        }
-         // Full Reset Button
-        if (event.target.closest('#full-reset-btn')) {
-            handleFullReset();
-            return;
-        }
-         // Create Token WIP Button
-        if (event.target.closest('#create-token-btn')) {
-             alert("Token creation UI not yet implemented.");
-             return;
-        }
-
-        // Add Sender Modal Close/Confirm
-        if (event.target === closeModalBtn) {
-             addSenderModal.style.display = 'none';
-             return;
-        }
-        if (event.target === confirmAddSenderBtn) {
-            handleConfirmAddSender();
-             return;
-        }
-        // Close modal on outside click
-        if (event.target === addSenderModal) {
-             addSenderModal.style.display = 'none';
-            return;
         }
     });
 
+    // Add event listener for session highlighting
+    document.addEventListener('mouseover', (event) => {
+        const receiverItem = event.target.closest('#receiver-list li');
+        if (receiverItem) {
+            const receiverName = receiverItem.querySelector('.receiver-name')?.textContent;
+            if (receiverName) {
+                // Extract session ID from name if possible
+                const sessionMatch = receiverName.match(/(\d+)/);
+                if (sessionMatch && sessionMatch[1]) {
+                    highlightSession(sessionMatch[1]);
+                }
+            }
+        }
+    });
 
-    const handleDeregisterSession = async (receiverId) => { /* ... as before, ensure AUTH_TOKEN check is implicit via apiFetch ... */
-         if (!receiverId) return alert("Error: Session ID missing.");
-         if (!confirm(`Deregister receiver "${receiverId}"?`)) return;
-         console.log(`Attempting to deregister receiver: ${receiverId}`);
-         try {
+    const handleDeregisterSession = async (receiverId) => {
+        if (!receiverId) return alert("Error: Session ID missing.");
+        if (!confirm(`Deregister receiver "${receiverId}"?`)) return;
+        console.log(`Attempting to deregister receiver: ${receiverId}`);
+        try {
             await apiFetch(`/receivers/${receiverId}`, { method: 'DELETE' });
             alert(`Session ${receiverId} deregistered successfully.`);
             if (currentSelectedLbId) { // Refresh if dashboard is visible
                 const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
                 renderSessions(statusData.workers);
             }
-         } catch (error) { /* Handled by apiFetch */ }
+        } catch (error) { /* Handled by apiFetch */ }
     };
 
-    const handleRevokeToken = async (tokenIdOrToken) => { /* ... as before ... */
+    const handleRevokeToken = async (tokenIdOrToken) => {
         if (!tokenIdOrToken || tokenIdOrToken === 'unknown') return alert('Error: Token identifier missing or invalid.');
         if (!confirm(`Revoke token "${tokenIdOrToken}" and its children? This is irreversible.`)) return;
-         console.log("Revoking token:", tokenIdOrToken);
-         try {
-             await apiFetch(`/tokens/${tokenIdOrToken}`, { method: 'DELETE' });
-             alert(`Token ${tokenIdOrToken} revoked successfully.`);
-             // Refresh token view data if currently visible
-             if (activeView === 'token-management-view') {
-                 // Re-fetch both permissions and children
-                 const [permissionsData, childrenData] = await Promise.all([
+        console.log("Revoking token:", tokenIdOrToken);
+        try {
+            await apiFetch(`/tokens/${tokenIdOrToken}`, { method: 'DELETE' });
+            alert(`Token ${tokenIdOrToken} revoked successfully.`);
+            // Refresh token view data if currently visible
+            if (activeView === 'token-management-view') {
+                // Re-fetch both permissions and children
+                const [permissionsData, childrenData] = await Promise.all([
                     apiFetch('/tokens/self/permissions'),
                     apiFetch('/tokens/self/children')
-                 ]);
-                 renderTokenPermissions(permissionsData);
-                 renderChildTokens(childrenData);
-             }
-         } catch (error) { /* Handled by apiFetch */ }
+                ]);
+                renderTokenPermissions(permissionsData);
+                renderChildTokens(childrenData);
+            }
+        } catch (error) { /* Handled by apiFetch */ }
     };
 
-    const handleAddSender = () => { /* ... as before, ensure AUTH_TOKEN check implicit ... */
-         if (!currentSelectedLbId) return alert("Select a Load Balancer first.");
-         newSenderIpInput.value = '';
-         addSenderModal.style.display = 'block';
+    const handleAddSender = () => {
+        if (!currentSelectedLbId) return alert("Select a Load Balancer first.");
+
+        // Check if form already exists
+        if (document.querySelector('.sender-form')) return;
+
+        // Show the sender input form
+        const senderForm = document.createElement('div');
+        senderForm.className = 'sender-form';
+        senderForm.innerHTML = `
+            <input type="text" id="new-sender-ip" placeholder="Enter sender IP address">
+            <button id="confirm-add-sender" class="action-button"><i class="fas fa-plus"></i></button>
+        `;
+
+        // Add the form to the sender list
+        senderListUl.appendChild(senderForm);
+
+        // Focus the input
+        document.getElementById('new-sender-ip').focus();
+
+        // Add event listener for the confirm button
+        document.getElementById('confirm-add-sender').addEventListener('click', handleConfirmAddSender);
+
+        // Add event listener for Enter key
+        document.getElementById('new-sender-ip').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                handleConfirmAddSender();
+            }
+        });
     };
-    const handleConfirmAddSender = async () => { /* ... as before ... */
-        const ipToAdd = newSenderIpInput.value.trim();
+
+    const handleConfirmAddSender = async () => {
+        const ipInput = document.getElementById('new-sender-ip');
+        if (!ipInput) return;
+
+        const ipToAdd = ipInput.value.trim();
         if (!ipToAdd) return alert("Please enter an IP address.");
         if (!currentSelectedLbId) return alert("Error: No Load Balancer selected.");
+
         console.log(`Adding sender ${ipToAdd} to LB ${currentSelectedLbId}`);
-         try {
-            await apiFetch(`/lb/${currentSelectedLbId}/senders`, { method: 'POST', body: JSON.stringify({ sender_addresses: [ipToAdd] }) });
-             alert(`Sender ${ipToAdd} added successfully.`);
-             addSenderModal.style.display = 'none';
-             const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`); // Refresh list
-             renderSenders(statusData.senderAddresses);
-         } catch(error) { addSenderModal.style.display = 'none'; /* Handled by apiFetch */ }
-    };
-    const handleRemoveSender = async () => { /* ... as before ... */
-        if (!currentSelectedLbId) return alert("Select a Load Balancer first.");
-         const ipToRemove = prompt(`Enter Sender IP to remove from LB ${currentSelectedLbId}:`);
-         if (!ipToRemove) return;
-         if (!confirm(`Remove sender ${ipToRemove}?`)) return;
-         console.log(`Removing sender ${ipToRemove} from LB ${currentSelectedLbId}`);
-         try {
-            await apiFetch(`/lb/${currentSelectedLbId}/senders`, { method: 'DELETE', body: JSON.stringify({ sender_addresses: [ipToRemove] }) });
-            alert(`Sender ${ipToRemove} removed.`);
-            const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`); // Refresh list
+        try {
+            await apiFetch(`/lb/${currentSelectedLbId}/senders`, {
+                method: 'POST',
+                body: JSON.stringify({ sender_addresses: [ipToAdd] })
+            });
+
+            // Remove the form
+            document.querySelector('.sender-form')?.remove();
+
+            // Refresh the sender list
+            const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
             renderSenders(statusData.senderAddresses);
-         } catch(error) { console.error("Failed to remove sender:", error); }
+
+            showToast(`Sender ${ipToAdd} added successfully.`, 'success');
+        } catch(error) {
+            document.querySelector('.sender-form')?.remove();
+            // Error handled by apiFetch
+        }
     };
-    const handleGenerateChildToken = async () => { /* ... as before ... */
+
+    const handleRemoveSender = async (ipToRemove) => {
+        if (!currentSelectedLbId) return alert("Select a Load Balancer first.");
+        if (!ipToRemove) return;
+
+        if (!confirm(`Remove sender ${ipToRemove}?`)) return;
+
+        console.log(`Removing sender ${ipToRemove} from LB ${currentSelectedLbId}`);
+        try {
+            await apiFetch(`/lb/${currentSelectedLbId}/senders`, {
+                method: 'DELETE',
+                body: JSON.stringify({ sender_addresses: [ipToRemove] })
+            });
+
+            // Refresh the sender list
+            const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
+            renderSenders(statusData.senderAddresses);
+
+            showToast(`Sender ${ipToRemove} removed.`, 'success');
+        } catch(error) {
+            console.error("Failed to remove sender:", error);
+        }
+    };
+
+    const handleGenerateChildToken = async () => {
         const tokenName = prompt("Enter name for new child token (basic read-only permissions):");
         if (!tokenName) return;
+
         const basicPermissions = [{ resource_type: 0, resource_id: '*', permission: 0 }];
         try {
-           const reply = await apiFetch('/tokens', { method: 'POST', body: JSON.stringify({ name: tokenName, permissions: basicPermissions }) });
+            const reply = await apiFetch('/tokens', {
+                method: 'POST',
+                body: JSON.stringify({ name: tokenName, permissions: basicPermissions })
+            });
+
             alert(`Child token created:\n\n${reply.token}\n\nStore securely!`);
+
             if (activeView === 'token-management-view') { // Refresh child list if visible
-                 const childrenData = await apiFetch('/tokens/self/children');
-                 renderChildTokens(childrenData);
+                const childrenData = await apiFetch('/tokens/self/children');
+                renderChildTokens(childrenData);
             }
-        } catch(error) { console.error("Failed to create child token:", error); }
+        } catch(error) {
+            console.error("Failed to create child token:", error);
+        }
     };
-    const handleFullReset = async () => { /* ... as before, minor cleanup ... */
+
+    const handleFullReset = async () => {
         if (!currentSelectedLbId) return alert("Select a Load Balancer to reset.");
+
         if (!confirm(`FULL RESET: Deregister ALL receivers and remove ALL senders for LB ${currentSelectedLbId}? IRREVERSIBLE.`)) return;
+
         console.warn(`Performing FULL RESET on LB: ${currentSelectedLbId}`);
         alert('Starting FULL RESET...');
-         try {
+
+        try {
             const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
             const workers = statusData.workers || [];
             const senders = statusData.senderAddresses || [];
+
             // Deregister workers
             console.log(`Deregistering ${workers.length} workers...`);
-            const deregPromises = workers.map(w => apiFetch(`/receivers/${w.name}`, { method: 'DELETE' }).catch(err => console.error(`Failed deregister ${w.name}:`, err)));
+            const deregPromises = workers.map(w =>
+                apiFetch(`/receivers/${w.name}`, { method: 'DELETE' })
+                    .catch(err => console.error(`Failed deregister ${w.name}:`, err))
+            );
             await Promise.allSettled(deregPromises);
             console.log("Finished worker deregistration attempt.");
+
             // Remove senders
             if (senders.length > 0) {
                 console.log(`Removing ${senders.length} senders...`);
-                await apiFetch(`/lb/${currentSelectedLbId}/senders`, { method: 'DELETE', body: JSON.stringify({ sender_addresses: senders }) });
+                await apiFetch(`/lb/${currentSelectedLbId}/senders`, {
+                    method: 'DELETE',
+                    body: JSON.stringify({ sender_addresses: senders })
+                });
                 console.log("Finished removing senders.");
             }
-             alert(`FULL RESET attempt complete for LB ${currentSelectedLbId}.`);
-             // Refresh UI
-             const finalStatus = await apiFetch(`/lb/${currentSelectedLbId}/status`);
-             renderSessions(finalStatus.workers);
-             renderSenders(finalStatus.senders);
-        } catch (error) { console.error("Error during FULL RESET:", error); alert(`Error during FULL RESET: ${error.message}.`); }
+
+            alert(`FULL RESET complete for LB ${currentSelectedLbId}.`);
+
+            // Refresh UI
+            const finalStatus = await apiFetch(`/lb/${currentSelectedLbId}/status`);
+            renderSessions(finalStatus.workers);
+            renderSenders(finalStatus.senderAddresses);
+        } catch (error) {
+            console.error("Error during FULL RESET:", error);
+            alert(`Error during FULL RESET: ${error.message}.`);
+        }
     };
 
+    // Attach direct event listeners to static buttons (moved after function definitions)
+    if (addSenderBtn) {
+        addSenderBtn.addEventListener('click', handleAddSender);
+    }
+    if (generateChildTokenBtn) {
+        generateChildTokenBtn.addEventListener('click', handleGenerateChildToken);
+    }
+    if (fullResetBtn) {
+        fullResetBtn.addEventListener('click', handleFullReset);
+    }
 
-    // --- Authentication Flow (Updated EJFAT Parsing) ---
-    const showAuthModal = (errorMessage = null) => { /* ... as before ... */
+    // --- SPA Routing ---
+    const navigateTo = (path, replace = false) => {
+        if (!AUTH_TOKEN) return showAuthModal("Please authenticate first."); // Don't navigate if not logged in
+
+        // Check if the target is a disabled LB
+        const targetElement = document.querySelector(`.left-sidebar li[data-target-path="${path}"]`);
+        if (targetElement && targetElement.classList.contains('disabled-lb')) {
+            console.log("Navigation prevented: Target LB is disabled.");
+            return; // Do not navigate
+        }
+
+        // Prevent pushing the same path multiple times consecutively
+        if (path === currentPath && !replace) return;
+
+        console.log(`Navigating to: ${path}`);
+        currentPath = path;
+
+        // Update browser history
+        const state = { path: path };
+        if (replace) {
+            history.replaceState(state, '', path);
+        } else {
+            history.pushState(state, '', path);
+        }
+
+        // Handle the route change to update the UI
+        handleRouteChange(path);
+    };
+
+    const handleRouteChange = (path) => {
+        if (!AUTH_TOKEN) { // Should ideally not happen if navigateTo checks, but belt-and-suspenders
+            checkAuth(); // Re-run auth check if route changes while unauthed
+            return;
+        }
+
+        updateActiveSidebarItem(path);
+
+        // Basic routing logic based on path segments
+        const segments = path.split('/').filter(Boolean); // Filter out empty strings
+
+        if (segments.length === 0) { // Root path "/"
+            switchView('placeholder-view');
+            currentSelectedLbId = null;
+        } else if (segments[0] === 'lb' && segments[1]) {
+            // Load Balancer Detail View
+            const lbId = segments[1];
+            showDashboardView(lbId);
+        } else if (segments[0] === 'tools') {
+            if (segments[1] === 'tokens') {
+                // Token Management View
+                showTokenManagementView();
+            } else if (segments[1] === 'system') {
+                // System Info View
+                showSystemInfoView();
+            } else {
+                // Unknown tool, show placeholder
+                switchView('placeholder-view');
+                currentSelectedLbId = null;
+            }
+        } else {
+            // Unknown path, show placeholder
+            switchView('placeholder-view');
+            currentSelectedLbId = null;
+        }
+    };
+
+    const handlePopState = (event) => {
+        // Handle browser back/forward button clicks
+        const path = event.state?.path || window.location.pathname;
+        console.log(`Handling popstate to: ${path}`);
+        currentPath = path; // Update internal state
+        handleRouteChange(path);
+    };
+
+    // Add popstate listener
+    window.addEventListener('popstate', handlePopState);
+
+    // --- Authentication Flow ---
+    const showAuthModal = (errorMessage = null) => {
         console.log("Authentication required. Showing modal.");
         authInput.value = '';
         authError.textContent = errorMessage || '';
         authError.style.display = errorMessage ? 'block' : 'none';
         authModal.style.display = 'block';
-         authInput.focus();
+        authInput.focus();
     };
-    const hideAuthModal = () => { /* ... as before ... */
+
+    const hideAuthModal = () => {
         authModal.style.display = 'none';
         authError.style.display = 'none';
     };
@@ -988,7 +1615,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const url = new URL(trimmedValue);
                 // Token is in the 'username' part for ejfats://token@host...
                 if (url.username) {
-                     console.log("Extracted token from EJFAT URI username.");
+                    console.log("Extracted token from EJFAT URI username.");
                     return url.username; // The part before '@'
                 } else {
                     console.warn("EJFAT URI detected but no token found in username part.");
@@ -1015,7 +1642,7 @@ document.addEventListener('DOMContentLoaded', () => {
         return null;
     };
 
-    const handleAuthSubmit = async (event) => { /* ... mostly as before ... */
+    const handleAuthSubmit = async (event) => {
         event.preventDefault();
         authError.style.display = 'none';
         authSubmitBtn.disabled = true;
@@ -1036,102 +1663,24 @@ document.addEventListener('DOMContentLoaded', () => {
         console.log("Attempting authentication with extracted token...");
 
         try {
-             await apiFetch('/version'); // Use /version as a lightweight validation endpoint
-             console.log("Authentication successful.");
-             setCookie(AUTH_COOKIE_NAME, AUTH_TOKEN, COOKIE_EXPIRY_DAYS);
-             hideAuthModal();
-             initializeApp(); // Start the main app loading process *after* auth success
+            await apiFetch('/version'); // Use /version as a lightweight validation endpoint
+            console.log("Authentication successful.");
+            setCookie(AUTH_COOKIE_NAME, AUTH_TOKEN, COOKIE_EXPIRY_DAYS);
+            hideAuthModal();
+            initializeApp(); // Start the main app loading process *after* auth success
 
         } catch (error) {
-             console.error("Authentication test failed:", error.message);
-             // apiFetch handles showing modal again on auth error
+            console.error("Authentication test failed:", error.message);
+            // apiFetch handles showing modal again on auth error
         } finally {
-             if (authModal.style.display === 'block') { // Re-enable button only if modal is still shown
+            if (authModal.style.display === 'block') { // Re-enable button only if modal is still shown
                 authSubmitBtn.disabled = false;
                 authSubmitBtn.textContent = 'Authenticate';
             }
         }
     };
 
-    // --- SPA Routing ---
-
-    const navigateTo = (path, replace = false) => {
-        if (!AUTH_TOKEN) return showAuthModal("Please authenticate first."); // Don't navigate if not logged in
-
-        // Check if the target is a disabled LB
-        const targetElement = document.querySelector(`.left-sidebar li[data-target-path="${path}"]`);
-        if (targetElement && targetElement.classList.contains('disabled-lb')) {
-            console.log("Navigation prevented: Target LB is disabled.");
-            return; // Do not navigate
-        }
-
-        // Prevent pushing the same path multiple times consecutively
-        if (path === currentPath && !replace) return;
-
-        console.log(`Navigating to: ${path}`);
-        currentPath = path;
-
-        // Update browser history
-        const state = { path: path };
-        if (replace) {
-            history.replaceState(state, '', path);
-        } else {
-             history.pushState(state, '', path);
-        }
-
-        // Handle the route change to update the UI
-        handleRouteChange(path);
-    };
-
-    const handleRouteChange = (path) => {
-         if (!AUTH_TOKEN) { // Should ideally not happen if navigateTo checks, but belt-and-suspenders
-            checkAuth(); // Re-run auth check if route changes while unauthed
-            return;
-         }
-
-        updateActiveSidebarItem(path);
-
-        // Basic routing logic based on path segments
-        const segments = path.split('/').filter(Boolean); // Filter out empty strings
-
-        if (segments.length === 0) { // Root path "/"
-             switchView('placeholder-view');
-             currentSelectedLbId = null;
-        } else if (segments[0] === 'lb' && segments[1]) {
-            // Load Balancer Detail View
-            const lbId = segments[1];
-            showDashboardView(lbId);
-        } else if (segments[0] === 'tools') {
-            if (segments[1] === 'tokens') {
-                // Token Management View
-                showTokenManagementView();
-            } else if (segments[1] === 'system') {
-                // System Info View
-                showSystemInfoView();
-            } else {
-                 // Unknown tool, show placeholder
-                switchView('placeholder-view');
-                currentSelectedLbId = null;
-            }
-        } else {
-             // Unknown path, show placeholder
-             switchView('placeholder-view');
-             currentSelectedLbId = null;
-        }
-    };
-
-    const handlePopState = (event) => {
-        // Handle browser back/forward button clicks
-        const path = event.state?.path || window.location.pathname;
-        console.log(`Handling popstate to: ${path}`);
-        currentPath = path; // Update internal state
-        handleRouteChange(path);
-    };
-
-    // Add popstate listener
-    window.addEventListener('popstate', handlePopState);
-
-
+    // --- Initialization ---
     // Set up polling for overview data
     let overviewUpdateInterval = null;
 
@@ -1156,7 +1705,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
                     if (activeLB && activeLB.status) {
                         renderSessions(activeLB.status.workers || []);
-                        renderSenders(activeLB.status.senderAddresses || []);
+                        renderSenders(activeLB.status.sender_addresses || []);
                     }
                 }
             } catch (error) {
@@ -1171,8 +1720,6 @@ document.addEventListener('DOMContentLoaded', () => {
             overviewUpdateInterval = null;
         }
     };
-
-    // --- Initialization ---
 
     // Loads essential data and sets up non-route-specific listeners
     const initializeApp = async () => {
@@ -1192,9 +1739,6 @@ document.addEventListener('DOMContentLoaded', () => {
             // Proceed without LB list for now, maybe show error to user
         }
 
-        // Setup non-dynamic listeners (auth modal handled separately)
-        // Event delegation handles most dynamic elements now
-
         // Handle initial route based on URL path
         handleRouteChange(window.location.pathname);
         initialLoadIndicator.style.display = 'none'; // Hide loading
@@ -1212,11 +1756,11 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.log("Token validated successfully.");
                 initializeApp(); // Token is valid, start the main app
             }).catch(error => {
-                 console.error("Token validation failed on load:", error.message);
-                 // apiFetch should have handled clearing cookie & showing modal if it was 401/403
-                 if (!authModal.style.display || authModal.style.display === 'none') {
-                     showAuthModal("Your receiver may have expired. Please re-authenticate.");
-                 }
+                console.error("Token validation failed on load:", error.message);
+                // apiFetch should have handled clearing cookie & showing modal if it was 401/403
+                if (!authModal.style.display || authModal.style.display === 'none') {
+                    showAuthModal("Your session may have expired. Please re-authenticate.");
+                }
             });
         } else {
             console.log("No auth token cookie found.");
@@ -1227,5 +1771,4 @@ document.addEventListener('DOMContentLoaded', () => {
     // --- Start the Application ---
     authForm.addEventListener('submit', handleAuthSubmit); // Auth form listener
     checkAuth(); // Start the authentication check on page load
-
-}); // End DOMContentLoaded
+});

@@ -17,6 +17,9 @@
     --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --sidebar-width: 280px;
     --right-sidebar-width: 320px;
+    --chart-text-color: #ffffff;
+    --chart-line-width: 2.5px;
+    --chart-text-size: 12px;
 }
 
 * {
@@ -290,57 +293,37 @@ button:disabled {
     margin-bottom: 25px;
 }
 
-.dashboard-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-    /* Responsive grid */
-    gap: 25px;
-}
-
 .card {
     background-color: var(--card-bg);
     border-radius: 8px;
     padding: 20px;
     border: 1px solid var(--border-color);
+    margin-bottom: 25px;
 }
 
-.chart-container {
-    background-color: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
-    border: 1px solid var(--border-color);
-    min-height: 300px;
-    /* Ensure charts have some height */
+/* Sender Management Panel */
+.sender-management-panel {
+    margin-bottom: 25px;
+}
+
+.sender-add-form {
     display: flex;
-    flex-direction: column;
-}
-
-.chart-container h3 {
     margin-bottom: 15px;
-    font-size: 1em;
-    color: var(--text-secondary-color);
 }
 
-/* Style uPlot charts (ensure container is set up) */
-.uplot {
-    width: 100%;
+.sender-add-form input {
     flex-grow: 1;
-    /* Chart takes available space in container */
+    padding: 10px;
+    background-color: var(--bg-color);
+    border: 1px solid var(--border-color);
+    color: var(--text-color);
+    border-radius: 4px 0 0 4px;
+    font-size: 1em;
 }
 
-/* Dark theme adjustments for uPlot axes/legend if needed */
-.u-legend .u-series>*,
-.u-axis text {
-    color: var(--text-color) !important;
-    /* Override default uPlot colors */
-}
-
-.u-legend .u-marker {
-    border-color: var(--text-color) !important;
-}
-
-.management-tools .tool-actions {
-    margin-bottom: 20px;
+.sender-add-form button {
+    border-radius: 0 4px 4px 0;
+    padding: 10px 15px;
 }
 
 .sender-list {
@@ -355,16 +338,88 @@ button:disabled {
 }
 
 .sender-list ul {
-    padding-left: 20px;
-    /* Indent list */
-    list-style: disc;
+    list-style: none;
+    padding: 0;
 }
 
 .sender-list li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 10px;
     margin-bottom: 5px;
+    background-color: rgba(0, 0, 0, 0.2);
+    border-radius: 4px;
     color: var(--text-color);
 }
 
+.sender-list .delete-sender {
+    background: none;
+    border: none;
+    color: var(--danger-color);
+    cursor: pointer;
+    padding: 5px;
+    font-size: 1em;
+    transition: color 0.2s ease;
+}
+
+.sender-list .delete-sender:hover {
+    color: #ff6b6b;
+}
+
+/* Management Tools */
+.management-tools {
+    margin-bottom: 25px;
+}
+
+.management-tools .tool-actions {
+    display: flex;
+    flex-wrap: wrap;
+}
+
+/* Charts Container */
+.charts-container {
+    width: 100%;
+}
+
+.chart-container {
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    min-height: 350px;
+    margin-bottom: 25px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+}
+
+.chart-container h3 {
+    margin-bottom: 15px;
+    font-size: 1.1em;
+    color: var(--text-secondary-color);
+}
+
+/* Style uPlot charts */
+.uplot {
+    width: 100%;
+    flex-grow: 1;
+}
+
+/* Dark theme adjustments for uPlot */
+.u-legend .u-series>*,
+.u-axis text {
+    color: var(--chart-text-color) !important;
+    font-size: var(--chart-text-size) !important;
+}
+
+.u-legend .u-marker {
+    border-color: var(--chart-text-color) !important;
+}
+
+.u-series path {
+    stroke-width: var(--chart-line-width) !important;
+}
 
 /* Right Sidebar */
 .right-sidebar {
@@ -433,6 +488,93 @@ button:disabled {
 #token-management-view .card,
 #system-info-view .card {
     margin-bottom: 20px;
+}
+
+/* --- Token Creation Form Styles --- */
+#token-management-view .form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#token-management-view label {
+    font-size: 0.98em;
+    color: var(--text-secondary-color);
+    margin-bottom: 2px;
+}
+
+#token-management-view input[type="text"],
+#token-management-view select {
+    padding: 8px 10px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    font-size: 1em;
+    margin-right: 6px;
+    margin-bottom: 0;
+    min-width: 90px;
+}
+
+#token-management-view input[type="text"]:focus,
+#token-management-view select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+#token-management-view .form-actions {
+    margin-top: 10px;
+    display: flex;
+    gap: 10px;
+}
+
+#token-management-view .permission-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#token-management-view .remove-permission-btn {
+    background: none;
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 1em;
+    margin-left: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+#token-management-view .remove-permission-btn:hover {
+    background: rgba(255, 59, 48, 0.15);
+    color: #fff;
+}
+
+#create-token-result.create-token-result {
+    margin-top: 12px;
+    font-size: 0.98em;
+    word-break: break-all;
+}
+
+#create-token-result.success-message {
+    color: var(--success-color);
+}
+
+#create-token-result.error-message {
+    color: var(--danger-color);
+}
+
+#create-token-result code {
+    background: var(--bg-color);
+    color: var(--accent-color);
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    padding: 2px 6px;
+    font-size: 1em;
+    margin: 2px 0;
+    display: inline-block;
 }
 
 pre {
@@ -560,7 +702,6 @@ pre {
     color: var(--text-color);
 }
 
-
 /* Modal Styles */
 .modal {
     display: none;
@@ -609,7 +750,6 @@ pre {
     font-size: 1em;
 }
 
-
 .close-button {
     color: var(--text-secondary-color);
     position: absolute;
@@ -624,25 +764,6 @@ pre {
     color: var(--text-color);
     text-decoration: none;
     cursor: pointer;
-}
-
-/* Scrollbar styling (Optional, Webkit specific) */
-::-webkit-scrollbar {
-    width: 8px;
-    height: 8px;
-}
-
-::-webkit-scrollbar-track {
-    background: var(--sidebar-bg);
-}
-
-::-webkit-scrollbar-thumb {
-    background-color: #555;
-    border-radius: 4px;
-}
-
-::-webkit-scrollbar-thumb:hover {
-    background-color: #777;
 }
 
 /* Toast container and toast styles */
@@ -692,6 +813,10 @@ pre {
 
 /* Load Balancer Alert Styles */
 #lb-alert-area {
+    position: fixed;
+    bottom: 20px;
+    left: 20px;
+    z-index: 1200;
     max-width: 300px;
 }
 

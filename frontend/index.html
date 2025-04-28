@@ -39,45 +39,38 @@
 
             <div id="dashboard-view" class="content-view">
                 <h2 id="dashboard-lb-title">Load Balancer Dashboard</h2>
-                <div class="dashboard-grid">
-                    <div class="chart-container">
-                        <h3>Queue Fill / Receiver</h3>
-                        <div id="queue-fill-chart"></div>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Mean Cluster Queue Fill</h3>
-                        <div id="mean-queue-chart"></div>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Event Prediction Accuracy</h3>
-                        <div id="prediction-accuracy-chart"></div>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Latency</h3>
-                        <div id="latency-chart"></div>
-                    </div>
-                    <div class="chart-container">
-                        <h3>Slot Assignments</h3>
-                        <div id="slot-assignments-chart"></div>
-                    </div>
 
-                    <div class="management-tools card">
-                        <h3>Management</h3>
-                        <div class="tool-actions">
-                            <button id="add-sender-btn" class="action-button"><i class="fas fa-plus-circle"></i> Add
-                                Sender</button>
-                            <button id="remove-sender-btn" class="action-button"><i class="fas fa-minus-circle"></i>
-                                Remove Sender</button>
-                            <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
-                                Generate Child Token</button>
-                            <button id="full-reset-btn" class="action-button danger-button"><i
-                                    class="fas fa-exclamation-triangle"></i> FULL RESET</button>
-                        </div>
-                        <div id="sender-list" class="sender-list">
-                            <h4>Allowed Senders:</h4>
-                            <ul>
-                            </ul>
-                        </div>
+                <!-- Sender Management Panel -->
+                <div class="sender-management-panel card">
+                    <h3>Sender Management</h3>
+                    <div class="sender-add-form">
+                        <input type="text" id="new-sender-ip" placeholder="Enter Sender IP Address">
+                        <button id="add-sender-btn" class="action-button"><i class="fas fa-plus"></i> Add</button>
+                    </div>
+                    <div id="sender-list" class="sender-list">
+                        <h4>Allowed Senders:</h4>
+                        <ul>
+                            <!-- Senders will be populated here -->
+                        </ul>
+                    </div>
+                </div>
+
+                <!-- Management Tools -->
+                <div class="management-tools card">
+                    <h3>Management Actions</h3>
+                    <div class="tool-actions">
+                        <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
+                            Generate Child Token</button>
+                        <button id="full-reset-btn" class="action-button danger-button"><i
+                                class="fas fa-exclamation-triangle"></i> FULL RESET</button>
+                    </div>
+                </div>
+
+                <!-- Charts Container - Full Width -->
+                <div class="charts-container">
+                    <!-- Dynamic charts will be generated here -->
+                    <div id="dynamic-charts-area">
+                        <!-- Charts will be added dynamically -->
                     </div>
                 </div>
             </div>
@@ -87,9 +80,28 @@
                 <p>Manage authentication tokens and permissions.</p>
                 <div class="loading" id="token-view-loading" style="display: none;">Loading token data...</div>
                 <div id="token-view-content">
-                    <div class="card">
+                    <div class="card" id="create-token-card">
                         <h3>Create New Token</h3>
-                        <button id="create-token-btn" class="action-button">Create Token (WIP)</button>
+                        <form id="create-token-form" autocomplete="off">
+                            <div class="form-group">
+                                <label for="new-token-name">Token Name:</label>
+                                <input type="text" id="new-token-name" name="tokenName" placeholder="Enter token name"
+                                    required>
+                            </div>
+                            <div class="form-group">
+                                <label>Permissions:</label>
+                                <div id="permissions-list">
+                                    <!-- Permission rows will be added here -->
+                                </div>
+                                <button type="button" id="add-permission-btn" class="action-button"
+                                    style="margin-top:8px;"><i class="fas fa-plus"></i> Add Permission</button>
+                            </div>
+                            <div class="form-actions">
+                                <button type="submit" id="create-token-submit-btn" class="action-button"><i
+                                        class="fas fa-key"></i> Create Token</button>
+                            </div>
+                            <div id="create-token-result" class="create-token-result"></div>
+                        </form>
                     </div>
                     <div class="card">
                         <h3>Your Token Details</h3>
@@ -122,14 +134,6 @@
         </aside>
     </div>
 
-    <div id="add-sender-modal" class="modal">
-        <div class="modal-content">
-            <span class="close-button">&times;</span>
-            <h2>Add Sender IP</h2>
-            <input type="text" id="new-sender-ip" placeholder="Enter Sender IP Address">
-            <button id="confirm-add-sender-btn" class="action-button">Add Sender</button>
-        </div>
-    </div>
     <div id="auth-modal" class="modal">
         <div class="modal-content auth-modal-content">
             <h2>Authentication Required</h2>
@@ -144,8 +148,6 @@
                 <button type="submit" id="auth-submit-btn" class="action-button">Authenticate</button>
             </form>
         </div>
-    </div>
-
     </div>
 
     <!-- Toast container for notifications -->
