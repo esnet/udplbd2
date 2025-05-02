@@ -257,7 +257,10 @@ async fn test_slot_generation() {
     .unwrap();
 
     // Test full epoch advancement
-    let epoch = db.advance_epoch(reservation.id).await.unwrap();
+    let epoch = db
+        .advance_epoch(reservation.id, chrono::Duration::milliseconds(800))
+        .await
+        .unwrap();
     assert_eq!(epoch.slots.len(), NUM_SLOTS);
 }
 

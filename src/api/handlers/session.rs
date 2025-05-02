@@ -109,20 +109,6 @@ impl LoadBalancerService {
         .await
         .map_err(|e| Status::internal(format!("Failed to delete session: {e}")))?;
 
-        // Force an epoch update since session composition changed
-        let sessions = sqlx::query!(
-            "SELECT reservation_id FROM session WHERE id = ?1",
-            session_id
-        )
-        .fetch_one(&self.db.write_pool)
-        .await
-        .map_err(|e| Status::internal(format!("Failed to get reservation ID: {e}")))?;
-
-        self.db
-            .advance_epoch(sessions.reservation_id)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to advance epoch: {e}")))?;
-
         Ok(Response::new(DeregisterReply {}))
     }
 

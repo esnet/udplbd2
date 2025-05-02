@@ -101,7 +101,9 @@ pub fn range_as_power_of_two_prefixes(start: u64, end: u64) -> Vec<Prefix> {
         let mut prefix_length = 1u64 << exponent;
 
         // Ensure the prefix does not extend beyond "end"
-        while exponent > 0 && (current_start.saturating_add(prefix_length) > end) {
+        while (exponent > 0 && current_start.saturating_add(prefix_length) > end)
+            || (current_start.wrapping_add(prefix_length) < start)
+        {
             exponent -= 1;
             prefix_length >>= 1;
         }

@@ -190,6 +190,7 @@ impl ReservationManager {
         unicast_mac: MacAddr6,
         current_rules: &Arc<Mutex<Vec<TableRule>>>,
         dump_rule_dir: &Option<PathBuf>,
+        offset: chrono::TimeDelta,
     ) {
         let start_time = Instant::now();
 
@@ -201,7 +202,7 @@ impl ReservationManager {
             let mut reservations = active_reservations.lock().await;
             for reservation in reservations.values_mut() {
                 // Advance the reservation’s epoch.
-                match db.advance_epoch(reservation.reservation_id).await {
+                match db.advance_epoch(reservation.reservation_id, offset).await {
                     Ok(epoch) => {
                         // Update metrics
                         if let Err(e) = reservation.update_metrics(db, epoch).await {
@@ -337,12 +338,8 @@ impl ReservationManager {
         mut shutdown_rx: broadcast::Receiver<()>,
     ) -> Result<()> {
         let mut interval = time::interval(tick_interval);
+        let offset: chrono::Duration = chrono::Duration::from_std(tick_offset)?;
         interval.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
-        // Wait until the next tick offset.
-        let now = time::Instant::now();
-        let next_tick = now + tick_offset;
-        time::sleep_until(next_tick).await;
 
         loop {
             tokio::select! {
@@ -352,7 +349,7 @@ impl ReservationManager {
                         Self::check_expired_reservations(&db, &mut reservations).await?;
                         Self::cleanup_sessions(&db, &reservations).await;
                     }
-                    Self::update_rules(&db, &mut smartnic_clients, &active_reservations, unicast_mac, &current_rules, dump_rule_dir).await;
+                    Self::update_rules(&db, &mut smartnic_clients, &active_reservations, unicast_mac, &current_rules, dump_rule_dir, offset).await;
                 }
                 _ = shutdown_rx.recv() => {
                     info!("Shutting down reservation manager");

@@ -79,6 +79,9 @@ pub enum Error {
     #[error("invalid timestamp: {0}")]
     ProstTimestampError(#[from] prost_wkt_types::TimestampError),
 
+    #[error("duration out of range: {0}")]
+    DurationOutOfRange(#[from] chrono::OutOfRangeError),
+
     #[error("event reassembly error: {0}")]
     ReassemblyError(#[from] crate::dataplane::receiver::ReassemblyError),
 

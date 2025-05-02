@@ -14,21 +14,26 @@ use super::SessionState;
 pub const NUM_SLOTS: usize = 512;
 
 impl LoadBalancerDB {
-    /// Predicts the next epoch boundary based on event number history
-    pub async fn predict_epoch_boundary(&self, reservation_id: i64) -> Result<i64> {
+    /// Predicts the next epoch boundary based on event number history,
+    /// with an optional time offset adjustment to the prediction moment.
+    pub async fn predict_epoch_boundary(
+        &self,
+        reservation_id: i64,
+        offset: chrono::Duration,
+    ) -> Result<i64> {
         // Get the most recent event number samples
         let samples = sqlx::query!(
             r#"
-            SELECT
-                event_number,
-                avg_event_rate_hz,
-                local_timestamp,
-                remote_timestamp
-            FROM event_number
-            WHERE reservation_id = ?1
-            ORDER BY created_at DESC
-            LIMIT 10
-            "#,
+        SELECT
+            event_number,
+            avg_event_rate_hz,
+            local_timestamp,
+            remote_timestamp
+        FROM event_number
+        WHERE reservation_id = ?1
+        ORDER BY created_at DESC
+        LIMIT 10
+        "#,
             reservation_id
         )
         .fetch_all(&self.read_pool)
@@ -47,19 +52,18 @@ impl LoadBalancerDB {
             let last_timestamp =
                 DateTime::<Utc>::from_timestamp_millis(latest_sample.local_timestamp)
                     .ok_or(Error::Parse("timestamp out of range".to_string()))?;
-            let prediction_time: DateTime<Utc> = Utc::now();
 
-            if prediction_time < last_timestamp {
-                return Ok(last_event);
-            }
-
-            let time_diff = (prediction_time - last_timestamp).num_seconds() as f64;
+            let prediction_time = Utc::now() + offset;
+            let time_diff = (prediction_time - last_timestamp).num_milliseconds() as f64 / 1000.0;
             let additional_events = rate * time_diff;
 
-            // Check for overflow
             if additional_events > (i64::MAX - last_event) as f64 {
                 return Ok(i64::MAX);
             }
+
+            trace!(
+                "predict_epoch_boundary: using rate-based, last timestamp: {last_timestamp}, rate: {rate}, addl events: {additional_events}"
+            );
 
             Ok(last_event + additional_events.round() as i64)
         } else {
@@ -77,7 +81,6 @@ impl LoadBalancerDB {
                 .min()
                 .unwrap_or(0);
 
-            // Calculate regression parameters
             let mut sum_x = 0.0;
             let mut sum_y = 0.0;
             let mut sum_xx = 0.0;
@@ -100,7 +103,7 @@ impl LoadBalancerDB {
                 return Ok(i64::MAX);
             }
 
-            let n = f64::from(count);
+            let n = count as f64;
             let denominator = n * sum_xx - sum_x * sum_x;
             if denominator == 0.0 {
                 return Ok(i64::MAX);
@@ -109,13 +112,13 @@ impl LoadBalancerDB {
             let slope = (n * sum_xy - sum_x * sum_y) / denominator;
             let intercept = (sum_y - slope * sum_x) / n;
 
-            // Predict using regression
-            let current_time = Utc::now().timestamp_millis();
-            let x = (current_time - min_timestamp) as f64;
+            let current_time = Utc::now() + offset;
+            let x = (current_time.timestamp_millis() - min_timestamp) as f64;
             let predicted_y = slope * x + intercept;
             let predicted_event = smallest_event + predicted_y.round() as i64;
 
-            // Check for overflow
+            trace!("predict_epoch_boundary: using regression, {predicted_y} = {slope} * {x} + {intercept}");
+
             if predicted_event < smallest_event {
                 return Ok(i64::MAX);
             }
@@ -315,8 +318,12 @@ impl LoadBalancerDB {
     }
 
     /// Advances to the next epoch by predicting boundary and generating assignments
-    pub async fn advance_epoch(&self, reservation_id: i64) -> Result<Epoch> {
-        let boundary_event = match self.predict_epoch_boundary(reservation_id).await {
+    pub async fn advance_epoch(
+        &self,
+        reservation_id: i64,
+        offset: chrono::Duration,
+    ) -> Result<Epoch> {
+        let boundary_event = match self.predict_epoch_boundary(reservation_id, offset).await {
             Ok(boundary) => boundary,
             Err(Error::NotInitialized(_)) => 0,
             Err(other_err) => return Err(other_err),
