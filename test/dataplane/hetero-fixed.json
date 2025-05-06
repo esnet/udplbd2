@@ -1,0 +1,43 @@
+{
+    "event_count": 9000,
+    "sender": {
+        "rate": 150
+    },
+    "receivers": [
+        {
+            "name": "10",
+            "kp": 15.0,
+            "rate": 10,
+            "min_factor": 0.33,
+            "max_factor": 0.33
+        },
+        {
+            "name": "20",
+            "kp": 15.0,
+            "rate": 20,
+            "min_factor": 0.66,
+            "max_factor": 0.66
+        },
+        {
+            "name": "30",
+            "kp": 15.0,
+            "rate": 30,
+            "min_factor": 1,
+            "max_factor": 1
+        },
+        {
+            "name": "40",
+            "kp": 15.0,
+            "rate": 40,
+            "min_factor": 1.33,
+            "max_factor": 1.33
+        },
+        {
+            "name": "50",
+            "kp": 15.0,
+            "rate": 50,
+            "min_factor": 1.66,
+            "max_factor": 1.66
+        }
+    ]
+}

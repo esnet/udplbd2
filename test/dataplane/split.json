@@ -1,0 +1,33 @@
+{
+    "event_count": 100000,
+    "event_size": 1000000,
+    "sender": {
+        "rate": 80
+    },
+    "receivers": [
+        {
+            "name": "R1",
+            "rate": 100
+        },
+        {
+            "name": "R2",
+            "rate": 100
+        },
+        {
+            "name": "R3",
+            "rate": 100
+        },
+        {
+            "name": "R4",
+            "rate": 100
+        },
+        {
+            "name": "R5",
+            "rate": 100
+        },
+        {
+            "name": "R6",
+            "rate": 100
+        }
+    ]
+}

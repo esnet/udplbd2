@@ -1,0 +1,38 @@
+{
+    "event_count": 5000,
+    "sender": {
+        "rate": 1000
+    },
+    "receivers": [
+        {
+            "name": "chaos1",
+            "kp": 4.2,
+            "kd": 0.8,
+            "rate": 15
+        },
+        {
+            "name": "chaos2",
+            "kp": 6.1,
+            "kd": 1.2,
+            "rate": 18
+        },
+        {
+            "name": "chaos3",
+            "kp": 3.9,
+            "kd": 0.6,
+            "rate": 32
+        },
+        {
+            "name": "chaos4",
+            "kp": 5.5,
+            "kd": 1.1,
+            "rate": 38
+        },
+        {
+            "name": "chaos5",
+            "kp": 4.8,
+            "kd": 0.9,
+            "rate": 52
+        }
+    ]
+}

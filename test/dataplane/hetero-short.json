@@ -1,0 +1,34 @@
+{
+    "event_count": 500,
+    "sp": 2,
+    "sender": {
+        "rate": 149
+    },
+    "receivers": [
+        {
+            "name": "R1",
+            "kp": 1.0,
+            "rate": 10
+        },
+        {
+            "name": "R2",
+            "kp": 1.0,
+            "rate": 20
+        },
+        {
+            "name": "R3",
+            "kp": 1.0,
+            "rate": 30
+        },
+        {
+            "name": "R4",
+            "kp": 1.0,
+            "rate": 40
+        },
+        {
+            "name": "R5",
+            "kp": 1.0,
+            "rate": 50
+        }
+    ]
+}

@@ -276,7 +276,9 @@ impl SNP4Client {
                     Err(err) => return Err(err),
                 }
             }
+        }
 
+        for update in updates {
             // Handle updates
             if !update.updates.is_empty() {
                 let requests =
@@ -286,7 +288,10 @@ impl SNP4Client {
                     Err(err) => return Err(err),
                 }
             }
+        }
 
+        for i in (0..updates.len()).rev() {
+            let update = &updates[i];
             // Handle deletions
             if !update.deletions.is_empty() {
                 let requests =
