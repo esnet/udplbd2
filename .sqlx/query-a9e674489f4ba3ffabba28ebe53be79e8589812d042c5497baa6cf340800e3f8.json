@@ -1,0 +1,86 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                s.id as session_id,\n                ss.timestamp as \"timestamp?\",\n                ss.is_ready as \"is_ready?\",\n                ss.fill_percent as \"fill_percent?\",\n                ss.control_signal as \"control_signal?\",\n                ss.total_events_recv as \"total_events_recv?\",\n                ss.total_events_reassembled as \"total_events_reassembled?\",\n                ss.total_events_reassembly_err as \"total_events_reassembly_err?\",\n                ss.total_events_dequeued as \"total_events_dequeued?\",\n                ss.total_event_enqueue_err as \"total_event_enqueue_err?\",\n                ss.total_bytes_recv as \"total_bytes_recv?\",\n                ss.total_packets_recv as \"total_packets_recv?\"\n            FROM session s\n            LEFT JOIN session_state ss ON s.latest_session_state_id = ss.id\n            WHERE s.reservation_id = ?1\n            AND s.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "timestamp?",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "is_ready?",
+        "ordinal": 2,
+        "type_info": "Bool"
+      },
+      {
+        "name": "fill_percent?",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "control_signal?",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "total_events_recv?",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembled?",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_reassembly_err?",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_events_dequeued?",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_event_enqueue_err?",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_bytes_recv?",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "total_packets_recv?",
+        "ordinal": 11,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "a9e674489f4ba3ffabba28ebe53be79e8589812d042c5497baa6cf340800e3f8"
+}

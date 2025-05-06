@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, reservation_id, epoch_fpga_id, boundary_event, predicted_at, created_at, deleted_at, slots\n             FROM epoch\n             WHERE id = ?1 AND deleted_at IS NULL",
+  "query": "\n            SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots\n            FROM epoch\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
   "describe": {
     "columns": [
       {
@@ -14,33 +14,28 @@
         "type_info": "Integer"
       },
       {
-        "name": "epoch_fpga_id",
-        "ordinal": 2,
-        "type_info": "Text"
-      },
-      {
         "name": "boundary_event",
-        "ordinal": 3,
+        "ordinal": 2,
         "type_info": "Integer"
       },
       {
         "name": "predicted_at",
-        "ordinal": 4,
+        "ordinal": 3,
         "type_info": "Integer"
       },
       {
         "name": "created_at",
-        "ordinal": 5,
+        "ordinal": 4,
         "type_info": "Integer"
       },
       {
         "name": "deleted_at",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer"
       },
       {
         "name": "slots",
-        "ordinal": 7,
+        "ordinal": 6,
         "type_info": "Blob"
       }
     ],
@@ -53,10 +48,9 @@
       false,
       false,
       false,
-      false,
       true,
       false
     ]
   },
-  "hash": "fa35f0bb4cc548564fd1f8f657f658cdc6f0499cd50f795b507bae2360ea1644"
+  "hash": "8bbd6c2e475f3d1e54b512bcf046998d181d44cf046d0341d7bd0d738e0fbac8"
 }

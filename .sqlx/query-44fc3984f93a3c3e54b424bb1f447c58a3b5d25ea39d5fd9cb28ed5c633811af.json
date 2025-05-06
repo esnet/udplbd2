@@ -1,0 +1,44 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT\n                s.id as session_id,\n                s.weight as relative_priority,\n                s.min_factor,\n                s.max_factor,\n                ss.is_ready\n            FROM session s\n            LEFT JOIN session_state ss ON s.latest_session_state_id = ss.id\n            WHERE s.reservation_id = $1\n            AND s.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "relative_priority",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "min_factor",
+        "ordinal": 2,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_factor",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "is_ready",
+        "ordinal": 4,
+        "type_info": "Bool"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "44fc3984f93a3c3e54b424bb1f447c58a3b5d25ea39d5fd9cb28ed5c633811af"
+}

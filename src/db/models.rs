@@ -33,7 +33,9 @@ pub struct Session {
     pub id: i64,
     pub reservation_id: i64,
     pub name: String,
+    pub initial_weight_factor: f64,
     pub weight: f64,
+    pub latest_session_state_id: Option<i64>,
     pub ip_address: IpAddr,
     pub udp_port: u16,
     pub port_range: u16,
@@ -64,7 +66,6 @@ pub struct SessionState {
 pub struct Epoch {
     pub id: i64,
     pub reservation_id: i64,
-    pub epoch_fpga_id: String,
     pub boundary_event: u64,
     pub predicted_at: DateTime<Utc>,
     pub created_at: DateTime<Utc>,

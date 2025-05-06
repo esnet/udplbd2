@@ -7,7 +7,6 @@ use chrono::{DateTime, Utc};
 use rand::rng;
 use rand::seq::SliceRandom;
 use tracing::trace;
-use uuid::Uuid;
 
 use super::SessionState;
 
@@ -24,16 +23,17 @@ impl LoadBalancerDB {
         // Get the most recent event number samples
         let samples = sqlx::query!(
             r#"
-        SELECT
-            event_number,
-            avg_event_rate_hz,
-            local_timestamp,
-            remote_timestamp
-        FROM event_number
-        WHERE reservation_id = ?1
-        ORDER BY created_at DESC
-        LIMIT 10
-        "#,
+            SELECT
+                event_number,
+                avg_event_rate_hz,
+                local_timestamp,
+                remote_timestamp
+            FROM event_number
+            WHERE reservation_id = ?1
+            AND created_at >= (unixepoch('subsec') * 1000 - 60000)
+            ORDER BY created_at DESC
+            LIMIT 10
+            "#,
             reservation_id
         )
         .fetch_all(&self.read_pool)
@@ -137,16 +137,9 @@ impl LoadBalancerDB {
                 s.weight as relative_priority,
                 s.min_factor,
                 s.max_factor,
-                COALESCE(latest_state.is_ready, true) as is_ready
+                ss.is_ready
             FROM session s
-            LEFT JOIN (
-                SELECT
-                    session_id,
-                    is_ready
-                FROM session_state
-                GROUP BY session_id
-                HAVING created_at = MAX(created_at)
-            ) latest_state ON s.id = latest_state.session_id
+            LEFT JOIN session_state ss ON s.latest_session_state_id = ss.id
             WHERE s.reservation_id = $1
             AND s.deleted_at IS NULL
             "#,
@@ -169,7 +162,7 @@ impl LoadBalancerDB {
         let mut total_relative_priority = 0.0;
 
         for state in &session_states {
-            if state.is_ready == 0 {
+            if !state.is_ready {
                 continue;
             }
 
@@ -262,7 +255,6 @@ impl LoadBalancerDB {
         boundary_event: i64,
         slot_assignments: &[u16],
     ) -> Result<Epoch> {
-        let epoch_fpga_id = Uuid::new_v4().to_string();
         let now = Utc::now().timestamp_millis();
 
         let mut tx = self.write_pool.begin().await?;
@@ -295,16 +287,14 @@ impl LoadBalancerDB {
             r#"
             INSERT INTO epoch (
                 reservation_id,
-                epoch_fpga_id,
                 boundary_event,
                 predicted_at,
                 slots
             )
-            VALUES (?1, ?2, ?3, ?4, ?5)
+            VALUES (?1, ?2, ?3, ?4)
             RETURNING id
             "#,
             reservation_id,
-            epoch_fpga_id,
             boundary_event,
             now,
             slots_blob
@@ -323,6 +313,56 @@ impl LoadBalancerDB {
         reservation_id: i64,
         offset: chrono::Duration,
     ) -> Result<Epoch> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Accumulate latest control signals into session weights
+        let sessions = sqlx::query!(
+            r#"
+            SELECT s.id, s.weight, ss.control_signal
+            FROM session s
+            LEFT JOIN session_state ss
+                ON s.latest_session_state_id = ss.id
+            WHERE s.reservation_id = ?1 AND s.deleted_at IS NULL
+            "#,
+            reservation_id
+        )
+        .fetch_all(&mut *tx)
+        .await?;
+
+        // Step 1: Compute new weights after applying control signals
+        let mut new_weights = Vec::new();
+        for session in &sessions {
+            let new_weight = session.weight + session.control_signal;
+            new_weights.push((session.id, new_weight));
+        }
+
+        // Step 2: Compute average of new weights
+        let sum_weights: f64 = new_weights.iter().map(|(_, w)| w).sum();
+        let count = new_weights.len() as f64;
+        let avg_weight = if count > 0.0 {
+            sum_weights / count
+        } else {
+            1.0
+        };
+
+        // Step 3: Compute scaling factor to make average 1000
+        let scaling = 1000.0 / avg_weight;
+
+        // Step 4: Update all session weights to scaled value
+        for (id, weight) in new_weights {
+            let scaled_weight = (weight * scaling).round();
+            sqlx::query!(
+                "UPDATE session SET weight = ?1 WHERE id = ?2",
+                scaled_weight,
+                id
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+
+        // Predict boundary and generate assignments (read-only, can use self)
         let boundary_event = match self.predict_epoch_boundary(reservation_id, offset).await {
             Ok(boundary) => boundary,
             Err(Error::NotInitialized(_)) => 0,
@@ -332,6 +372,7 @@ impl LoadBalancerDB {
         if boundary_event > 0 {
             trace!("next epoch for {reservation_id} will begin at {boundary_event}");
         }
+
         self.create_epoch(reservation_id, boundary_event, &slot_assignments)
             .await
     }
@@ -339,7 +380,7 @@ impl LoadBalancerDB {
     /// Retrieves an epoch by ID.
     pub async fn get_epoch(&self, id: i64) -> Result<Epoch> {
         let epoch_record = sqlx::query!(
-            "SELECT id, reservation_id, epoch_fpga_id, boundary_event, predicted_at, created_at, deleted_at, slots
+            "SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots
              FROM epoch
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -359,7 +400,6 @@ impl LoadBalancerDB {
         Ok(Epoch {
             id: epoch_record.id,
             reservation_id: epoch_record.reservation_id,
-            epoch_fpga_id: epoch_record.epoch_fpga_id,
             boundary_event: epoch_record.boundary_event as u64,
             predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)
                 .ok_or(Error::Parse("timestamp out of range".to_string()))?,
@@ -376,7 +416,7 @@ impl LoadBalancerDB {
     pub async fn get_latest_epoch(&self, reservation_id: i64) -> Result<Epoch> {
         let epoch_record = sqlx::query!(
             r#"
-            SELECT id, reservation_id, epoch_fpga_id, boundary_event, predicted_at, created_at, deleted_at, slots
+            SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots
             FROM epoch
             WHERE reservation_id = ?1 AND deleted_at IS NULL
             ORDER BY created_at DESC
@@ -400,7 +440,6 @@ impl LoadBalancerDB {
         Ok(Epoch {
             id: epoch_record.id,
             reservation_id: epoch_record.reservation_id,
-            epoch_fpga_id: epoch_record.epoch_fpga_id,
             boundary_event: epoch_record.boundary_event as u64,
             predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)
                 .ok_or(Error::Parse("timestamp out of range".to_string()))?,
@@ -423,30 +462,19 @@ impl LoadBalancerDB {
             r#"
             SELECT
                 s.id as session_id,
-                ss.timestamp,
-                ss.is_ready,
-                ss.fill_percent,
-                ss.control_signal,
-                ss.total_events_recv,
-                ss.total_events_reassembled,
-                ss.total_events_reassembly_err,
-                ss.total_events_dequeued,
-                ss.total_event_enqueue_err,
-                ss.total_bytes_recv,
-                ss.total_packets_recv
+                ss.timestamp as "timestamp?",
+                ss.is_ready as "is_ready?",
+                ss.fill_percent as "fill_percent?",
+                ss.control_signal as "control_signal?",
+                ss.total_events_recv as "total_events_recv?",
+                ss.total_events_reassembled as "total_events_reassembled?",
+                ss.total_events_reassembly_err as "total_events_reassembly_err?",
+                ss.total_events_dequeued as "total_events_dequeued?",
+                ss.total_event_enqueue_err as "total_event_enqueue_err?",
+                ss.total_bytes_recv as "total_bytes_recv?",
+                ss.total_packets_recv as "total_packets_recv?"
             FROM session s
-            LEFT JOIN (
-                SELECT
-                    ss1.*
-                FROM session_state ss1
-                JOIN (
-                    SELECT
-                        session_id,
-                        MAX(created_at) as max_created_at
-                    FROM session_state
-                    GROUP BY session_id
-                ) ss2 ON ss1.session_id = ss2.session_id AND ss1.created_at = ss2.max_created_at
-            ) ss ON s.id = ss.session_id
+            LEFT JOIN session_state ss ON s.latest_session_state_id = ss.id
             WHERE s.reservation_id = ?1
             AND s.deleted_at IS NULL
             "#,

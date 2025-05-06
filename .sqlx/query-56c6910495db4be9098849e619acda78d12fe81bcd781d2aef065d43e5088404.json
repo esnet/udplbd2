@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT\n                event_number,\n                avg_event_rate_hz,\n                local_timestamp,\n                remote_timestamp\n            FROM event_number\n            WHERE reservation_id = ?1\n            ORDER BY created_at DESC\n            LIMIT 10\n            ",
+  "query": "\n            SELECT\n                event_number,\n                avg_event_rate_hz,\n                local_timestamp,\n                remote_timestamp\n            FROM event_number\n            WHERE reservation_id = ?1\n            AND created_at >= (unixepoch('subsec') * 1000 - 60000)\n            ORDER BY created_at DESC\n            LIMIT 10\n            ",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "b5270081e8ad7b837f6d2dafeb0e826b703c58e28304021c6226b148bee06213"
+  "hash": "56c6910495db4be9098849e619acda78d12fe81bcd781d2aef065d43e5088404"
 }

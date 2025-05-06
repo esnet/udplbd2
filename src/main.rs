@@ -137,6 +137,8 @@ mod test {
         let cli = Cli::parse_from(vec![
             "udplbd",
             "dataplane",
+            "-u",
+            "ejfat://test@127.0.0.1:19523/",
             "doctor",
             "-a",
             "127.0.0.1",

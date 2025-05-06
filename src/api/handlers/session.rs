@@ -140,32 +140,24 @@ impl LoadBalancerService {
         }
         let dt_ms = dt.timestamp_millis();
 
-        // Update session state
-        sqlx::query!(
-            r#"
-            INSERT INTO session_state (
-                session_id, timestamp, is_ready, fill_percent, control_signal,
-                total_events_recv, total_events_reassembled, total_events_reassembly_err,
-                total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
-                total_packets_recv
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            "#,
-            session_id,
-            dt_ms,
-            request.is_ready,
-            request.fill_percent,
-            request.control_signal,
-            request.total_events_recv,
-            request.total_events_reassembled,
-            request.total_events_reassembly_err,
-            request.total_events_dequeued,
-            request.total_event_enqueue_err,
-            request.total_bytes_recv,
-            request.total_packets_recv
-        )
-        .execute(&self.db.write_pool)
-        .await
-        .map_err(|e| Status::internal(format!("Failed to update session state: {e}")))?;
+        // Update session state and update latest_session_state_id
+        self.db
+            .add_session_state_and_update_latest(
+                session_id,
+                dt_ms,
+                request.is_ready,
+                request.fill_percent as f64,
+                request.control_signal as f64,
+                request.total_events_recv,
+                request.total_events_reassembled,
+                request.total_events_reassembly_err,
+                request.total_events_dequeued,
+                request.total_event_enqueue_err,
+                request.total_bytes_recv,
+                request.total_packets_recv,
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Failed to update session state: {e}")))?;
 
         Ok(Response::new(SendStateReply {}))
     }

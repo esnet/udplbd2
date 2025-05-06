@@ -26,7 +26,7 @@ controller:
 server:
   listen:
     - "127.0.0.1:18347"
-  auth_token: "udplbd_default_change_me"
+  auth_token: "udplbd2changeme"
   tls:
     enable: false
     certFile: "x509/server_cert.pem"

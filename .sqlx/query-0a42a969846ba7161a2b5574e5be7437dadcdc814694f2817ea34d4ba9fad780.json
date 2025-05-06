@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO session_state (\n                session_id, timestamp, is_ready, fill_percent, control_signal,\n                total_events_recv, total_events_reassembled, total_events_reassembly_err,\n                total_events_dequeued, total_event_enqueue_err, total_bytes_recv,\n                total_packets_recv\n            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)\n            RETURNING id\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 12
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "0a42a969846ba7161a2b5574e5be7437dadcdc814694f2817ea34d4ba9fad780"
+}

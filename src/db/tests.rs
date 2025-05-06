@@ -98,7 +98,8 @@ async fn test_loadbalancer_crud_and_associations() {
     assert_eq!(sessions.len(), 2);
     for (i, session) in sessions.iter().enumerate() {
         assert_eq!(session.name, format!("test-session-{i}"));
-        assert_eq!(session.weight, 1.0);
+        assert_eq!(session.initial_weight_factor, 1.0);
+        assert_eq!(session.weight, 1000.0);
         assert_eq!(session.port_range, 1000);
         assert_eq!(session.min_factor, 0.0);
         assert_eq!(session.max_factor, 2.0);
@@ -172,12 +173,12 @@ async fn test_slot_generation() {
         ("session5", 0.5, 0.0, 2.0),
     ];
 
-    for (name, weight, min_factor, max_factor) in &additional_sessions {
+    for (name, weight_factor, min_factor, max_factor) in &additional_sessions {
         let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8000);
         db.add_session(
             reservation.id,
             name,
-            *weight,
+            *weight_factor,
             addr,
             1000,
             *min_factor,
@@ -196,6 +197,16 @@ async fn test_slot_generation() {
         5,
         "Expected 5 sessions (2 from setup + 3 new ones)"
     );
+
+    let ts = chrono::Utc::now().timestamp_millis();
+    for session in &sessions {
+        assert!(db
+            .add_session_state_and_update_latest(
+                session.id, ts, true, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0
+            )
+            .await
+            .is_ok())
+    }
 
     // Test with default session states (should use defaults)
     let slots = db.generate_epoch_assignments(reservation.id).await.unwrap();

@@ -200,10 +200,16 @@ mod tests {
         let prefixes = range_as_power_of_two_prefixes(u64::MAX - 3, u64::MAX);
         assert_eq!(
             prefixes,
-            vec![Prefix {
-                start: u64::MAX - 3,
-                power_of_two: 2
-            },]
+            vec![
+                Prefix {
+                    start: u64::MAX - 3,
+                    power_of_two: 1
+                },
+                Prefix {
+                    start: u64::MAX - 1,
+                    power_of_two: 0
+                }
+            ]
         );
     }
 }

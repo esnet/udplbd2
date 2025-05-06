@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.id, s.weight, ss.control_signal\n            FROM session s\n            LEFT JOIN session_state ss\n                ON s.latest_session_state_id = ss.id\n            WHERE s.reservation_id = ?1 AND s.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "weight",
+        "ordinal": 1,
+        "type_info": "Float"
+      },
+      {
+        "name": "control_signal",
+        "ordinal": 2,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "efb6da6c78ee5e5b113a95de357815b37944180dc93566f3d18e967c327f63e6"
+}

@@ -43,6 +43,66 @@ impl LoadBalancerDB {
         }))
     }
 
+    /// Inserts a new session_state and updates session.latest_session_state_id
+    #[allow(clippy::too_many_arguments)]
+    pub async fn add_session_state_and_update_latest(
+        &self,
+        session_id: i64,
+        timestamp: i64,
+        is_ready: bool,
+        fill_percent: f64,
+        control_signal: f64,
+        total_events_recv: i64,
+        total_events_reassembled: i64,
+        total_events_reassembly_err: i64,
+        total_events_dequeued: i64,
+        total_event_enqueue_err: i64,
+        total_bytes_recv: i64,
+        total_packets_recv: i64,
+    ) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Insert session_state
+        let state_record = sqlx::query!(
+            r#"
+            INSERT INTO session_state (
+                session_id, timestamp, is_ready, fill_percent, control_signal,
+                total_events_recv, total_events_reassembled, total_events_reassembly_err,
+                total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
+                total_packets_recv
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            RETURNING id
+            "#,
+            session_id,
+            timestamp,
+            is_ready,
+            fill_percent,
+            control_signal,
+            total_events_recv,
+            total_events_reassembled,
+            total_events_reassembly_err,
+            total_events_dequeued,
+            total_event_enqueue_err,
+            total_bytes_recv,
+            total_packets_recv
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        // Update session.latest_session_state_id
+        sqlx::query!(
+            "UPDATE session SET latest_session_state_id = ?1 WHERE id = ?2",
+            state_record.id,
+            session_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
+        Ok(())
+    }
+
     /// Soft deletes sessions that haven't been updated in the last 5 seconds,
     /// excluding sessions created in the last 5 seconds.
     pub async fn cleanup_stale_sessions(&self) -> Result<()> {
@@ -83,7 +143,7 @@ impl LoadBalancerDB {
         &self,
         reservation_id: i64,
         name: &str,
-        weight: f64,
+        initial_weight_factor: f64,
         addr: SocketAddr,
         port_range: u16,
         min_factor: f64,
@@ -94,18 +154,20 @@ impl LoadBalancerDB {
         let ip_str = addr.ip().to_string();
         let mac_str = mac_address.to_string();
         let port = addr.port();
+        let weight = 1000.0 * initial_weight_factor;
         let record = sqlx::query!(
             r#"
             INSERT INTO session (
-                reservation_id, name, weight, ip_address, udp_port, port_range,
+                reservation_id, name, initial_weight_factor, weight, ip_address, udp_port, port_range,
                 min_factor, max_factor, mac_address, keep_lb_header
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
-            RETURNING id, reservation_id, name, weight, ip_address, udp_port,
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+            RETURNING id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
                       port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
             "#,
             reservation_id,
             name,
+            initial_weight_factor,
             weight,
             ip_str,
             port,
@@ -122,7 +184,9 @@ impl LoadBalancerDB {
             id: record.id,
             reservation_id: record.reservation_id,
             name: record.name,
+            initial_weight_factor: record.initial_weight_factor,
             weight: record.weight,
+            latest_session_state_id: record.latest_session_state_id,
             ip_address: record.ip_address.parse().unwrap(),
             udp_port: record.udp_port as u16,
             port_range: record.port_range as u16,
@@ -162,7 +226,7 @@ impl LoadBalancerDB {
     pub async fn get_session(&self, id: i64) -> Result<Session> {
         let record = sqlx::query!(
             r#"
-            SELECT id, reservation_id, name, weight, ip_address, udp_port,
+            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
                    port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
             FROM session
             WHERE id = ?1 AND deleted_at IS NULL
@@ -178,7 +242,9 @@ impl LoadBalancerDB {
             id: record.id,
             reservation_id: record.reservation_id,
             name: record.name,
+            initial_weight_factor: record.initial_weight_factor,
             weight: record.weight,
+            latest_session_state_id: record.latest_session_state_id,
             ip_address: record
                 .ip_address
                 .parse()

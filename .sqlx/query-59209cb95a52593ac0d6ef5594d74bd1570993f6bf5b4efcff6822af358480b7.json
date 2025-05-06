@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, reservation_id, name, weight, ip_address, udp_port,\n                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE id = ?1 AND deleted_at IS NULL\n            ",
+  "query": "\n            SELECT\n                id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port, port_range,\n                mac_address, min_factor, max_factor, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -19,34 +19,34 @@
         "type_info": "Text"
       },
       {
-        "name": "weight",
+        "name": "initial_weight_factor",
         "ordinal": 3,
         "type_info": "Float"
       },
       {
-        "name": "ip_address",
+        "name": "weight",
         "ordinal": 4,
-        "type_info": "Text"
+        "type_info": "Float"
       },
       {
-        "name": "udp_port",
+        "name": "latest_session_state_id",
         "ordinal": 5,
         "type_info": "Integer"
       },
       {
-        "name": "port_range",
+        "name": "ip_address",
         "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "udp_port",
+        "ordinal": 7,
         "type_info": "Integer"
       },
       {
-        "name": "min_factor",
-        "ordinal": 7,
-        "type_info": "Float"
-      },
-      {
-        "name": "max_factor",
+        "name": "port_range",
         "ordinal": 8,
-        "type_info": "Float"
+        "type_info": "Integer"
       },
       {
         "name": "mac_address",
@@ -54,18 +54,28 @@
         "type_info": "Text"
       },
       {
-        "name": "keep_lb_header",
+        "name": "min_factor",
         "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_factor",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "keep_lb_header",
+        "ordinal": 12,
         "type_info": "Integer"
       },
       {
         "name": "created_at",
-        "ordinal": 11,
+        "ordinal": 13,
         "type_info": "Integer"
       },
       {
         "name": "deleted_at",
-        "ordinal": 12,
+        "ordinal": 14,
         "type_info": "Integer"
       }
     ],
@@ -78,15 +88,17 @@
       false,
       false,
       false,
-      false,
+      true,
       false,
       false,
       false,
       true,
       false,
       false,
+      false,
+      false,
       true
     ]
   },
-  "hash": "a083c31fd4f8ad69b39ab3923be4590c2a38789d8f7ed1f0edf5c0cffec37a82"
+  "hash": "59209cb95a52593ac0d6ef5594d74bd1570993f6bf5b4efcff6822af358480b7"
 }
