@@ -73,7 +73,8 @@ CREATE TABLE IF NOT EXISTS reservation (
     reserved_until INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
     deleted_at INTEGER,
-    fpga_lb_id INTEGER NOT NULL
+    fpga_lb_id INTEGER NOT NULL,
+    current_epoch INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_reservation_loadbalancer_id ON reservation(loadbalancer_id);
 CREATE INDEX idx_reservation_reserved_until ON reservation(reserved_until);
@@ -140,12 +141,14 @@ CREATE TABLE IF NOT EXISTS epoch (
     predicted_at INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
     deleted_at INTEGER,
-    slots BLOB NOT NULL
+    slots BLOB NOT NULL,
+    epoch_count INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_epoch_reservation_id ON epoch(reservation_id);
 CREATE INDEX idx_epoch_predicted_at ON epoch(predicted_at);
 CREATE INDEX idx_epoch_created_at ON epoch(created_at);
 CREATE INDEX idx_epoch_deleted_at ON epoch(deleted_at);
+CREATE INDEX idx_epoch_epoch_count ON epoch(epoch_count);
 
 CREATE TABLE IF NOT EXISTS event_number (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,

@@ -248,7 +248,7 @@ impl LoadBalancerDB {
         Ok(slots)
     }
 
-    /// Creates a new epoch with given boundary event and slot assignments
+    /// Creates a new epoch with given boundary event and slot assignments, using epoch_count from RankedEpochs CTE
     pub async fn create_epoch(
         &self,
         reservation_id: i64,
@@ -258,6 +258,15 @@ impl LoadBalancerDB {
         let now = Utc::now().timestamp_millis();
 
         let mut tx = self.write_pool.begin().await?;
+
+        // Get the current_epoch from the reservation
+        let reservation_row = sqlx::query!(
+            "SELECT current_epoch FROM reservation WHERE id = ?1",
+            reservation_id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+        let new_epoch_count = reservation_row.current_epoch + 1;
 
         // Soft delete epochs beyond our 5 most recent
         sqlx::query!(
@@ -289,22 +298,54 @@ impl LoadBalancerDB {
                 reservation_id,
                 boundary_event,
                 predicted_at,
-                slots
+                slots,
+                epoch_count
             )
-            VALUES (?1, ?2, ?3, ?4)
-            RETURNING id
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            RETURNING id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots, epoch_count
             "#,
             reservation_id,
             boundary_event,
             now,
-            slots_blob
+            slots_blob,
+            new_epoch_count
         )
         .fetch_one(&mut *tx)
         .await?;
 
+        // Update reservation's current_epoch to match
+        sqlx::query!(
+            "UPDATE reservation SET current_epoch = ?1 WHERE id = ?2",
+            new_epoch_count,
+            reservation_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
         tx.commit().await.map_err(Error::Database)?;
 
-        self.get_epoch(epoch_record.id).await
+        // Build and return the Epoch struct directly
+        let slots: Vec<u16> = epoch_record
+            .slots
+            .chunks_exact(2)
+            .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+            .collect();
+
+        Ok(Epoch {
+            id: epoch_record.id,
+            reservation_id: epoch_record.reservation_id,
+            boundary_event: epoch_record.boundary_event as u64,
+            predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)
+                .ok_or(Error::Parse("timestamp out of range".to_string()))?,
+            created_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.created_at)
+                .ok_or(Error::Parse("timestamp out of range".to_string()))?,
+            deleted_at: epoch_record.deleted_at.map(|dt| {
+                DateTime::<Utc>::from_timestamp_millis(dt)
+                    .expect("deleted_at set but out of range!")
+            }),
+            slots,
+            epoch_count: epoch_record.epoch_count,
+        })
     }
 
     /// Advances to the next epoch by predicting boundary and generating assignments
@@ -380,7 +421,7 @@ impl LoadBalancerDB {
     /// Retrieves an epoch by ID.
     pub async fn get_epoch(&self, id: i64) -> Result<Epoch> {
         let epoch_record = sqlx::query!(
-            "SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots
+            "SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots, epoch_count
              FROM epoch
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -410,13 +451,14 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             slots,
+            epoch_count: epoch_record.epoch_count,
         })
     }
 
     pub async fn get_latest_epoch(&self, reservation_id: i64) -> Result<Epoch> {
         let epoch_record = sqlx::query!(
             r#"
-            SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots
+            SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots, epoch_count
             FROM epoch
             WHERE reservation_id = ?1 AND deleted_at IS NULL
             ORDER BY created_at DESC
@@ -450,6 +492,7 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             slots,
+            epoch_count: epoch_record.epoch_count,
         })
     }
 

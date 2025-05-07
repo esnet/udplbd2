@@ -1,8 +1,8 @@
 {
-    "event_count": 500,
-    "sp": 2,
     "sender": {
-        "rate": 149
+        "rate": 149,
+        "event_size": 50000,
+        "event_count": 14900
     },
     "receivers": [
         {

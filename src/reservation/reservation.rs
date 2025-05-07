@@ -201,38 +201,56 @@ impl ReservationManager {
         {
             let mut reservations = active_reservations.lock().await;
             for reservation in reservations.values_mut() {
-                // Advance the reservation’s epoch.
-                match db.advance_epoch(reservation.reservation_id, offset).await {
-                    Ok(epoch) => {
-                        // Update metrics
-                        if let Err(e) = reservation.update_metrics(db, epoch).await {
-                            error!(
-                                "failed to update metrics for reservation {}: {}",
-                                reservation.reservation_id, e
-                            );
-                        }
-
-                        // Generate reservation-specific rules.
-                        match reservation.generate_all_rules(db).await {
-                            Ok(rules) => {
-                                desired_rules.extend(rules.clone());
-                                // Update the reservation’s own internal state (informational only).
-                                reservation.set_current_rules(rules);
-                            }
-                            Err(e) => {
-                                error!(
-                                    "failed to generate rules for reservation {}: {}",
-                                    reservation.reservation_id, e
-                                );
-                            }
-                        }
+                // Only advance the epoch if there is at least one session for this reservation.
+                let sessions = match db
+                    .get_reservation_sessions(reservation.reservation_id)
+                    .await
+                {
+                    Ok(sessions) => sessions,
+                    Err(e) => {
+                        error!(
+                            "failed to get sessions for reservation {}: {}",
+                            reservation.reservation_id, e
+                        );
+                        continue;
                     }
+                };
+                if sessions.is_empty() {
+                    // No sessions for this reservation; skip epoch advancement.
+                    continue;
+                }
+
+                let epoch = match db.advance_epoch(reservation.reservation_id, offset).await {
+                    Ok(epoch) => epoch,
                     Err(e) => {
                         error!(
                             "failed to advance epoch for reservation {}: {}",
                             reservation.reservation_id, e
                         );
                         continue;
+                    }
+                };
+
+                // Update metrics
+                if let Err(e) = reservation.update_metrics(db, epoch).await {
+                    error!(
+                        "failed to update metrics for reservation {}: {}",
+                        reservation.reservation_id, e
+                    );
+                }
+
+                // Generate reservation-specific rules.
+                match reservation.generate_all_rules(db).await {
+                    Ok(rules) => {
+                        desired_rules.extend(rules.clone());
+                        // Update the reservation’s own internal state (informational only).
+                        reservation.set_current_rules(rules);
+                    }
+                    Err(e) => {
+                        error!(
+                            "failed to generate rules for reservation {}: {}",
+                            reservation.reservation_id, e
+                        );
                     }
                 }
             }

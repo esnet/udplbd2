@@ -35,7 +35,7 @@ impl LoadBalancerDB {
         let record = sqlx::query!(
             "INSERT INTO reservation (loadbalancer_id, reserved_until, fpga_lb_id)
              VALUES (?1, ?2, ?3)
-             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id",
+             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch",
             lb_id,
             reserved_until,
             fpga_lb_id
@@ -55,13 +55,14 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             fpga_lb_id: record.fpga_lb_id as u16,
+            current_epoch: record.current_epoch,
         })
     }
 
     /// Retrieves a reservation by ID.
     pub async fn get_reservation(&self, id: i64) -> Result<Reservation> {
         let reservation_record = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id
+            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch
              FROM reservation
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -84,6 +85,7 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             fpga_lb_id: reservation_record.fpga_lb_id as u16,
+            current_epoch: reservation_record.current_epoch,
         })
     }
 
@@ -228,7 +230,7 @@ impl LoadBalancerDB {
 
     pub async fn list_reservations(&self) -> Result<Vec<Reservation>> {
         let records = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id
+            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch
              FROM reservation
              WHERE deleted_at IS NULL"
         )
@@ -249,6 +251,7 @@ impl LoadBalancerDB {
                         .expect("deleted_at set but out of range!")
                 }),
                 fpga_lb_id: record.fpga_lb_id as u16,
+                current_epoch: record.current_epoch,
             });
         }
 
@@ -263,7 +266,7 @@ impl LoadBalancerDB {
             SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at, r.fpga_lb_id,
                    lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,
                    lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,
-                   lb.created_at lb_created_at
+                   lb.created_at lb_created_at, r.current_epoch
             FROM reservation r
             JOIN loadbalancer lb ON r.loadbalancer_id = lb.id
             WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL
@@ -286,6 +289,7 @@ impl LoadBalancerDB {
                         .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,
                     fpga_lb_id: record.fpga_lb_id as u16,
+                    current_epoch: record.current_epoch,
                 },
                 crate::db::models::LoadBalancer {
                     id: record.lb_id,

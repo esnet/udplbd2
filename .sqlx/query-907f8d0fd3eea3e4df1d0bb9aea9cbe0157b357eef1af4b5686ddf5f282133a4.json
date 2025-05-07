@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots, epoch_count\n            FROM epoch\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ORDER BY created_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "boundary_event",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "predicted_at",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "slots",
+        "ordinal": 6,
+        "type_info": "Blob"
+      },
+      {
+        "name": "epoch_count",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "907f8d0fd3eea3e4df1d0bb9aea9cbe0157b357eef1af4b5686ddf5f282133a4"
+}

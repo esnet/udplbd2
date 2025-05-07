@@ -193,7 +193,7 @@ impl ActiveReservation {
         let mut rules = Vec::new();
         let mut recent_epochs = sqlx::query!(
             r#"
-            SELECT id, boundary_event, slots
+            SELECT id, boundary_event, epoch_count, slots
             FROM epoch
             WHERE reservation_id = ?1 AND deleted_at IS NULL
             ORDER BY created_at DESC
@@ -218,7 +218,7 @@ impl ActiveReservation {
                 rules.push(
                     SlotToMemberRule {
                         match_lb_instance_id: self.lb_fpga_id,
-                        match_epoch: epoch.id as u32,
+                        match_epoch: (epoch.epoch_count % 4) as u32,
                         match_slot: slot_idx as u16,
                         set_member_id: member_id,
                         priority: 0,
@@ -243,7 +243,7 @@ impl ActiveReservation {
                         match_lb_instance_id: self.lb_fpga_id,
                         match_event: boundary.start,
                         match_event_prefix_len: 64 - boundary.power_of_two,
-                        set_epoch: epoch.id as u32,
+                        set_epoch: (epoch.epoch_count % 4) as u32,
                         priority: if i == recent_epochs.len() - 1 { 63 } else { 0 },
                     }
                     .into(),

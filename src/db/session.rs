@@ -59,7 +59,7 @@ impl LoadBalancerDB {
         total_event_enqueue_err: i64,
         total_bytes_recv: i64,
         total_packets_recv: i64,
-    ) -> Result<()> {
+    ) -> Result<i64> {
         let mut tx = self.write_pool.begin().await?;
 
         // Insert session_state
@@ -100,7 +100,7 @@ impl LoadBalancerDB {
 
         tx.commit().await?;
 
-        Ok(())
+        Ok(state_record.id)
     }
 
     /// Soft deletes sessions that haven't been updated in the last 5 seconds,
@@ -155,6 +155,9 @@ impl LoadBalancerDB {
         let mac_str = mac_address.to_string();
         let port = addr.port();
         let weight = 1000.0 * initial_weight_factor;
+        let mut tx = self.write_pool.begin().await?;
+
+        let now = chrono::Utc::now().timestamp_millis();
         let record = sqlx::query!(
             r#"
             INSERT INTO session (
@@ -162,7 +165,7 @@ impl LoadBalancerDB {
                 min_factor, max_factor, mac_address, keep_lb_header
             )
             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
-            RETURNING id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
+            RETURNING id, reservation_id, name, initial_weight_factor, weight, ip_address, udp_port,
                       port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
             "#,
             reservation_id,
@@ -177,26 +180,64 @@ impl LoadBalancerDB {
             mac_str,
             keep_lb_header
         )
-        .fetch_one(&self.write_pool)
+        .fetch_one(&mut *tx)
         .await?;
 
+        let state_record = sqlx::query!(
+            r#"
+            INSERT INTO session_state (
+                session_id, timestamp, is_ready, fill_percent, control_signal,
+                total_events_recv, total_events_reassembled, total_events_reassembly_err,
+                total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
+                total_packets_recv
+            ) VALUES (?1, ?2, 1, 0.0, 0.0, 0, 0, 0, 0, 0, 0, 0)
+            RETURNING id
+            "#,
+            record.id,
+            now
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        sqlx::query!(
+            "UPDATE session SET latest_session_state_id = ?1 WHERE id = ?2",
+            state_record.id,
+            record.id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        let session_row = sqlx::query!(
+            r#"
+            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
+                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
+            FROM session
+            WHERE id = ?1
+            "#,
+            record.id
+        )
+        .fetch_one(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+
         let session = Session {
-            id: record.id,
-            reservation_id: record.reservation_id,
-            name: record.name,
-            initial_weight_factor: record.initial_weight_factor,
-            weight: record.weight,
-            latest_session_state_id: record.latest_session_state_id,
-            ip_address: record.ip_address.parse().unwrap(),
-            udp_port: record.udp_port as u16,
-            port_range: record.port_range as u16,
-            mac_address: record.mac_address,
-            min_factor: record.min_factor,
-            max_factor: record.max_factor,
-            keep_lb_header: record.keep_lb_header == 1,
-            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
+            id: session_row.id,
+            reservation_id: session_row.reservation_id,
+            name: session_row.name,
+            initial_weight_factor: session_row.initial_weight_factor,
+            weight: session_row.weight,
+            latest_session_state_id: session_row.latest_session_state_id,
+            ip_address: session_row.ip_address.parse().unwrap(),
+            udp_port: session_row.udp_port as u16,
+            port_range: session_row.port_range as u16,
+            mac_address: session_row.mac_address,
+            min_factor: session_row.min_factor,
+            max_factor: session_row.max_factor,
+            keep_lb_header: session_row.keep_lb_header == 1,
+            created_at: DateTime::<Utc>::from_timestamp_millis(session_row.created_at)
                 .ok_or(Error::Parse("created_at out of range".to_string()))?,
-            deleted_at: record.deleted_at.map(|dt| {
+            deleted_at: session_row.deleted_at.map(|dt| {
                 DateTime::<Utc>::from_timestamp_millis(dt)
                     .expect("deleted_at set but out of range!")
             }),

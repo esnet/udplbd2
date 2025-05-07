@@ -26,6 +26,7 @@ pub struct Reservation {
     pub reserved_until: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
+    pub current_epoch: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -71,6 +72,7 @@ pub struct Epoch {
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub slots: Vec<u16>,
+    pub epoch_count: i64,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

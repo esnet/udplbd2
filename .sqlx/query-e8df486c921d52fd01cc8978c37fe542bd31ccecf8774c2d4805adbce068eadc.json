@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at, r.fpga_lb_id,\n                   lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,\n                   lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,\n                   lb.created_at lb_created_at\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
+  "query": "\n            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at, r.fpga_lb_id,\n                   lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,\n                   lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,\n                   lb.created_at lb_created_at, r.current_epoch\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -67,6 +67,11 @@
         "name": "lb_created_at",
         "ordinal": 12,
         "type_info": "Integer"
+      },
+      {
+        "name": "current_epoch",
+        "ordinal": 13,
+        "type_info": "Integer"
       }
     ],
     "parameters": {
@@ -85,8 +90,9 @@
       false,
       false,
       false,
+      false,
       false
     ]
   },
-  "hash": "4e3078ac50663593b585ac9c072c09e2796f45b1764ff181e045c3f47ea7b7e7"
+  "hash": "e8df486c921d52fd01cc8978c37fe542bd31ccecf8774c2d4805adbce068eadc"
 }
