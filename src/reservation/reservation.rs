@@ -220,7 +220,11 @@ impl ReservationManager {
                     continue;
                 }
 
-                let epoch = match db.advance_epoch(reservation.reservation_id, offset).await {
+                let boundary_event = reservation.predict_epoch_boundary_from_sync(offset);
+                let epoch = match db
+                    .advance_epoch(reservation.reservation_id, offset, boundary_event)
+                    .await
+                {
                     Ok(epoch) => epoch,
                     Err(e) => {
                         error!(
@@ -399,7 +403,9 @@ impl ReservationManager {
         // Start the event sync server.
         let mut sync_addr = self.sync_address;
         sync_addr.set_port(sync_address_port);
-        reservation.start_event_sync(self.db.clone(), sync_addr);
+        reservation
+            .start_event_sync(self.db.clone(), sync_addr)
+            .await;
 
         // Do not apply reservation rules directly – let update_rules handle it.
         reservations.insert(reservation_id, reservation);

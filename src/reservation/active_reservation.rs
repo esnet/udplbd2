@@ -22,6 +22,7 @@ pub struct ActiveReservation {
     current_rules: Vec<TableRule>,
     event_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<broadcast::Sender<()>>,
+    pub event_server: Option<Arc<EventIdSyncServer>>,
 }
 
 impl ActiveReservation {
@@ -32,16 +33,27 @@ impl ActiveReservation {
             current_rules: Vec::new(),
             event_task: None,
             shutdown_tx: None,
+            event_server: None,
         }
     }
 
-    pub fn start_event_sync(&mut self, db: Arc<LoadBalancerDB>, address: SocketAddr) {
-        let event_server = EventIdSyncServer::new(db, self.reservation_id, address);
+    pub async fn start_event_sync(&mut self, db: Arc<LoadBalancerDB>, address: SocketAddr) {
+        let event_server = Arc::new(
+            super::event_id_sync::EventIdSyncServer::new(db, self.reservation_id, address).await,
+        );
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
-        let event_task = tokio::spawn(event_server.run(shutdown_rx));
+        let event_task = tokio::spawn(event_server.clone().run(shutdown_rx));
 
         self.event_task = Some(event_task);
         self.shutdown_tx = Some(shutdown_tx);
+        self.event_server = Some(event_server);
+    }
+
+    /// Returns the current predicted epoch boundary using the in-memory sync server
+    pub fn predict_epoch_boundary_from_sync(&self, offset: chrono::Duration) -> Option<i64> {
+        self.event_server
+            .as_ref()
+            .map(|srv| srv.predict_epoch_boundary(offset))
     }
 
     pub async fn stop_event_sync(&mut self) {

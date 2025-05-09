@@ -89,10 +89,12 @@ impl LoadBalancerDB {
         .fetch_one(&mut *tx)
         .await?;
 
-        // Update session.latest_session_state_id
+        // Update session.latest_session_state_id and is_ready in one query
         sqlx::query!(
-            "UPDATE session SET latest_session_state_id = ?1 WHERE id = ?2",
+            "UPDATE session SET latest_session_state_id = ?1, is_ready = ?2, control_signal = ?3 WHERE id = ?4",
             state_record.id,
+            is_ready,
+            control_signal,
             session_id
         )
         .execute(&mut *tx)

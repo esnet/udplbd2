@@ -1,8 +1,10 @@
+use crate::db::epoch::{predict_epoch_boundary_from_samples, EventSample};
 use crate::db::LoadBalancerDB;
 use byteorder::{BigEndian, ByteOrder};
 use chrono::{DateTime, Utc};
+use std::collections::VecDeque;
 use std::net::SocketAddr;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use tokio::sync::broadcast;
 use tracing::{debug, error, info, warn};
 
@@ -25,23 +27,55 @@ pub struct EventIdSyncServer {
     db: Arc<LoadBalancerDB>,
     reservation_id: i64,
     address: SocketAddr,
+    samples: Arc<Mutex<VecDeque<EventSample>>>, // in-memory buffer of recent samples
 }
 
 impl EventIdSyncServer {
     /// Creates a new event ID synchronization server.
     /// The server will persist event numbers to the database
     /// for the specified reservation.
-    pub fn new(db: Arc<LoadBalancerDB>, reservation_id: i64, address: SocketAddr) -> Self {
+    pub async fn new(db: Arc<LoadBalancerDB>, reservation_id: i64, address: SocketAddr) -> Self {
+        // Load recent samples from DB for recovery
+        let samples_db = sqlx::query!(
+            r#"
+            SELECT
+                event_number,
+                avg_event_rate_hz,
+                local_timestamp,
+                remote_timestamp
+            FROM event_number
+            WHERE reservation_id = ?1
+            AND created_at >= (unixepoch('subsec') * 1000 - 60000)
+            ORDER BY created_at DESC
+            LIMIT 10
+            "#,
+            reservation_id
+        )
+        .fetch_all(&db.read_pool)
+        .await
+        .unwrap_or_default();
+
+        let mut samples = VecDeque::new();
+        for s in samples_db {
+            samples.push_back(EventSample {
+                event_number: s.event_number,
+                avg_event_rate_hz: s.avg_event_rate_hz as i32,
+                local_timestamp: s.local_timestamp,
+                remote_timestamp: s.remote_timestamp,
+            });
+        }
+
         Self {
             db,
             reservation_id,
             address,
+            samples: Arc::new(Mutex::new(samples)),
         }
     }
 
     /// Runs the event id sync server until a shutdown signal is received.
     /// Validates and processes incoming event ID packets.
-    pub async fn run(self, mut shutdown_rx: broadcast::Receiver<()>) {
+    pub async fn run(self: Arc<Self>, mut shutdown_rx: broadcast::Receiver<()>) {
         let socket = match UdpSocket::bind(self.address).await {
             Ok(s) => s,
             Err(e) => {
@@ -126,6 +160,25 @@ impl EventIdSyncServer {
             )
             .await?;
 
+        // Update in-memory buffer
+        let mut samples = self.samples.lock().unwrap();
+        samples.push_front(EventSample {
+            event_number: event_number as i64,
+            avg_event_rate_hz: event_rate as i32,
+            local_timestamp: Utc::now().timestamp_millis(),
+            remote_timestamp: remote_ts.timestamp_millis(),
+        });
+        while samples.len() > 10 {
+            samples.pop_back();
+        }
+
         Ok(())
+    }
+
+    /// Returns the current predicted epoch boundary using in-memory samples
+    pub fn predict_epoch_boundary(&self, offset: chrono::Duration) -> i64 {
+        let samples = self.samples.lock().unwrap();
+        let samples_vec: Vec<_> = samples.iter().cloned().collect();
+        predict_epoch_boundary_from_samples(&samples_vec, offset)
     }
 }

@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO epoch (\n                reservation_id,\n                boundary_event,\n                predicted_at,\n                slots,\n                epoch_count\n            )\n            VALUES (?1, ?2, ?3, ?4, ?5)\n            RETURNING id, reservation_id, boundary_event, predicted_at, created_at, deleted_at, slots, epoch_count\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "boundary_event",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "predicted_at",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "slots",
+        "ordinal": 6,
+        "type_info": "Blob"
+      },
+      {
+        "name": "epoch_count",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "d9f38b520bd5bc21340a01cd3ad87c1f7aae833c7d9828b218f2d648f76af2aa"
+}

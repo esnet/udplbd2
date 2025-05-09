@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE session SET latest_session_state_id = ?1, is_ready = ?2, control_signal = ?3 WHERE id = ?4",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "0db72a8c1bc985f262fd569984603c6daef202527e35bcb07c46e38aa17edfff"
+}

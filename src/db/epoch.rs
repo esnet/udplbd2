@@ -12,6 +12,100 @@ use super::SessionState;
 
 pub const NUM_SLOTS: usize = 512;
 
+#[derive(Clone)]
+pub struct EventSample {
+    pub event_number: i64,
+    pub avg_event_rate_hz: i32,
+    pub local_timestamp: i64,
+    pub remote_timestamp: i64,
+}
+
+pub fn predict_epoch_boundary_from_samples(
+    samples: &[EventSample],
+    offset: chrono::Duration,
+) -> i64 {
+    use chrono::Utc;
+
+    if samples.is_empty() {
+        return i64::MAX;
+    }
+
+    let latest_sample = &samples[0];
+
+    // If we have a rate, use rate-based prediction
+    if latest_sample.avg_event_rate_hz > 0 {
+        let rate = latest_sample.avg_event_rate_hz as f64;
+        let last_event = latest_sample.event_number;
+        let last_timestamp = latest_sample.local_timestamp;
+
+        let prediction_time = Utc::now() + offset;
+        let time_diff = (prediction_time.timestamp_millis() - last_timestamp) as f64 / 1000.0;
+        let additional_events = rate * time_diff;
+
+        if additional_events > (i64::MAX - last_event) as f64 {
+            return i64::MAX;
+        }
+
+        last_event + additional_events.round() as i64
+    } else {
+        // Use regression-based prediction
+        let min_timestamp = samples
+            .iter()
+            .map(|s| s.local_timestamp.min(s.remote_timestamp))
+            .min()
+            .unwrap();
+
+        let smallest_event = samples
+            .iter()
+            .filter(|s| s.event_number > 0)
+            .map(|s| s.event_number)
+            .min()
+            .unwrap_or(0);
+
+        let mut sum_x = 0.0;
+        let mut sum_y = 0.0;
+        let mut sum_xx = 0.0;
+        let mut sum_xy = 0.0;
+        let mut count = 0;
+
+        for sample in samples {
+            if sample.event_number > 0 {
+                let x = (sample.local_timestamp - min_timestamp) as f64;
+                let y = (sample.event_number - smallest_event) as f64;
+                sum_x += x;
+                sum_y += y;
+                sum_xx += x * x;
+                sum_xy += x * y;
+                count += 1;
+            }
+        }
+
+        if count == 0 {
+            return i64::MAX;
+        }
+
+        let n = count as f64;
+        let denominator = n * sum_xx - sum_x * sum_x;
+        if denominator == 0.0 {
+            return i64::MAX;
+        }
+
+        let slope = (n * sum_xy - sum_x * sum_y) / denominator;
+        let intercept = (sum_y - slope * sum_x) / n;
+
+        let current_time = Utc::now() + offset;
+        let x = (current_time.timestamp_millis() - min_timestamp) as f64;
+        let predicted_y = slope * x + intercept;
+        let predicted_event = smallest_event + predicted_y.round() as i64;
+
+        if predicted_event < smallest_event {
+            return i64::MAX;
+        }
+
+        predicted_event
+    }
+}
+
 impl LoadBalancerDB {
     /// Predicts the next epoch boundary based on event number history,
     /// with an optional time offset adjustment to the prediction moment.
@@ -43,88 +137,19 @@ impl LoadBalancerDB {
             return Err(Error::NotInitialized("event data needed".into()));
         }
 
-        let latest_sample = &samples[0];
+        let event_samples: Vec<EventSample> = samples
+            .into_iter()
+            .map(|s| EventSample {
+                event_number: s.event_number,
+                avg_event_rate_hz: s.avg_event_rate_hz as i32,
+                local_timestamp: s.local_timestamp,
+                remote_timestamp: s.remote_timestamp,
+            })
+            .collect();
 
-        // If we have a rate, use rate-based prediction
-        if latest_sample.avg_event_rate_hz > 0 {
-            let rate = latest_sample.avg_event_rate_hz as f64;
-            let last_event = latest_sample.event_number;
-            let last_timestamp =
-                DateTime::<Utc>::from_timestamp_millis(latest_sample.local_timestamp)
-                    .ok_or(Error::Parse("timestamp out of range".to_string()))?;
+        let prediction = predict_epoch_boundary_from_samples(&event_samples, offset);
 
-            let prediction_time = Utc::now() + offset;
-            let time_diff = (prediction_time - last_timestamp).num_milliseconds() as f64 / 1000.0;
-            let additional_events = rate * time_diff;
-
-            if additional_events > (i64::MAX - last_event) as f64 {
-                return Ok(i64::MAX);
-            }
-
-            trace!(
-                "predict_epoch_boundary: using rate-based, last timestamp: {last_timestamp}, rate: {rate}, addl events: {additional_events}"
-            );
-
-            Ok(last_event + additional_events.round() as i64)
-        } else {
-            // Use regression-based prediction
-            let min_timestamp = samples
-                .iter()
-                .map(|s| s.local_timestamp.min(s.remote_timestamp))
-                .min()
-                .unwrap();
-
-            let smallest_event = samples
-                .iter()
-                .filter(|s| s.event_number > 0)
-                .map(|s| s.event_number)
-                .min()
-                .unwrap_or(0);
-
-            let mut sum_x = 0.0;
-            let mut sum_y = 0.0;
-            let mut sum_xx = 0.0;
-            let mut sum_xy = 0.0;
-            let mut count = 0;
-
-            for sample in &samples {
-                if sample.event_number > 0 {
-                    let x = (sample.local_timestamp - min_timestamp) as f64;
-                    let y = (sample.event_number - smallest_event) as f64;
-                    sum_x += x;
-                    sum_y += y;
-                    sum_xx += x * x;
-                    sum_xy += x * y;
-                    count += 1;
-                }
-            }
-
-            if count == 0 {
-                return Ok(i64::MAX);
-            }
-
-            let n = count as f64;
-            let denominator = n * sum_xx - sum_x * sum_x;
-            if denominator == 0.0 {
-                return Ok(i64::MAX);
-            }
-
-            let slope = (n * sum_xy - sum_x * sum_y) / denominator;
-            let intercept = (sum_y - slope * sum_x) / n;
-
-            let current_time = Utc::now() + offset;
-            let x = (current_time.timestamp_millis() - min_timestamp) as f64;
-            let predicted_y = slope * x + intercept;
-            let predicted_event = smallest_event + predicted_y.round() as i64;
-
-            trace!("predict_epoch_boundary: using regression, {predicted_y} = {slope} * {x} + {intercept}");
-
-            if predicted_event < smallest_event {
-                return Ok(i64::MAX);
-            }
-
-            Ok(predicted_event)
-        }
+        Ok(prediction)
     }
 
     /// Generates slot assignments based on current session states
@@ -137,9 +162,8 @@ impl LoadBalancerDB {
                 s.weight as relative_priority,
                 s.min_factor,
                 s.max_factor,
-                ss.is_ready
+                s.is_ready
             FROM session s
-            LEFT JOIN session_state ss ON s.latest_session_state_id = ss.id
             WHERE s.reservation_id = $1
             AND s.deleted_at IS NULL
             "#,
@@ -348,21 +372,20 @@ impl LoadBalancerDB {
         })
     }
 
-    /// Advances to the next epoch by predicting boundary and generating assignments
+    /// Advances to the next epoch by using a provided boundary event (if any), or predicting from the DB if None.
     pub async fn advance_epoch(
         &self,
         reservation_id: i64,
         offset: chrono::Duration,
+        boundary_event: Option<i64>,
     ) -> Result<Epoch> {
         let mut tx = self.write_pool.begin().await?;
 
         // Accumulate latest control signals into session weights
         let sessions = sqlx::query!(
             r#"
-            SELECT s.id, s.weight, ss.control_signal
+            SELECT s.id, s.weight, s.control_signal
             FROM session s
-            LEFT JOIN session_state ss
-                ON s.latest_session_state_id = ss.id
             WHERE s.reservation_id = ?1 AND s.deleted_at IS NULL
             "#,
             reservation_id
@@ -403,11 +426,14 @@ impl LoadBalancerDB {
 
         tx.commit().await?;
 
-        // Predict boundary and generate assignments (read-only, can use self)
-        let boundary_event = match self.predict_epoch_boundary(reservation_id, offset).await {
-            Ok(boundary) => boundary,
-            Err(Error::NotInitialized(_)) => 0,
-            Err(other_err) => return Err(other_err),
+        // Use provided boundary_event if Some, otherwise predict from DB
+        let boundary_event = match boundary_event {
+            Some(boundary) => boundary,
+            None => match self.predict_epoch_boundary(reservation_id, offset).await {
+                Ok(boundary) => boundary,
+                Err(Error::NotInitialized(_)) => 0,
+                Err(other_err) => return Err(other_err),
+            },
         };
         let slot_assignments = self.generate_epoch_assignments(reservation_id).await?;
         if boundary_event > 0 {

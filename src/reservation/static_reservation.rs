@@ -185,7 +185,7 @@ impl StaticReservation {
         if let Some(slots) = &self.slots {
             db.create_epoch(reservation.id, 0, slots).await?;
         } else {
-            db.advance_epoch(reservation.id, chrono::Duration::milliseconds(0))
+            db.advance_epoch(reservation.id, chrono::Duration::milliseconds(0), None)
                 .await?;
         }
 

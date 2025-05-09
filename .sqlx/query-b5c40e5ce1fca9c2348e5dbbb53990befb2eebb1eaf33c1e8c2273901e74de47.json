@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE reservation SET current_epoch = ?1 WHERE id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "b5c40e5ce1fca9c2348e5dbbb53990befb2eebb1eaf33c1e8c2273901e74de47"
+}

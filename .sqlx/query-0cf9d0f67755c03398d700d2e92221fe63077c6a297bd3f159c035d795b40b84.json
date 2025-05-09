@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT s.id, s.weight, ss.control_signal\n            FROM session s\n            LEFT JOIN session_state ss\n                ON s.latest_session_state_id = ss.id\n            WHERE s.reservation_id = ?1 AND s.deleted_at IS NULL\n            ",
+  "query": "\n            SELECT s.id, s.weight, s.control_signal\n            FROM session s\n            WHERE s.reservation_id = ?1 AND s.deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -28,5 +28,5 @@
       false
     ]
   },
-  "hash": "efb6da6c78ee5e5b113a95de357815b37944180dc93566f3d18e967c327f63e6"
+  "hash": "0cf9d0f67755c03398d700d2e92221fe63077c6a297bd3f159c035d795b40b84"
 }

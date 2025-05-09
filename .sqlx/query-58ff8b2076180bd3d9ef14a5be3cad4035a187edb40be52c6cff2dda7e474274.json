@@ -1,0 +1,104 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,\n                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE id = ?1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "name",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "initial_weight_factor",
+        "ordinal": 3,
+        "type_info": "Float"
+      },
+      {
+        "name": "weight",
+        "ordinal": 4,
+        "type_info": "Float"
+      },
+      {
+        "name": "latest_session_state_id",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "ip_address",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "udp_port",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "port_range",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "min_factor",
+        "ordinal": 9,
+        "type_info": "Float"
+      },
+      {
+        "name": "max_factor",
+        "ordinal": 10,
+        "type_info": "Float"
+      },
+      {
+        "name": "mac_address",
+        "ordinal": 11,
+        "type_info": "Text"
+      },
+      {
+        "name": "keep_lb_header",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 14,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "58ff8b2076180bd3d9ef14a5be3cad4035a187edb40be52c6cff2dda7e474274"
+}

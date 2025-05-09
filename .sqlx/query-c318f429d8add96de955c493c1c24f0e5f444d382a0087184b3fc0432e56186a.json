@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT current_epoch FROM reservation WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "current_epoch",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "c318f429d8add96de955c493c1c24f0e5f444d382a0087184b3fc0432e56186a"
+}
