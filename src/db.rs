@@ -74,6 +74,24 @@ impl LoadBalancerDB {
     pub async fn sync_config(&self, config: &Config) -> Result<bool> {
         let mut changes = false;
 
+        // Apply SQLite performance pragmas based on config
+        // Set journal_mode to WAL for better concurrency
+        sqlx::query("PRAGMA journal_mode = WAL")
+            .execute(&self.write_pool)
+            .await
+            .ok();
+
+        // Set synchronous mode based on config
+        let sync_mode_query = if !config.database.fsync {
+            "PRAGMA synchronous = OFF"
+        } else {
+            "PRAGMA synchronous = FULL"
+        };
+        sqlx::query(sync_mode_query)
+            .execute(&self.write_pool)
+            .await
+            .ok();
+
         // Get all existing loadbalancers
         let existing_lbs = self.list_loadbalancers().await?;
         let mut existing_names: HashSet<String> =

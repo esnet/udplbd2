@@ -16,6 +16,7 @@ lb:
   mac_broadcast: "33:33:ff:00:00:16"
 database:
   file: "/tmp/udplbd.db"
+  fsync: false
 event_numbers:
   addresses:
     - "127.0.0.1"
@@ -29,8 +30,8 @@ server:
   auth_token: "udplbd2changeme"
   tls:
     enable: false
-    certFile: "x509/server_cert.pem"
-    keyFile: "x509/server_key.pem"
+    cert_file: "x509/server_cert.pem"
+    key_file: "x509/server_key.pem"
 rest:
   enable: true
 log:

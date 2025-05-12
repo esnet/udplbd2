@@ -440,8 +440,17 @@ impl LoadBalancerDB {
             trace!("next epoch for {reservation_id} will begin at {boundary_event}");
         }
 
-        self.create_epoch(reservation_id, boundary_event, &slot_assignments)
+        let epoch = self
+            .create_epoch(reservation_id, boundary_event, &slot_assignments)
+            .await?;
+
+        // Ensure DB is synced to disk after advancing epoch (WAL checkpoint)
+        sqlx::query("PRAGMA wal_checkpoint(FULL)")
+            .execute(&self.write_pool)
             .await
+            .ok();
+
+        Ok(epoch)
     }
 
     /// Retrieves an epoch by ID.

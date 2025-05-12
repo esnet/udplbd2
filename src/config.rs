@@ -59,6 +59,9 @@ pub struct DatabaseConfig {
 
     #[serde(default = "default_cleanup_age")]
     pub cleanup_age: String,
+
+    #[serde(default)]
+    pub fsync: bool,
 }
 
 fn default_cleanup_interval() -> String {
@@ -164,6 +167,7 @@ impl Config {
                 file: PathBuf::from("/tmp/udplbd-sim.db"),
                 cleanup_interval: "60s".to_string(),
                 cleanup_age: "4h".to_string(),
+                fsync: false,
             },
             controller: ControllerConfig {
                 duration: "1s".to_string(),
