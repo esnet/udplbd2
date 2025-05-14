@@ -2,6 +2,9 @@
 name = "udplbd"
 version = "0.4.0"
 edition = "2021"
+description = "ESnet-JLab FPGA Accelerated Transport (EJFAT) Control Plane"
+authors = ["Derek Howard <dhoward@es.net>"]
+license = "BSD-3-Clause-LBNL"
 
 [[bin]]
 name = "udplbd"

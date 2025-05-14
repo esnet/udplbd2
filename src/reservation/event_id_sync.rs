@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::db::epoch::{predict_epoch_boundary_from_samples, EventSample};
 use crate::db::LoadBalancerDB;
 use byteorder::{BigEndian, ByteOrder};

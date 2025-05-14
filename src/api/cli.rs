@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// CLI subcommands that interact with the gRPC API
 use chrono::{TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};

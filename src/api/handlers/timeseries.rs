@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for timeseries data
 use chrono::{TimeZone, Utc};
 use log::info;

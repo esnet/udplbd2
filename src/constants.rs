@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Common constants used mostly by the `smartnic` and `dataplane` modules
 pub const MAX_LAYER_2_INPUT_PACKET_FILTER_ROW: usize = 64;
 pub const MAX_LAYER_3_INPUT_PACKET_FILTER_ROW: usize = 64;

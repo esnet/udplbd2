@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// Struct that holds the state required to operate the gRPC server (LoadBalancerDB, ReservationManager)
 use std::net::SocketAddr;
 use std::sync::Arc;

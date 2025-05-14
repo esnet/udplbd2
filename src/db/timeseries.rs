@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
 use crate::proto::loadbalancer::v1::{FloatSample, FloatTimeseries, Timeseries};

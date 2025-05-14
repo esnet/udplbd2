@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! gRPC API that provides ReserveLoadBalancer, Register, SendState, etc.
 //! This API is the primary interface to udplbd in typical circumstances.
 pub mod cli;

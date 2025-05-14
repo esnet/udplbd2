@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Types for every rule in udplb that can be coverted To/From the `TableRule` in the smartnic-p4 protobuf API.
 use crate::errors::{Error, Result};
 use crate::proto::smartnic::p4_v2::{

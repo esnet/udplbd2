@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handler tests
 use crate::proto::loadbalancer::v1::{
     CreateTokenRequest, RegisterRequest, ReserveLoadBalancerRequest,

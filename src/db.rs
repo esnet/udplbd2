@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Provides the queries and pools needed to manipulate the state of the control plane and its LBs.
 //! The core functions like epoch prediction and slot assignments are implemented in this module.
 pub mod csv;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/load_balancer.rs
 
 use crate::db::models::LoadBalancer;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 pub mod receiver {
     use turmoil::net::*;
     include!("./receiver.rs");

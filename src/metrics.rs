@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use prometheus::{
     exponential_buckets, register_counter, register_counter_vec, register_gauge_vec,
     register_histogram, Counter, CounterVec, GaugeVec, Histogram, HistogramOpts, Opts,

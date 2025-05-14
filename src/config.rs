@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Structs used to configure `start_server` and the `udplbd` command line application in general.
 //! Clients commands will use this if `EJFAT_URI` is not otherwise provided.
 //!

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// Reassemble EJFAT events
 /// This file is included in both udplbd::dataplane::receiver and udplbd::dataplane::turmoil::receiver
 use crate::dataplane::protocol::EjfatEvent;

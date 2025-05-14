@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::errors::{Error, Result};
 use futures::stream::TryStreamExt;
 use ipnetwork::IpNetwork;

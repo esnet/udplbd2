@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // use crate::db::timeseries::TimeseriesData;
 // use chrono::SecondsFormat;
 

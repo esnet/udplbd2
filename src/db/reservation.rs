@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/reservation.rs
 
 use crate::db::models::Reservation;

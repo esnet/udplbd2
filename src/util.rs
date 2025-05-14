@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Misc. helper functions
 use std::net::Ipv6Addr;
 

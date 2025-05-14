@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/dataplane/cli.rs
 use clap::{Args, Parser, Subcommand};
 use std::io;

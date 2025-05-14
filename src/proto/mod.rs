@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! tonic-generated modules for the gRPC protobuf definitions used
 pub mod smartnic {
     pub mod p4_v2 {

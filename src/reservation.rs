@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Connects the `db` module with the `snp4` module to generate rules according to the database state.
 //! Also contains the event id sync server.
 //!

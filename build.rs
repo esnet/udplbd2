@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use prost_wkt_build::*;
 use std::{env, error::Error, fmt, path::PathBuf, process::Command};
 

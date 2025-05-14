@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Tonic gRPC client for the smartnic-p4 gRPC API
 use crate::{
     proto::smartnic::p4_v2::{batch_response, ErrorCode},

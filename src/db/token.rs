@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/token.rs
 
 use crate::db::models::{Permission, PermissionType, Resource};

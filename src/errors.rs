@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Common `Error` and `Result` types used throughout the library and application. Serves as a reference for all that can go wrong.
 use crate::config::ConfigError;
 use thiserror::Error;

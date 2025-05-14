@@ -1,8 +1,11 @@
+# Load balancer configuration
 lb:
+  # List of load balancer instances. Each instance must specify IPv4, IPv6, and event number port.
+  # These are the addresses you are assigning to the FPGA
   instances:
-    - ipv4: "192.0.2.1"
-      ipv6: "2001:DB8::1"
-      event_number_port: 19531
+    - ipv4: "192.0.2.1" # [IPv4 address] Load balancer instance 1
+      ipv6: "2001:DB8::1" # [IPv6 address] Load balancer instance 1
+      event_number_port: 19531 # [u16] UDP port for event number traffic
     - ipv4: "192.0.2.2"
       ipv6: "2001:DB8::2"
       event_number_port: 19532
@@ -12,28 +15,81 @@ lb:
     - ipv4: "192.0.2.4"
       ipv6: "2001:DB8::4"
       event_number_port: 19534
+
+  # [MAC address, string] Unicast MAC address for L2 rules
   mac_unicast: "AB:CD:DE:F1:23:45"
+  # [MAC address, string] Broadcast MAC address for L2 rules
   mac_broadcast: "33:33:ff:00:00:16"
+
+# Database configuration
 database:
+  # [Path] SQLite database file location
   file: "/tmp/udplbd.db"
+  # [String, duration] How often to clean up old records (default: 60s)
+  cleanup_interval: "60s"
+  # [String, duration] Age threshold for deleting soft-deleted records (default: 4h)
+  cleanup_age: "4h"
+  # [bool] If true, use full fsync for durability (default: false, for performance)
   fsync: false
-event_numbers:
-  addresses:
-    - "127.0.0.1"
-    - "::1"
+
+# Controller timing configuration
 controller:
-  duration: 1s
-  offset: 800ms
+  # [String, duration] Controller tick interval (default: 1s)
+  duration: "1s"
+  # [String, duration] Offset for controller tick (default: 800ms)
+  offset: "800ms"
+
+# Server (gRPC/REST) configuration
 server:
+  # [String] Admin authentication token for API access, CHANGE THIS BEFORE DEPLOYMENT!
+  auth_token: "udplbd2changeme"
+  # [SocketAddr] List of addresses to listen on (host:port)
   listen:
     - "127.0.0.1:18347"
-  auth_token: "udplbd2changeme"
+  # TLS configuration for the gRPC/REST server
   tls:
+    # [bool] Enable TLS for gRPC/REST server (default: false)
+    # This should be enabled in production
     enable: false
+    # [Path, optional] TLS certificate file (required if enable: true)
     cert_file: "x509/server_cert.pem"
+    # [Path, optional] TLS private key file (required if enable: true)
     key_file: "x509/server_key.pem"
+
+# REST API configuration
 rest:
+  # [bool] Enable REST API server (default: true)
   enable: true
+
+# Logging configuration
 log:
+  # [String] Log level (e.g., debug, info, warn, error)
   level: debug
+
+# List of SmartNICs to manage. Each entry configures a SmartNIC gRPC client.
+# Example entry (uncomment and edit as needed):
+# smartnic:
+#   - # [bool] Use mock SmartNIC (for testing)
+#     mock: false
+#     # [String] Hostname or IP of SmartNIC
+#     host: "dataplane"
+#     # [u16] gRPC port of SmartNIC
+#     port: 50051
+#     # [String] Auth token for SmartNIC
+#     auth_token: ""
+#     # TLS client options for SmartNIC
+#     tls:
+#       # [bool] Enable TLS for SmartNIC client
+#       enable: false
+#       # [bool] Verify server certificate
+#       verify: false
+
+# Empty list disables SmartNIC integration
 smartnic: []
+# -----------------------------------------------------------------------------
+# Notes:
+# - All durations are strings with units: e.g., "1s", "800ms", "4h", "1d"
+# - MAC addresses must be valid 6-byte hex strings (e.g., "AB:CD:DE:F1:23:45")
+# - If TLS is enabled for the server, cert_file and key_file must be provided.
+# - The database section controls SQLite performance and cleanup.
+# - The smartnic section can be omitted or left empty for software-only mode.

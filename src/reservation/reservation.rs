@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
 use crate::metrics::LB_IS_ACTIVE;

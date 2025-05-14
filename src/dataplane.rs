@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! EJFAT sender, receiver, and a software implementation for the dataplane. Also includes turmoil implementations
 //! for simulated network testing.
 pub mod cli;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/models.rs
 
 use chrono::{DateTime, Utc};

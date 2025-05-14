@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Determines how to set the MAC address for receivers in the member info table. Finds the correct MAC address
 //! whether its a local address, on the LAN, or on the WAN using netlink on Linux and `ifconfig` on macOS (for debug only).
 #[cfg(target_os = "linux")]

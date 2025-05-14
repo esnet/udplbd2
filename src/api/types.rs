@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// Mapping from protobuf types to internal types
 use crate::db::models::PermissionType;
 use crate::proto::loadbalancer::v1::token_permission::PermissionType as ProtoPermissionType;

@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 #[cfg(test)]
 use crate::db::*;
 use chrono::Duration;

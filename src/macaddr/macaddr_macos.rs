@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::errors::{Error, Result};
 use macaddr::MacAddr6;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};

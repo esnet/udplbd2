@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use serde::ser::SerializeStruct;
 use std::{fmt, mem::size_of, time::SystemTime};
 use zerocopy::{byteorder::*, *};

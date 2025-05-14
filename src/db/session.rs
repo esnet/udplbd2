@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/session.rs
 
 use crate::db::models::{Session, SessionState};

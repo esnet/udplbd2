@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for functions related to registering, deregistering, updating sessions with an LB
 use std::net::IpAddr;
 use std::str::FromStr;

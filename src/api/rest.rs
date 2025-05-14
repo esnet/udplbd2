@@ -1,3 +1,4 @@
+// SPDX-License-Identifier: BSD-3-Clause-LBNL
 use axum::{
     extract::{Path, State},
     http::{header, HeaderMap, StatusCode},
