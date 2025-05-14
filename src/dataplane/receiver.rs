@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
-use tokio::sync::RwLock;
+use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
 use tracing::warn;
 use zerocopy::FromBytes;
@@ -90,6 +90,10 @@ impl ReassemblyBuffer {
         self.received_packets[1..num_packets - 1]
             .iter()
             .any(|&received| !received)
+    }
+
+    pub fn received_packets_count(&self) -> usize {
+        self.recieved_packets_count
     }
 }
 
@@ -256,16 +260,13 @@ impl Reassembler {
 pub async fn listen_and_reassemble_with_offset(
     socket: UdpSocket,
     tx: mpsc::Sender<EjfatEvent>,
-    mtu: usize,
-    max_memory: usize,
     header_offset: usize,
-    meta_event_context: Option<MetaEventContext>,
+    reassembler: Arc<Mutex<Reassembler>>,
     stats: Arc<RwLock<ReassemblyStats>>, // Accept stats as a parameter
 ) {
     let mut buffer = vec![0; 65536];
-    let mut reasm = Reassembler::new(max_memory, mtu, meta_event_context);
     let stats_clone = stats.clone();
-    let mut _drops = 0;
+    let tx_clone = tx.clone();
 
     tokio::spawn(async move {
         loop {
@@ -277,6 +278,7 @@ pub async fn listen_and_reassemble_with_offset(
                 }
             };
 
+            let mut reasm = reassembler.lock().await;
             match reasm
                 .handle_packet(&mut buffer[header_offset..size], &stats_clone)
                 .await
@@ -285,14 +287,13 @@ pub async fn listen_and_reassemble_with_offset(
                     let tick = event.tick;
                     let mut stats = stats_clone.write().await;
                     stats.total_events_recv += 1;
-                    match tx.try_send(event) {
+                    match tx_clone.try_send(event) {
                         Err(TrySendError::Closed(_)) => {
                             panic!(
                                 "ejfat::receiver::listen_and_reassemble_with_offset channel closed"
                             )
                         }
                         Err(TrySendError::Full(_)) => {
-                            _drops += 1;
                             stats.total_event_enqueue_err += 1;
                         }
                         Ok(_) => {
@@ -324,8 +325,13 @@ pub async fn listen_and_reassemble(
     meta_event_context: Option<MetaEventContext>,
     stats: Arc<RwLock<ReassemblyStats>>, // Accept stats as a parameter
 ) {
-    listen_and_reassemble_with_offset(socket, tx, mtu, max_memory, 0, meta_event_context, stats)
-        .await
+    // Create the reassembler and wrap in Arc<Mutex<>>
+    let reassembler = Arc::new(Mutex::new(Reassembler::new(
+        max_memory,
+        mtu,
+        meta_event_context,
+    )));
+    listen_and_reassemble_with_offset(socket, tx, 0, reassembler, stats).await
 }
 
 pub struct PIDController {
@@ -415,6 +421,7 @@ pub struct Receiver {
     creation_time: Instant,
     first_packet_start: Option<Instant>,
     pub rx: mpsc::Receiver<EjfatEvent>,
+    pub reassembler: Arc<Mutex<Reassembler>>,
     listen_task: Option<tokio::task::JoinHandle<()>>,
     pid_task: Option<tokio::task::JoinHandle<()>>,
 }
@@ -457,21 +464,21 @@ impl Receiver {
             .await?
             .into_inner();
 
-        let meta_event_ctx_clone1 = meta_event_context.clone();
+        let _meta_event_ctx_clone1 = meta_event_context.clone();
         let stats = Arc::new(RwLock::new(ReassemblyStats::default()));
         let stats_clone = stats.clone();
 
+        // Create the reassembler and wrap in Arc<Mutex<>>
+        let reassembler = Arc::new(Mutex::new(Reassembler::new(
+            max_buffer_size,
+            mtu,
+            meta_event_context.clone(),
+        )));
+
+        let reassembler_clone = reassembler.clone();
         let listen_task_handle = tokio::spawn(async move {
-            listen_and_reassemble_with_offset(
-                socket,
-                tx,
-                mtu,
-                max_buffer_size,
-                offset,
-                meta_event_ctx_clone1,
-                stats_clone,
-            )
-            .await;
+            listen_and_reassemble_with_offset(socket, tx, offset, reassembler_clone, stats_clone)
+                .await;
         });
 
         let mut receiver = Self {
@@ -479,6 +486,7 @@ impl Receiver {
             creation_time: Instant::now(),
             first_packet_start: None,
             rx,
+            reassembler,
             listen_task: Some(listen_task_handle),
             pid_task: None,
         };

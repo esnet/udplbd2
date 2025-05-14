@@ -226,19 +226,24 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to get senders: {e}")))?;
 
-        let latest_epoch = self
-            .db
-            .get_latest_epoch(reservation_id)
-            .await
-            .map_err(|e| Status::internal(format!("Failed to get latest epoch: {e}")))?;
+        // Try to get the latest epoch; if it fails, use 0/defaults
+        let (current_epoch, current_predicted_event_number, slot_counts) =
+            match self.db.get_latest_epoch(reservation_id).await {
+                Ok(latest_epoch) => {
+                    let mut slot_counts = HashMap::new();
+                    for &slot in &latest_epoch.slots {
+                        *slot_counts.entry(slot).or_insert(0) += 1;
+                    }
+                    (
+                        latest_epoch.id as u64,
+                        latest_epoch.boundary_event,
+                        slot_counts,
+                    )
+                }
+                Err(_) => (0, 0, HashMap::new()),
+            };
 
         let mut workers = Vec::new();
-        let mut slot_counts = HashMap::new();
-
-        // Count slots assigned to each worker
-        for &slot in &latest_epoch.slots {
-            *slot_counts.entry(slot).or_insert(0) += 1;
-        }
 
         for session in sessions {
             let state = self
@@ -280,8 +285,8 @@ impl LoadBalancerService {
 
         Ok(Response::new(LoadBalancerStatusReply {
             timestamp: Some(prost_wkt_types::Timestamp::from(SystemTime::now())),
-            current_epoch: latest_epoch.id as u64,
-            current_predicted_event_number: latest_epoch.boundary_event,
+            current_epoch,
+            current_predicted_event_number,
             workers,
             sender_addresses: senders.into_iter().map(|addr| addr.to_string()).collect(),
             expires_at: Some(prost_wkt_types::Timestamp::from(SystemTime::from(

@@ -2,7 +2,6 @@
 use tonic::{Request, Response, Status};
 
 use super::super::service::LoadBalancerService;
-use crate::db::models::{PermissionType, Resource};
 use crate::proto::loadbalancer::v1::{
     GetLoadBalancerRequest, LoadBalancerStatusRequest, Overview, OverviewReply, OverviewRequest,
     VersionReply, VersionRequest,
@@ -15,8 +14,10 @@ impl LoadBalancerService {
     ) -> Result<Response<OverviewReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         if !self
-            .validate_token(&token, Resource::All, PermissionType::ReadOnly)
-            .await?
+            .db
+            .token_exists(&token)
+            .await
+            .map_err(|e| Status::internal(format!("Token validation failed: {e}")))?
         {
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -55,7 +56,12 @@ impl LoadBalancerService {
                 request
                     .metadata_mut()
                     .insert("authorization", token_str.parse().unwrap());
-                let reservation_reply = self.handle_get_load_balancer(request).await?.into_inner();
+                let reservation_reply_res = self.handle_get_load_balancer(request).await;
+                if reservation_reply_res.is_err() {
+                    // skip the reservations the token can't access
+                    continue;
+                }
+                let reservation_reply = reservation_reply_res?.into_inner();
 
                 // Get status
                 let mut status_request = Request::new(LoadBalancerStatusRequest {

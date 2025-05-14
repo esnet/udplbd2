@@ -40,18 +40,23 @@ pub mod receiver {
                 .await?
                 .into_inner();
 
-            let meta_event_ctx_clone1 = meta_event_context.clone();
             let stats = Arc::new(RwLock::new(ReassemblyStats::default()));
             let stats_clone = stats.clone();
+
+            // Create the reassembler and wrap in Arc<Mutex<>>
+            let reassembler = Arc::new(Mutex::new(Reassembler::new(
+                max_buffer_size,
+                mtu,
+                meta_event_context.clone(),
+            )));
+            let reassembler_clone = reassembler.clone();
 
             let listen_task_handle = tokio::spawn(async move {
                 listen_and_reassemble_with_offset(
                     socket,
                     tx,
-                    mtu,
-                    max_buffer_size,
                     offset,
-                    meta_event_ctx_clone1,
+                    reassembler_clone,
                     stats_clone,
                 )
                 .await;
@@ -62,6 +67,7 @@ pub mod receiver {
                 creation_time: Instant::now(),
                 first_packet_start: None,
                 rx,
+                reassembler,
                 listen_task: Some(listen_task_handle),
                 pid_task: None,
             };

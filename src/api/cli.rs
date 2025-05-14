@@ -401,32 +401,66 @@ async fn overview_to_string(url: String) -> Result<String> {
         return Ok("No load balancers currently active".to_string());
     }
     for lb in reply.load_balancers {
-        if let Some(reservation) = lb.reservation {
-            output.push_str(&format!("LB {} - {}\n", reservation.lb_id, lb.name));
-            output.push_str(&format!(
-                "  sync: {}:{}\n",
-                reservation.sync_ip_address, reservation.sync_udp_port
-            ));
-            output.push_str(&format!(
-                "  data: {}:19522\n",
-                reservation.data_ipv4_address
-            ));
-        }
+        let (lb_id, name, sync_ip, sync_port, data_ipv4, data_ipv6, fpga_lb_id) =
+            if let Some(res) = &lb.reservation {
+                (
+                    res.lb_id.clone(),
+                    lb.name.clone(),
+                    res.sync_ip_address.clone(),
+                    res.sync_udp_port,
+                    res.data_ipv4_address.clone(),
+                    res.data_ipv6_address.clone(),
+                    res.fpga_lb_id,
+                )
+            } else {
+                (
+                    "".to_string(),
+                    lb.name.clone(),
+                    "".to_string(),
+                    0,
+                    "".to_string(),
+                    "".to_string(),
+                    0,
+                )
+            };
 
-        if let Some(status) = lb.status {
-            output.push_str(&format!(
-                "  expires: {}\n",
-                status
-                    .expires_at
-                    .map(|t| Utc
-                        .timestamp_opt(t.seconds, t.nanos as u32)
+        output.push_str(&format!("LB {lb_id} - \"{name}\"\n"));
+        output.push_str(&format!("  sync: {}:{}\n", sync_ip, sync_port));
+        output.push_str(&format!("  ipv4: {}\n", data_ipv4));
+        output.push_str(&format!("  ipv6: {}\n", data_ipv6));
+        output.push_str(&format!("  fpga_lb_id: {}\n", fpga_lb_id));
+
+        if let Some(status) = &lb.status {
+            let expires = status
+                .expires_at
+                .map(|t| {
+                    Utc.timestamp_opt(t.seconds, t.nanos as u32)
                         .unwrap()
-                        .to_rfc3339())
-                    .unwrap_or_else(|| "Never".to_string())
+                        .to_rfc3339()
+                })
+                .unwrap_or_else(|| "never".to_string());
+            let timestamp = status
+                .timestamp
+                .map(|t| {
+                    Utc.timestamp_opt(t.seconds, t.nanos as u32)
+                        .unwrap()
+                        .to_rfc3339()
+                })
+                .unwrap_or_else(|| "never".to_string());
+            output.push_str(&format!("  expires_at: {}\n", expires));
+            output.push_str(&format!("  status_time: {}\n", timestamp));
+            output.push_str(&format!("  current_epoch: {}\n", status.current_epoch));
+            output.push_str(&format!(
+                "  predicted_event: {}\n",
+                status.current_predicted_event_number
             ));
-
-            output.push_str("  workers:\n");
-            for worker in status.workers {
+            if !status.sender_addresses.is_empty() {
+                output.push_str(&format!(
+                    "  senders: {}\n",
+                    status.sender_addresses.join(", ")
+                ));
+            }
+            for worker in &status.workers {
                 let last_updated = worker
                     .last_updated
                     .map(|t| {
@@ -434,20 +468,37 @@ async fn overview_to_string(url: String) -> Result<String> {
                             .unwrap()
                             .to_rfc3339()
                     })
-                    .unwrap_or_else(|| "Never".to_string());
+                    .unwrap_or_else(|| "never".to_string());
+                output.push_str(&format!("  worker: {}\n", worker.name));
                 output.push_str(&format!(
-                    "    - {} (slots: {}/512, queue: {:.2}%, control: {}, updated: {})\n",
-                    worker.name,
-                    worker.slots_assigned,
-                    worker.fill_percent * 100.0,
-                    worker.control_signal,
-                    last_updated
+                    "    ip: {}  port: {}\n",
+                    worker.ip_address, worker.udp_port
                 ));
-            }
-
-            output.push_str("  senders:\n");
-            for sender in status.sender_addresses {
-                output.push_str(&format!("    - {sender}\n"));
+                output.push_str(&format!("  slots_assigned: {}\n", worker.slots_assigned));
+                output.push_str(&format!(
+                    "    fill_percent: {:.2}  control_signal: {:.2}\n",
+                    worker.fill_percent, worker.control_signal
+                ));
+                output.push_str(&format!("  last_updated: {}\n", last_updated));
+                output.push_str(&format!("  port_range: {:?}\n", worker.port_range));
+                output.push_str(&format!(
+                    "    min_factor: {:.2}  max_factor: {:.2}\n",
+                    worker.min_factor, worker.max_factor
+                ));
+                output.push_str(&format!("  keep_lb_header: {}\n", worker.keep_lb_header));
+                output.push_str(&format!(
+                    "   events_recv: {}  reassembled: {}  reassembly_err: {}  dequeued: {}\n",
+                    worker.total_events_recv,
+                    worker.total_events_reassembled,
+                    worker.total_events_reassembly_err,
+                    worker.total_events_dequeued
+                ));
+                output.push_str(&format!(
+                    "    enqueue_err: {}  bytes_recv: {}  packets_recv: {}\n",
+                    worker.total_event_enqueue_err,
+                    worker.total_bytes_recv,
+                    worker.total_packets_recv
+                ));
             }
         }
         output.push('\n');

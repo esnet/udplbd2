@@ -70,8 +70,8 @@ pub async fn doctor(
         client = Some(ControlPlaneClient::from_url(&url).await?);
         let client_ref = client.as_mut().unwrap();
 
-        // Set expiration time to 1 hour from now
-        let expiration = SystemTime::now() + Duration::from_secs(3600);
+        // Set expiration time to three minutes from now
+        let expiration = SystemTime::now() + Duration::from_secs(180);
         let expiration_timestamp = Timestamp::from(expiration);
 
         let reply = client_ref
@@ -92,9 +92,6 @@ pub async fn doctor(
         } else {
             0
         };
-
-        eprint!("done. \nwaiting for next tick...");
-        tokio::time::sleep(Duration::from_millis(1000)).await;
 
         eprint!("done.\ntesting receiver register/sendstate and time to first packet...");
         receiver = Some(
@@ -221,36 +218,75 @@ pub async fn doctor(
             responsivity_duration_receiver2
         );
 
-        // Packet Distribution Test: Send 1000 events over 3 seconds and measure how many each receiver gets
-        eprint!("testing packet distribution...");
+        // Packet Distribution Test: Send 5000 events over 3 seconds and measure how many each receiver gets
+        eprint!("testing event distribution...");
         let mut sender4 = Sender::from_url(&parsed_url, None).await?;
-        let num_packets_dist = 1000;
+        let num_packets_dist = 5000;
         let cancel4 = CancellationToken::new();
         let cancel4_cloned = cancel4.clone();
         jh = tokio::spawn(async move {
             sender4
                 .generate_test_stream(
                     num_packets_dist,
-                    10000,
-                    Duration::from_millis(3),
+                    20000,
+                    Duration::from_millis(5),
                     cancel4_cloned,
                 )
                 .await
         });
+
+        // Count packets as before
         let (received_packets_dist_1, received_packets_dist_2): (usize, usize) = tokio::join!(
             receiver
                 .as_mut()
                 .unwrap()
-                .count_packets(num_packets_dist, Duration::from_millis(100)),
+                .count_packets(num_packets_dist, Duration::from_millis(2000)),
             receiver2
                 .as_mut()
                 .unwrap()
-                .count_packets(num_packets_dist, Duration::from_millis(100))
+                .count_packets(num_packets_dist, Duration::from_millis(2000))
         );
         eprintln!(
             "done.\n    sent: {}\n    receiver1: {}\n    receiver2: {}",
             num_packets_dist, received_packets_dist_1, received_packets_dist_2
         );
+
+        // --- Split event detection ---
+        // This assumes you can access the reassembler and its buffers from the receiver.
+        // If not, you may need to make the field pub or use a test-only accessor.
+        use std::collections::HashSet;
+
+        // Helper to extract incomplete buffer keys from a receiver's reassembler (async)
+        async fn incomplete_event_keys(receiver: &Receiver) -> HashSet<(u64, u16)> {
+            let reassembler = receiver.reassembler.lock().await;
+            reassembler
+                .buffers
+                .iter()
+                .filter_map(|(key, buffer)| {
+                    if !buffer.is_complete() && buffer.received_packets_count() > 0 {
+                        Some(*key)
+                    } else {
+                        None
+                    }
+                })
+                .collect()
+        }
+
+        let split_candidates_1 = incomplete_event_keys(receiver.as_ref().unwrap()).await;
+        let split_candidates_2 = incomplete_event_keys(receiver2.as_ref().unwrap()).await;
+        let split_events: HashSet<_> = split_candidates_1
+            .intersection(&split_candidates_2)
+            .collect();
+
+        eprintln!(
+            "split event detection: receiver1 incomplete: {}, receiver2 incomplete: {}, split events: {}",
+            split_candidates_1.len(),
+            split_candidates_2.len(),
+            split_events.len()
+        );
+        if !split_events.is_empty() {
+            eprintln!("Split events detected: {:?}", split_events);
+        }
 
         // Test overview
         eprint!("testing overview...");
