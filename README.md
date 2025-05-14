@@ -2,7 +2,17 @@
 
 ## Overview
 
-`udplbd` is the control plane for the EJFAT (ESnet-Jefferson Lab FPGA-Accelerated Transport) project. It provides a command-line interface for managing the EJFAT load balancers, handling configuration loading, and initializing the logging subsystem. The daemon supports configuration via both file and environment variables, with environment variables taking precedence over file configuration.
+`udplbd` is the control plane for the EJFAT (ESnet-Jefferson Lab FPGA-Accelerated Transport) project. It provides
+a gRPC API that EJFAT workflows use to coordinate changes to EJFAT load balancers. It also provides administration, testing, and debugging tools for EJFAT workflows.
+
+`udplbd` works by updating the P4 tables of the udplb dataplane which is developed via the [ESnet
+SmartNIC](https://github.com/esnet/esnet-smartnic-fw) project. Tables are updated via the sn-p4 API.
+Setting up the data plane is a requirement before running `udplbd start`, as you need an FPGA to control
+for `udplbd start` to do anything meaningful.
+
+It is written in Rust for memory safety and to minimize the possibility of data races. It uses SQLite with
+an append-only schema design (configurable retention) to enable seamless recovery and the ability to inspect
+this historical state of the control plane. udplbd also integrates `turmoil` for testing in simulation.
 
 ## Features
 
@@ -40,13 +50,16 @@
 2. **Build the Project**
 
    ```bash
-   cargo build --release
+   cargo install --path .
    ```
 
 3. **Run the Application**
 
+  Ensure that the ESnet SmartNIC applications are running, and that the udplb bitfile was flashed to an FPGA.
+  Configure the `/etc/udplbd/config.yml` appropiately then
+
    ```bash
-   ./target/release/udplbd start --config /path/to/config.yml
+   udplbd start
    ```
 
 ## Configuration
@@ -68,6 +81,7 @@ The `udplbd` command-line interface provides several subcommands for different o
 #### Start the gRPC Server
 
 ```bash
+udplbd start  # uses /etc/udplbd/config.yml
 udplbd start --config /path/to/config.yml
 ```
 
@@ -80,13 +94,13 @@ udplbd static --reservation-file /path/to/reservation.yml --apply
 #### Start the Mock Server
 
 ```bash
-udplbd mock
+udplbd mock # uses built-in testing config, only works on localhost
 ```
 
 #### gRPC API Commands
 
 ```bash
-udplbd client --url "ejfats://your_auth_token@0.0.0.0:50051" reserve --name "my_lb" --sender "192.168.1.123" --after "1hour"
+udplbd client reserve --name "my_lb" --sender "192.168.1.123" --after "1hour"
 ```
 
 #### Dataplane Testing Commands
