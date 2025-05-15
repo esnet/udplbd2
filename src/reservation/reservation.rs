@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-use crate::db::{LoadBalancerDB, Result};
+use crate::db::{Epoch, LoadBalancerDB, Result};
 use crate::errors::Error;
 use crate::metrics::LB_IS_ACTIVE;
 use crate::proto::smartnic::p4_v2::TableRule;
@@ -197,6 +197,7 @@ impl ReservationManager {
 
         // Start with the base L2 filter rules.
         let mut desired_rules = Self::generate_l2_filter_rules(unicast_mac);
+        let mut epochs: HashMap<i64, Epoch> = HashMap::new();
 
         // Gather rules from all active reservations.
         {
@@ -235,14 +236,7 @@ impl ReservationManager {
                         continue;
                     }
                 };
-
-                // Update metrics
-                if let Err(e) = reservation.update_metrics(db, epoch).await {
-                    error!(
-                        "failed to update metrics for reservation {}: {}",
-                        reservation.reservation_id, e
-                    );
-                }
+                epochs.insert(reservation.reservation_id, epoch);
 
                 // Generate reservation-specific rules.
                 match reservation.generate_all_rules(db).await {
@@ -294,14 +288,41 @@ impl ReservationManager {
                     }
                 }
                 let elapsed = start_time.elapsed().as_millis();
+                let table_summaries: Vec<String> = updates
+                    .iter()
+                    .map(|u| {
+                        format!(
+                            "{}: +{}/-{}/*{}",
+                            u.description,
+                            u.insertions.len(),
+                            u.deletions.len(),
+                            u.updates.len()
+                        )
+                    })
+                    .collect();
                 debug!(
-                    "rules updated ({}ms): applied {} diff updates",
+                    "rules updated ({}ms): applied {} diff updates [{}]",
                     elapsed,
-                    updates.len()
+                    updates.len(),
+                    table_summaries.join(", ")
                 );
             }
             // Update the central state.
             *current = desired_rules;
+        }
+
+        {
+            let mut reservations = active_reservations.lock().await;
+            for reservation in reservations.values_mut() {
+                if let Some(epoch) = epochs.get(&reservation.reservation_id) {
+                    if let Err(e) = reservation.update_metrics(db, epoch.clone()).await {
+                        warn!(
+                            "failed to update metrics for reservation {}: {e}",
+                            reservation.reservation_id,
+                        );
+                    }
+                }
+            }
         }
     }
 

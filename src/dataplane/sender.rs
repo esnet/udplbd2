@@ -4,9 +4,9 @@ use crate::dataplane::meta_events::{MetaEventContext, MetaEventType};
 use crate::dataplane::protocol::*;
 use crate::errors::Result;
 
+use chrono::Utc;
 use std::net::SocketAddr;
 use std::time::{Duration, Instant};
-use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::warn;
@@ -194,10 +194,7 @@ impl Sender {
     }
 
     pub async fn send_ts(&mut self, buffer: &[u8], data_id: u16) -> u32 {
-        let tick = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_micros() as u64;
+        let tick = Utc::now().timestamp_millis() as u64;
         self.send(buffer, tick, data_id).await
     }
 

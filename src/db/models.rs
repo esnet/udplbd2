@@ -64,7 +64,7 @@ pub struct SessionState {
     pub total_packets_recv: u64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub struct Epoch {
     pub id: i64,
     pub reservation_id: i64,

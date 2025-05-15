@@ -151,12 +151,14 @@ impl EventIdSyncServer {
             addr, event_number, event_rate, remote_ts
         );
 
+        let local_ts = Utc::now();
+
         self.db
             .create_event_number(
                 self.reservation_id,
                 event_number as i64,
                 event_rate as i32,
-                Utc::now(),
+                local_ts,
                 remote_ts,
             )
             .await?;
@@ -166,7 +168,7 @@ impl EventIdSyncServer {
         samples.push_front(EventSample {
             event_number: event_number as i64,
             avg_event_rate_hz: event_rate as i32,
-            local_timestamp: Utc::now().timestamp_millis(),
+            local_timestamp: local_ts.timestamp_millis(),
             remote_timestamp: remote_ts.timestamp_millis(),
         });
         while samples.len() > 10 {

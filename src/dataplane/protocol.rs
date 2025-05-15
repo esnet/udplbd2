@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
+use chrono::Utc;
 use serde::ser::SerializeStruct;
-use std::{fmt, mem::size_of, time::SystemTime};
+use std::{fmt, mem::size_of};
 use zerocopy::{byteorder::*, *};
 use zerocopy_derive::*;
 
@@ -75,10 +76,7 @@ impl LBHeader {
     }
 
     pub fn set_tick_to_timestamp(&mut self) -> &mut Self {
-        let tick = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
+        let tick = Utc::now().timestamp_millis() as u64;
         self.tick.set(tick);
         self
     }
@@ -181,10 +179,7 @@ pub struct SyncPayload {
 
 impl SyncPayload {
     pub fn new() -> Self {
-        let ts = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
+        let ts = Utc::now().timestamp_millis() as u64;
         SyncPayload {
             magic_l: b'L',
             magic_c: b'C',
@@ -192,7 +187,7 @@ impl SyncPayload {
             reserved: 0,
             src_id: U32::new(0),
             tick: U64::new(0),
-            evt_rate: U32::new(1_000_000_000),
+            evt_rate: U32::new(1000),
             unix_time_nano: U64::new(ts),
         }
     }
@@ -205,11 +200,8 @@ impl SyncPayload {
     }
 
     pub fn set_tick_to_timestamp(&mut self) -> &mut Self {
-        let tick = SystemTime::now()
-            .duration_since(SystemTime::UNIX_EPOCH)
-            .unwrap()
-            .as_nanos() as u64;
-        self.evt_rate.set(1_000_000_000);
+        let tick = Utc::now().timestamp_millis() as u64;
+        self.evt_rate.set(1000);
         self.tick.set(tick);
         self.unix_time_nano.set(tick);
         self

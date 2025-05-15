@@ -593,3 +593,64 @@ impl LoadBalancerDB {
         Ok(result)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, Utc};
+
+    #[test]
+    fn test_predict_epoch_boundary_empty_samples() {
+        let samples = vec![];
+        let offset = Duration::milliseconds(0);
+        let result = predict_epoch_boundary_from_samples(&samples, offset);
+        assert_eq!(result, i64::MAX);
+    }
+
+    #[test]
+    fn test_predict_epoch_boundary_rate_based() {
+        // Simulate a sample with a known event rate and timestamp
+        let now = Utc::now();
+        let sample = EventSample {
+            event_number: 1000,
+            avg_event_rate_hz: 100, // 100 events/sec
+            local_timestamp: now.timestamp_millis(),
+            remote_timestamp: now.timestamp_millis(),
+        };
+        let offset = Duration::milliseconds(1000); // Predict 1 second in the future
+        let result = predict_epoch_boundary_from_samples(&[sample.clone()], offset);
+        // Should predict about 1100 (1000 + 100*1)
+        assert!((result - 1100).abs() <= 2, "result: {result}");
+    }
+
+    #[test]
+    fn test_predict_epoch_boundary_regression_based() {
+        // Simulate 3 samples with increasing event numbers and timestamps
+        let base_time = Utc::now().timestamp_millis();
+        // The function expects the latest sample first (descending order)
+        let samples = vec![
+            EventSample {
+                event_number: 300,
+                avg_event_rate_hz: 0,
+                local_timestamp: base_time,
+                remote_timestamp: base_time,
+            },
+            EventSample {
+                event_number: 200,
+                avg_event_rate_hz: 0,
+                local_timestamp: base_time - 1000,
+                remote_timestamp: base_time - 1000,
+            },
+            EventSample {
+                event_number: 100,
+                avg_event_rate_hz: 0,
+                local_timestamp: base_time - 2000,
+                remote_timestamp: base_time - 2000,
+            },
+        ];
+        let offset = Duration::milliseconds(1000); // Predict 1 second in the future
+        let result = predict_epoch_boundary_from_samples(&samples, offset);
+        // The event rate is 100 events/sec, so after 3 seconds, event_number should be ~400
+        assert!((result - 400).abs() <= 2, "result: {result}");
+    }
+}

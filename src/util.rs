@@ -2,6 +2,8 @@
 //! Misc. helper functions
 use std::net::Ipv6Addr;
 
+use tracing::warn;
+
 /// Converts a 48-bit MAC address to its u64 representation.
 /// The MAC address is left-aligned in the resulting u64, with the remaining
 /// 16 most significant bits set to zero.
@@ -91,6 +93,11 @@ pub fn range_as_power_of_two_prefixes(start: u64, end: u64) -> Vec<Prefix> {
 
     let mut result = Vec::new();
     let mut current_start = start;
+
+    if end <= start {
+        warn!("next boundary {end} is smaller than or equal to previous boundary {start}");
+        return result;
+    }
 
     while current_start < end {
         // Calculate the prefix length based on the least significant set bit in "current_start"

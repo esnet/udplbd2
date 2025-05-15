@@ -172,7 +172,7 @@ impl Config {
             },
             controller: ControllerConfig {
                 duration: "1s".to_string(),
-                offset: "0s".to_string(),
+                offset: "800ms".to_string(),
             },
             server: ServerConfig {
                 listen: vec!["0.0.0.0:19523".parse().unwrap()],

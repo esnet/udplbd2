@@ -15,6 +15,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
+use tracing::trace;
 
 /// Represents an active load balancer reservation with its FPGA rules and state.
 pub struct ActiveReservation {
@@ -210,14 +211,24 @@ impl ActiveReservation {
             FROM epoch
             WHERE reservation_id = ?1 AND deleted_at IS NULL
             ORDER BY created_at DESC
-            LIMIT 3
+            LIMIT 4
             "#,
             self.reservation_id
         )
-        .fetch_all(&db.read_pool)
+        .fetch_all(&db.write_pool)
         .await?;
 
         recent_epochs.reverse(); // Process oldest to newest
+
+        trace!(
+            "generate_epoch_rules: reservation_id={}, epochs_found={}: {:?}",
+            self.reservation_id,
+            recent_epochs.len(),
+            recent_epochs
+                .iter()
+                .map(|e| (e.id, e.boundary_event, e.epoch_count))
+                .collect::<Vec<_>>()
+        );
 
         for (i, epoch) in recent_epochs.iter().enumerate() {
             // Generate member map rules

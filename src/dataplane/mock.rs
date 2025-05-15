@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-use crate::dataplane::protocol::LBPayload;
+use crate::dataplane::protocol::{LBPayload, ReassemblyPayload, REASSEMBLY_HEADER_SIZE};
 use crate::errors::Error;
 use crate::proto::smartnic::p4_v2::{
     self, batch_request, batch_response, smartnic_p4_server::SmartnicP4, BatchOperation,
@@ -89,14 +89,14 @@ impl MockLoadBalancer {
                         // Lock the shared dataplane state.
                         // (Note: In production you might consider a try-lock or other strategy
                         // to avoid holding the lock for too long.)
-                        let state = self.state.lock().await;
+                        let mut state = self.state.lock().await;
                         // Check whether the source IP is allowed.
                         if !state.is_source_allowed(self.lb_id, src_addr.ip()) {
                             continue;
                         }
 
                         // Process the packet and, if successful, forward it.
-                        if let Some((payload, dst_addr)) = self.process_packet(data, &state) {
+                        if let Some((payload, dst_addr)) = self.process_packet(data, &mut state) {
                             if let Err(e) = socket.send_to(&payload, dst_addr).await {
                                 error!(
                                     "Failed to forward packet: could not send to {}: {}",
@@ -129,7 +129,7 @@ impl MockLoadBalancer {
     fn process_packet(
         &self,
         data: &[u8],
-        state: &MockDataplaneState,
+        state: &mut MockDataplaneState,
     ) -> Option<(Vec<u8>, SocketAddr)> {
         // Parse the LB header and payload.
         let lb_payload = match LBPayload::parse(data) {
@@ -189,8 +189,55 @@ impl MockLoadBalancer {
         // Calculate destination UDP port using entropy.
         let entropy_mask = (1u16 << member.set_entropy_bit_mask_width) - 1;
         let dst_port = member.set_dest_udp_port + (lb_payload.header.entropy.get() & entropy_mask);
-
         let dst_addr = SocketAddr::new(member.set_dest_ip_addr, dst_port);
+
+        // ==== split‐event detection based on ReassemblyHeader ====
+        if let Some(reasm) = ReassemblyPayload::parse(&lb_payload.body) {
+            let rh = &reasm.header;
+            let tick = rh.tick.get();
+            let data_id = rh.data_id.get();
+            let length = rh.length.get() as usize;
+            // all fragments except the last carry a payload = total_body_len - header
+            let frag_size = lb_payload.body.len() - REASSEMBLY_HEADER_SIZE;
+            let total_parts = length.div_ceil(frag_size);
+
+            let key = (tick, data_id);
+            let mut remove = false;
+            let mut log_split = None;
+            {
+                if let Some((first_dest, seen, expect)) = state.partial_event_routes.get_mut(&key) {
+                    // split if dest changes
+                    if *first_dest != dst_addr {
+                        log_split = Some((*first_dest, dst_addr));
+                    }
+                    *seen += 1;
+                    if *seen >= *expect {
+                        remove = true;
+                    }
+                } else {
+                    // first fragment seen
+                    state
+                        .partial_event_routes
+                        .insert(key, (dst_addr, 1, total_parts));
+                    if total_parts == 1 {
+                        // single‐fragment event → remove immediately
+                        remove = true;
+                    }
+                }
+            }
+            if let Some((first_dest, dst_addr)) = log_split {
+                let epoch_rule = state.find_epoch_rule(self.lb_id, tick);
+                let slot_rule = state.find_slot_rule(self.lb_id, epoch, slot);
+                warn!(
+                    "mock dp: split event detected tick={} data_id={} first→{} now→{}; epoch_rule={:?}, slot_rule={:?}",
+                    tick, data_id, first_dest, dst_addr, epoch_rule, slot_rule
+                );
+            }
+            if remove {
+                state.partial_event_routes.remove(&key);
+            }
+        }
+
         Some((lb_payload.body.to_vec(), dst_addr))
     }
 }
@@ -213,6 +260,9 @@ struct MockDataplaneState {
     allowed_sources: HashMap<(u8, IpAddr), IpSrcFilterRule>,
     /// Active LB tasks.
     lb_tasks: HashMap<IpAddr, tokio::task::JoinHandle<()>>,
+    /// Tracks (first_dest, seen_count, total_parts) per tick so we can detect splits
+    /// and remove entries once fully forwarded.
+    partial_event_routes: HashMap<(u64, u16), (SocketAddr, usize, usize)>,
 }
 
 impl MockDataplaneState {
@@ -332,8 +382,13 @@ impl MockDataplaneState {
                 } else {
                     entries.push(r);
                 }
-                // Ensure most specific (largest prefix) rules come first.
-                entries.sort_by_key(|e| std::cmp::Reverse(e.match_event_prefix_len));
+                // Ensure most specific (largest prefix) rules come first,
+                // and for equal prefix, lower priority comes first.
+                entries.sort_by(|a, b| {
+                    b.match_event_prefix_len
+                        .cmp(&a.match_event_prefix_len)
+                        .then_with(|| a.priority.cmp(&b.priority))
+                });
             }
             RuleType::Slot(r) => {
                 self.calendar
@@ -346,6 +401,24 @@ impl MockDataplaneState {
             _ => {}
         }
         Ok(())
+    }
+
+    /// Find the epoch rule that matched this tick (so we can log it later).
+    fn find_epoch_rule(&self, lb_id: u8, tick: u64) -> Option<&EventIdToEpochRule> {
+        let entries = self.epochs.get(&lb_id)?;
+        entries.iter().find(|entry| {
+            let mask = match entry.match_event_prefix_len {
+                64 => u64::MAX,
+                0 => 0,
+                n => ((1u64 << n) - 1) << (64 - n),
+            };
+            (tick & mask) == (entry.match_event & mask)
+        })
+    }
+
+    /// Find the slot rule that matched this epoch & slot (so we can log it later).
+    fn find_slot_rule(&self, lb_id: u8, epoch: u32, slot: u16) -> Option<&SlotToMemberRule> {
+        self.calendar.get(&(lb_id, epoch, slot))
     }
 }
 
