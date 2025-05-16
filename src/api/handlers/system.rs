@@ -51,7 +51,6 @@ impl LoadBalancerService {
             .map_err(|e| Status::internal(format!("Failed to query reservation: {e}")))?;
 
             let (reservation_details, status) = if let Some(res) = reservation {
-                info!("{:?}", res);
                 // Get full reservation details
                 let mut request = Request::new(GetLoadBalancerRequest {
                     lb_id: res.id.to_string(),
@@ -65,7 +64,6 @@ impl LoadBalancerService {
                     continue 'lbs;
                 }
                 let reservation_reply = reservation_reply_res?.into_inner();
-                info!("{reservation_reply:?}");
 
                 // Get status
                 let mut status_request = Request::new(LoadBalancerStatusRequest {
