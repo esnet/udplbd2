@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for LB system administration (Overview, Version, etc.)
 use tonic::{Request, Response, Status};
+use tracing::info;
 
 use super::super::service::LoadBalancerService;
 use crate::proto::loadbalancer::v1::{
@@ -32,7 +33,7 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to list load balancers: {e}")))?;
 
-        for lb in lbs {
+        'lbs: for lb in lbs {
             // Attempt to find an active reservation for this LB
             let reservation = sqlx::query!(
                 r#"
@@ -50,6 +51,7 @@ impl LoadBalancerService {
             .map_err(|e| Status::internal(format!("Failed to query reservation: {e}")))?;
 
             let (reservation_details, status) = if let Some(res) = reservation {
+                info!("{:?}", res);
                 // Get full reservation details
                 let mut request = Request::new(GetLoadBalancerRequest {
                     lb_id: res.id.to_string(),
@@ -60,9 +62,10 @@ impl LoadBalancerService {
                 let reservation_reply_res = self.handle_get_load_balancer(request).await;
                 if reservation_reply_res.is_err() {
                     // skip the reservations the token can't access
-                    continue;
+                    continue 'lbs;
                 }
                 let reservation_reply = reservation_reply_res?.into_inner();
+                info!("{reservation_reply:?}");
 
                 // Get status
                 let mut status_request = Request::new(LoadBalancerStatusRequest {
@@ -81,11 +84,13 @@ impl LoadBalancerService {
                 (None, None)
             };
 
-            load_balancers.push(Overview {
-                name: lb.name,
-                reservation: reservation_details,
-                status,
-            });
+            if reservation_details.is_some() {
+                load_balancers.push(Overview {
+                    name: lb.name,
+                    reservation: reservation_details,
+                    status,
+                });
+            }
         }
 
         Ok(Response::new(OverviewReply { load_balancers }))
