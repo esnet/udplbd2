@@ -96,18 +96,6 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create reservation: {e}")))?;
 
-        self.manager
-            .lock()
-            .await
-            .start_reservation(reservation.id, lb.event_number_udp_port)
-            .await
-            .map_err(|_| {
-                Status::internal(format!(
-                    "Failed to start reservation server on port {}",
-                    lb.event_number_udp_port
-                ))
-            })?;
-
         for addr_str in request.sender_addresses {
             let addr = IpAddr::from_str(&addr_str)
                 .map_err(|_| Status::invalid_argument("Invalid sender IP address"))?;
@@ -130,6 +118,18 @@ impl LoadBalancerService {
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
+
+        self.manager
+            .lock()
+            .await
+            .start_reservation(reservation.id, lb.event_number_udp_port)
+            .await
+            .map_err(|_| {
+                Status::internal(format!(
+                    "Failed to start reservation server on port {}",
+                    lb.event_number_udp_port
+                ))
+            })?;
 
         Ok(Response::new(ReserveLoadBalancerReply {
             token,

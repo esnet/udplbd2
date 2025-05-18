@@ -29,6 +29,9 @@ use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
 use crate::dataplane::protocol::LBHeader;
 use crate::dataplane::receiver::Receiver;
 
+use crate::macaddr::get_mac_addr;
+use std::net::IpAddr;
+
 use super::turmoil::tester::run_turmoil_test;
 
 /// Dataplane commands for testing the EJFAT protocol.
@@ -75,6 +78,8 @@ pub enum DataplaneCommand {
     Print(PrintArgs),
     /// Reassemble the packets in a PCAP file and report errors.
     Pcap(PcapArgs),
+    /// Resolve MAC addresses for given IP addresses.
+    MacAddr(MacAddrArgs),
 }
 
 #[derive(Args, Debug)]
@@ -189,6 +194,13 @@ pub struct PcapArgs {
     /// Expect packets to still contain LB headers.
     #[arg(long)]
     pub lb: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct MacAddrArgs {
+    /// IP addresses to resolve MAC addresses for.
+    #[arg(value_name = "IP_ADDRS")]
+    pub ips: Vec<String>,
 }
 
 impl DataplaneCli {
@@ -314,6 +326,19 @@ impl DataplaneCli {
                         }
                     });
                 });
+            }
+            DataplaneCommand::MacAddr(args) => {
+                for ip_str in &args.ips {
+                    match ip_str.parse::<IpAddr>() {
+                        Ok(ip) => match get_mac_addr(ip).await {
+                            Ok(mac) => println!("{} -> {}", ip, mac),
+                            Err(e) => eprintln!("{} -> error: {}", ip, e),
+                        },
+                        Err(e) => {
+                            eprintln!("{} -> invalid IP address: {}", ip_str, e);
+                        }
+                    }
+                }
             }
         }
         Ok(())

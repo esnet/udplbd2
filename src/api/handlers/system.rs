@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for LB system administration (Overview, Version, etc.)
 use tonic::{Request, Response, Status};
-use tracing::info;
 
 use super::super::service::LoadBalancerService;
 use crate::proto::loadbalancer::v1::{

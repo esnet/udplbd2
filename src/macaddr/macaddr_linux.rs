@@ -35,7 +35,12 @@ pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
 async fn ping(ip: IpAddr) -> Result<()> {
     use tokio::net::UdpSocket;
 
-    let socket = UdpSocket::bind("0.0.0.0:0")
+    let bind_addr = match ip {
+        IpAddr::V4(_) => "0.0.0.0:0",
+        IpAddr::V6(_) => "[::]:0",
+    };
+
+    let socket = UdpSocket::bind(bind_addr)
         .await
         .map_err(|e| Error::Network(format!("Failed to bind socket: {}", e)))?;
 
@@ -100,7 +105,10 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
     let mut neighbours = handle
         .neighbours()
         .get()
-        .set_family(IpVersion::V4)
+        .set_family(match ip {
+            IpAddr::V4(_) => IpVersion::V4,
+            IpAddr::V6(_) => IpVersion::V6,
+        })
         .execute();
 
     while let Some(neighbor) = neighbours
