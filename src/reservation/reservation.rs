@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, Mutex};
 use tokio::task::JoinHandle;
 use tokio::time::{self, MissedTickBehavior};
-use tracing::{debug, error, info, warn};
+use tracing::{debug, error, info, trace, warn};
 
 /// Manages the lifecycle of load balancer reservations and their associated resources.
 pub struct ReservationManager {
@@ -204,12 +204,25 @@ impl ReservationManager {
             let mut reservations = active_reservations.lock().await;
             for reservation in reservations.values_mut() {
                 // Only advance the epoch if there is at least one session for this reservation.
+                let get_sessions_start = Instant::now();
                 let sessions = match db
                     .get_reservation_sessions(reservation.reservation_id)
                     .await
                 {
-                    Ok(sessions) => sessions,
+                    Ok(sessions) => {
+                        trace!(
+                            "get_reservation_sessions for reservation {} took {}ms",
+                            reservation.reservation_id,
+                            get_sessions_start.elapsed().as_millis()
+                        );
+                        sessions
+                    }
                     Err(e) => {
+                        trace!(
+                            "get_reservation_sessions for reservation {} failed after {}ms",
+                            reservation.reservation_id,
+                            get_sessions_start.elapsed().as_millis()
+                        );
                         error!(
                             "failed to get sessions for reservation {}: {}",
                             reservation.reservation_id, e
@@ -222,13 +235,32 @@ impl ReservationManager {
                     continue;
                 }
 
+                let predict_boundary_start = Instant::now();
                 let boundary_event = reservation.predict_epoch_boundary_from_sync(offset);
+                trace!(
+                    "predict_epoch_boundary_from_sync for reservation {} took {}ms",
+                    reservation.reservation_id,
+                    predict_boundary_start.elapsed().as_millis()
+                );
+                let advance_epoch_start = Instant::now();
                 let epoch = match db
                     .advance_epoch(reservation.reservation_id, offset, boundary_event)
                     .await
                 {
-                    Ok(epoch) => epoch,
+                    Ok(epoch) => {
+                        trace!(
+                            "advance_epoch for reservation {} took {}ms",
+                            reservation.reservation_id,
+                            advance_epoch_start.elapsed().as_millis()
+                        );
+                        epoch
+                    }
                     Err(e) => {
+                        trace!(
+                            "advance_epoch for reservation {} failed after {}ms",
+                            reservation.reservation_id,
+                            advance_epoch_start.elapsed().as_millis()
+                        );
                         error!(
                             "failed to advance epoch for reservation {}: {}",
                             reservation.reservation_id, e
@@ -239,13 +271,24 @@ impl ReservationManager {
                 epochs.insert(reservation.reservation_id, epoch);
 
                 // Generate reservation-specific rules.
+                let generate_rules_start = Instant::now();
                 match reservation.generate_all_rules(db).await {
                     Ok(rules) => {
+                        trace!(
+                            "generate_all_rules for reservation {} took {}ms",
+                            reservation.reservation_id,
+                            generate_rules_start.elapsed().as_millis()
+                        );
                         desired_rules.extend(rules.clone());
                         // Update the reservation’s own internal state (informational only).
                         reservation.set_current_rules(rules);
                     }
                     Err(e) => {
+                        trace!(
+                            "generate_all_rules for reservation {} failed after {}ms",
+                            reservation.reservation_id,
+                            generate_rules_start.elapsed().as_millis()
+                        );
                         error!(
                             "failed to generate rules for reservation {}: {}",
                             reservation.reservation_id, e
@@ -258,7 +301,14 @@ impl ReservationManager {
         // Compare against the central state.
         let mut current = current_rules.lock().await;
         if desired_rules != *current {
+            let compare_rules_start = Instant::now();
             let updates = compare_rule_sets(&current, &desired_rules);
+            trace!(
+                "compare_rule_sets took {}ms ({} current, {} desired)",
+                compare_rules_start.elapsed().as_millis(),
+                current.len(),
+                desired_rules.len()
+            );
             if !updates.is_empty() {
                 if let Some(dir) = dump_rule_dir {
                     if let Err(e) = dump_updates_to_file(dir, &updates).await {
@@ -266,7 +316,13 @@ impl ReservationManager {
                     }
                 }
                 // First, try to apply the diff update.
+                let bulk_update_diff_start = Instant::now();
                 if let Err(e) = smartnic_clients.bulk_update(&updates).await {
+                    trace!(
+                        "bulk_update (diff) failed after {}ms ({} updates)",
+                        bulk_update_diff_start.elapsed().as_millis(),
+                        updates.len()
+                    );
                     warn!(
                         "Failed to apply rule diff update, attempting reload: {:#?}",
                         e
@@ -282,10 +338,26 @@ impl ReservationManager {
                         updates: Vec::new(),
                         deletions: Vec::new(),
                     };
+                    let bulk_update_reload_start = Instant::now();
                     if let Err(e) = smartnic_clients.bulk_update(&[reload_update]).await {
+                        trace!(
+                            "bulk_update (reload) failed after {}ms (reload all rules)",
+                            bulk_update_reload_start.elapsed().as_millis()
+                        );
                         error!("Failed to reload rules: {:#?}", e);
                         return;
+                    } else {
+                        trace!(
+                            "bulk_update (reload) succeeded in {}ms (reload all rules)",
+                            bulk_update_reload_start.elapsed().as_millis()
+                        );
                     }
+                } else {
+                    trace!(
+                        "bulk_update (diff) succeeded in {}ms ({} updates)",
+                        bulk_update_diff_start.elapsed().as_millis(),
+                        updates.len()
+                    );
                 }
                 let elapsed = start_time.elapsed().as_millis();
                 let table_summaries: Vec<String> = updates
@@ -315,10 +387,22 @@ impl ReservationManager {
             let mut reservations = active_reservations.lock().await;
             for reservation in reservations.values_mut() {
                 if let Some(epoch) = epochs.get(&reservation.reservation_id) {
+                    let update_metrics_start = Instant::now();
                     if let Err(e) = reservation.update_metrics(db, epoch.clone()).await {
+                        trace!(
+                            "update_metrics for reservation {} failed after {}ms",
+                            reservation.reservation_id,
+                            update_metrics_start.elapsed().as_millis()
+                        );
                         warn!(
                             "failed to update metrics for reservation {}: {e}",
                             reservation.reservation_id,
+                        );
+                    } else {
+                        trace!(
+                            "update_metrics for reservation {} succeeded in {}ms",
+                            reservation.reservation_id,
+                            update_metrics_start.elapsed().as_millis()
                         );
                     }
                 }
