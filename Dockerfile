@@ -12,10 +12,7 @@ COPY . .
 RUN cargo sqlx database setup
 RUN cargo zigbuild --release --target x86_64-unknown-linux-musl
 
-
-
 FROM alpine as udplbd
 RUN apk --no-cache add ca-certificates curl openssl && update-ca-certificates
 COPY --from=builder /usr/src/udplbd/target/x86_64-unknown-linux-musl/release/udplbd /bin/udplbd
-USER 1000
 CMD ["udplbd", "mock"]
