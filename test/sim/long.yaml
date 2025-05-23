@@ -42,9 +42,9 @@ timelines:
       - time: 2000
         event:
           !SpawnSender {
-            config: { rate: 10, event_size: 300, event_count: 100 },
+            config: { rate: 10, event_size: 300, event_count: 359950 },
             lb: "lb1",
           }
-      - time: 15000
+      - time: 36000000
         event: !SimulationExit
-    end_condition: !Tick { tick: 15000 }
+    end_condition: !Tick { tick: 36000000 }

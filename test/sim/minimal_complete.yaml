@@ -15,9 +15,13 @@ timelines:
     events:
       - time: 0
         event: !ReserveLoadBalancer { name: "lb1", addresses: ["192.168.0.8"] }
-    end_condition: !UDPHostReady { host: "dataplane", port: 19522 }
+    end_condition: !UDPHostReady { host: "server", port: 19524 }
 
   - id: 3
+    events: []
+    end_condition: !UDPHostReady { host: "dataplane", port: 19522 }
+
+  - id: 4
     events:
       - time: 100
         event:
@@ -38,7 +42,7 @@ timelines:
       - time: 2000
         event:
           !SpawnSender {
-            config: { rate: 10, event_size: 300, event_count: 100 },
+            config: { rate: 10, event_size: 300, event_count: 130 },
             lb: "lb1",
           }
       - time: 15000

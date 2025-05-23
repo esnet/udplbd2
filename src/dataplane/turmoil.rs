@@ -130,7 +130,7 @@ pub mod tester {
     use tokio::sync::Mutex;
     use tokio::time::sleep;
     use tonic::transport::Server;
-    use tracing::{debug, trace};
+    use tracing::debug;
     use turmoil::lookup;
     use turmoil::{net::TcpListener, Builder};
 
@@ -310,11 +310,6 @@ pub mod tester {
                     );
                 }
                 let relative_time = sim_elapsed - timeline_start_tick.unwrap();
-                trace!(
-                    "timeline {} relative time: {} ms",
-                    timeline.id,
-                    relative_time
-                );
 
                 // Process all timeline events scheduled for (or before) the current relative time.
                 while let Some(event) = event_iter.peek() {
