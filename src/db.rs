@@ -81,8 +81,14 @@ impl LoadBalancerDB {
             .execute(&self.write_pool)
             .await
             .ok();
-
-        // Set synchronous mode based on config
+        sqlx::query("PRAGMA mmap_size = 30000000000")
+            .execute(&self.write_pool)
+            .await
+            .ok();
+        sqlx::query("PRAGMA page_size = 32768;")
+            .execute(&self.write_pool)
+            .await
+            .ok();
         let sync_mode_query = if !config.database.fsync {
             "PRAGMA synchronous = OFF"
         } else {
