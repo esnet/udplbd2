@@ -106,24 +106,21 @@ impl LoadBalancerDB {
         Ok(state_record.id)
     }
 
-    /// Soft deletes sessions that haven't been updated in the last 5 seconds,
-    /// excluding sessions created in the last 5 seconds.
+    /// Marks sessions as not ready if their latest state update is older than 2 seconds,
+    /// and soft deletes sessions that haven't been updated in the last 5 seconds,
+    /// using the latest session state timestamp. Sessions with no state update are ignored.
     pub async fn cleanup_stale_sessions(&self) -> Result<()> {
-        let result = sqlx::query!(
+        // Step 1: Mark as not ready (is_ready = FALSE) if latest state is older than 2 seconds
+        let deactivated = sqlx::query!(
             r#"
-            WITH stale_sessions AS (
-                SELECT s.id
-                FROM session s
-                LEFT JOIN session_state ss ON s.id = ss.session_id
-                WHERE s.deleted_at IS NULL
-                AND s.created_at < strftime('%s', 'now', '-5 seconds') * 1000
-                GROUP BY s.id
-                HAVING MAX(ss.created_at) < strftime('%s', 'now', '-5 seconds') * 1000
-                OR MAX(ss.created_at) IS NULL
-            )
             UPDATE session
-            SET deleted_at = unixepoch('subsec') * 1000
-            WHERE id IN (SELECT id FROM stale_sessions)
+            SET is_ready = FALSE
+            WHERE deleted_at IS NULL
+              AND created_at < strftime('%s', 'now', '-5 seconds') * 1000
+              AND latest_session_state_id IS NOT NULL
+              AND (
+                SELECT timestamp FROM session_state WHERE id = session.latest_session_state_id
+              ) < strftime('%s', 'now', '-2 seconds') * 1000
             RETURNING id
             "#
         )
@@ -131,10 +128,49 @@ impl LoadBalancerDB {
         .await
         .map_err(Error::Database)?;
 
-        let cleaned_session_ids: Vec<i64> = result.into_iter().map(|r| r.id).collect();
+        let deactivated_ids: Vec<i64> = deactivated.into_iter().map(|r| r.id).collect();
 
-        if !cleaned_session_ids.is_empty() {
-            info!("removed stale sessions: {:?}", cleaned_session_ids);
+        // Step 2: Soft delete (set deleted_at) if latest state is older than 5 seconds and session is older than 1 minute
+        let deleted = sqlx::query!(
+            r#"
+            UPDATE session
+            SET deleted_at = unixepoch('subsec') * 1000
+            WHERE deleted_at IS NULL
+              AND created_at < strftime('%s', 'now', '-5 seconds') * 1000
+              AND latest_session_state_id IS NOT NULL
+              AND (
+                SELECT timestamp FROM session_state WHERE id = session.latest_session_state_id
+              ) < strftime('%s', 'now', '-60 seconds') * 1000
+            RETURNING id
+            "#
+        )
+        .fetch_all(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        let deleted_ids: Vec<i64> = deleted.into_iter().map(|r| r.id).collect();
+
+        if !deactivated_ids.is_empty() || !deleted_ids.is_empty() {
+            // Delete permissions for expired (soft-deleted) sessions
+            if !deleted_ids.is_empty() {
+                for id in &deleted_ids {
+                    sqlx::query!(
+                        "DELETE FROM token_session_permission WHERE session_id = ?1",
+                        id
+                    )
+                    .execute(&self.write_pool)
+                    .await
+                    .map_err(Error::Database)?;
+                }
+            }
+
+            self.delete_tokens_with_no_permissions().await?;
+            if !deactivated_ids.is_empty() {
+                info!("deactivated stale sessions: {:?}", deactivated_ids);
+            }
+            if !deleted_ids.is_empty() {
+                info!("removed stale sessions: {:?}", deleted_ids);
+            }
         }
 
         Ok(())

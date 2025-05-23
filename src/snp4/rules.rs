@@ -5,6 +5,7 @@ use crate::proto::smartnic::p4_v2::{
     self, r#match::Type as MatchType, Action, ActionParameter, Match, MatchKeyOnly, MatchKeyPrefix,
     TableRule,
 };
+use prost::Message;
 use std::{
     collections::HashMap,
     fmt,
@@ -891,4 +892,25 @@ mod tests {
         assert_eq!(table2_update.deletions.len(), 1);
         assert!(table2_update.updates.is_empty());
     }
+}
+
+/// Serialize a slice of TableRule to bytes using prost length-delimited encoding.
+pub fn serialize_table_rules(rules: &[TableRule]) -> Vec<u8> {
+    let mut buf = Vec::new();
+    for rule in rules {
+        rule.encode_length_delimited(&mut buf).unwrap();
+    }
+    buf
+}
+
+/// Deserialize a slice of bytes into a Vec<TableRule> using prost length-delimited decoding.
+pub fn deserialize_table_rules(mut bytes: &[u8]) -> Vec<TableRule> {
+    let mut rules = Vec::new();
+    while !bytes.is_empty() {
+        match TableRule::decode_length_delimited(&mut bytes) {
+            Ok(rule) => rules.push(rule),
+            Err(_) => break,
+        }
+    }
+    rules
 }

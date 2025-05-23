@@ -165,3 +165,11 @@ CREATE INDEX idx_event_number_reservation_id ON event_number(reservation_id);
 CREATE INDEX idx_event_number_local_timestamp ON event_number(local_timestamp);
 CREATE INDEX idx_event_number_remote_timestamp ON event_number(remote_timestamp);
 CREATE INDEX idx_event_number_created_at ON event_number(created_at);
+
+-- Table to cache global rules
+CREATE TABLE IF NOT EXISTS rule_cache (
+    id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+    rules BLOB NOT NULL,
+    created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000)
+);
+CREATE INDEX idx_rule_cache_created_at ON rule_cache(created_at);

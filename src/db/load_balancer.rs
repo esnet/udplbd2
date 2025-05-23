@@ -77,6 +77,51 @@ impl LoadBalancerDB {
         })
     }
 
+    /// Fetches the latest cached global rules from the rule_cache table.
+    pub async fn get_latest_rule_cache(&self) -> Result<Option<Vec<u8>>> {
+        let record = sqlx::query!(
+            r#"
+            SELECT rules
+            FROM rule_cache
+            ORDER BY created_at DESC
+            LIMIT 1
+            "#
+        )
+        .fetch_optional(&self.read_pool)
+        .await?;
+
+        Ok(record.map(|r| r.rules))
+    }
+
+    /// Inserts a new global ruleset into the rule_cache table and keeps only the 10 most recent.
+    pub async fn insert_rule_cache(&self, rules: &[u8]) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+        sqlx::query!(
+            r#"
+            INSERT INTO rule_cache (rules, created_at)
+            VALUES (?1, unixepoch('subsec') * 1000)
+            "#,
+            rules
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Delete all but the 10 most recent entries
+        sqlx::query!(
+            r#"
+            DELETE FROM rule_cache
+            WHERE id NOT IN (
+                SELECT id FROM rule_cache ORDER BY created_at DESC LIMIT 10
+            )
+            "#
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        tx.commit().await?;
+        Ok(())
+    }
+
     /// Retrieves a loadbalancer by ID.
     pub async fn get_loadbalancer(&self, id: i64) -> Result<LoadBalancer> {
         let record = sqlx::query!(

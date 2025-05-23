@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, boundary_event, epoch_count, slots\n            FROM epoch\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ORDER BY created_at DESC\n            LIMIT 3\n            ",
+  "query": "\n            SELECT id, boundary_event, epoch_count, slots\n            FROM epoch\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ORDER BY created_at DESC\n            LIMIT 4\n            ",
   "describe": {
     "columns": [
       {
@@ -34,5 +34,5 @@
       false
     ]
   },
-  "hash": "555fc2455b78e03f88feb04925fcf7d47a29fc0df075e9d61823ccbc3e02ace5"
+  "hash": "4e307981a8fafd5dfbd76c4142a4fbc3331cf6e7b58960d937b695f097eaa93d"
 }

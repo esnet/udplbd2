@@ -4,7 +4,10 @@ use crate::errors::Error;
 use crate::metrics::LB_IS_ACTIVE;
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::client::MultiSNP4Client;
-use crate::snp4::rules::{compare_rule_sets, Layer2InputPacketFilterRule, TableUpdate};
+use crate::snp4::rules::{
+    compare_rule_sets, deserialize_table_rules, serialize_table_rules, Layer2InputPacketFilterRule,
+    TableUpdate,
+};
 use crate::util::mac_to_u64;
 use chrono::Utc;
 use macaddr::MacAddr6;
@@ -35,6 +38,49 @@ pub struct ReservationManager {
 }
 
 impl ReservationManager {
+    /// Try to apply a diff from cached rules in the DB if current rules are empty.
+    async fn try_apply_cached_diff(
+        db: &Arc<LoadBalancerDB>,
+        smartnic_clients: &mut MultiSNP4Client,
+        desired_rules: &[TableRule],
+        current: &mut Vec<TableRule>,
+    ) -> bool {
+        if current.is_empty() {
+            match db.get_latest_rule_cache().await {
+                Ok(Some(cached_bytes)) => {
+                    let cached_rules = deserialize_table_rules(&cached_bytes);
+                    let cached_updates =
+                        crate::snp4::rules::compare_rule_sets(&cached_rules, desired_rules);
+                    if !cached_updates.is_empty() {
+                        match smartnic_clients.bulk_update(&cached_updates).await {
+                            Ok(_) => {
+                                trace!("Successfully applied diff from cached rules");
+                                *current = desired_rules.to_vec();
+                                return true;
+                            }
+                            Err(e) => {
+                                warn!("Failed to apply diff from cached rules: {:?}", e);
+                            }
+                        }
+                    }
+                }
+                Ok(None) => {
+                    warn!("No cached rules found in rule_cache");
+                }
+                Err(e) => {
+                    warn!("Failed to load cached rules from db: {:?}", e);
+                }
+            }
+        }
+        false
+    }
+
+    /// Cache the rules in the DB (keep only 10 most recent).
+    async fn cache_rules(db: &Arc<LoadBalancerDB>, rules: &[TableRule]) {
+        let bytes = serialize_table_rules(rules);
+        let _ = db.insert_rule_cache(&bytes).await;
+    }
+
     /// Creates a new reservation manager with the specified configuration.
     #[must_use]
     pub fn new(
@@ -327,30 +373,54 @@ impl ReservationManager {
                         "Failed to apply rule diff update, attempting reload: {:#?}",
                         e
                     );
-                    // On error, clear tables and reload everything.
-                    if let Err(e) = smartnic_clients.clear_tables().await {
-                        error!("Failed to clear tables: {:#?}", e);
-                        return;
+
+                    let mut update_success = false;
+
+                    // If current_rules is empty, try to load from rule_cache and do a diff update before resetting
+                    if Self::try_apply_cached_diff(
+                        db,
+                        smartnic_clients,
+                        &desired_rules,
+                        &mut current,
+                    )
+                    .await
+                    {
+                        update_success = true;
                     }
-                    let reload_update = TableUpdate {
-                        description: "reload all rules".to_string(),
-                        insertions: desired_rules.clone(),
-                        updates: Vec::new(),
-                        deletions: Vec::new(),
-                    };
-                    let bulk_update_reload_start = Instant::now();
-                    if let Err(e) = smartnic_clients.bulk_update(&[reload_update]).await {
-                        trace!(
-                            "bulk_update (reload) failed after {}ms (reload all rules)",
-                            bulk_update_reload_start.elapsed().as_millis()
-                        );
-                        error!("Failed to reload rules: {:#?}", e);
-                        return;
-                    } else {
-                        trace!(
-                            "bulk_update (reload) succeeded in {}ms (reload all rules)",
-                            bulk_update_reload_start.elapsed().as_millis()
-                        );
+
+                    if !update_success {
+                        // On error, clear tables and reload everything.
+                        if let Err(e) = smartnic_clients.clear_tables().await {
+                            error!("Failed to clear tables: {:#?}", e);
+                            return;
+                        }
+                        let reload_update = TableUpdate {
+                            description: "reload all rules".to_string(),
+                            insertions: desired_rules.clone(),
+                            updates: Vec::new(),
+                            deletions: Vec::new(),
+                        };
+                        let bulk_update_reload_start = Instant::now();
+                        if let Err(e) = smartnic_clients.bulk_update(&[reload_update]).await {
+                            trace!(
+                                "bulk_update (reload) failed after {}ms (reload all rules)",
+                                bulk_update_reload_start.elapsed().as_millis()
+                            );
+                            error!("Failed to reload rules: {:#?}", e);
+                            return;
+                        } else {
+                            trace!(
+                                "bulk_update (reload) succeeded in {}ms (reload all rules)",
+                                bulk_update_reload_start.elapsed().as_millis()
+                            );
+                            *current = desired_rules.clone();
+                            update_success = true;
+                        }
+                    }
+
+                    // Cache the new rules after any successful update
+                    if update_success {
+                        Self::cache_rules(db, &desired_rules).await;
                     }
                 } else {
                     trace!(

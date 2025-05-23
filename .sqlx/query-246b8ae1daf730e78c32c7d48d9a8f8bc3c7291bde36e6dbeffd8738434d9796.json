@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            INSERT INTO rule_cache (rules, created_at)\n            VALUES (?1, unixepoch('subsec') * 1000)\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "246b8ae1daf730e78c32c7d48d9a8f8bc3c7291bde36e6dbeffd8738434d9796"
+}

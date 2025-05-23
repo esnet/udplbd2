@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            DELETE FROM rule_cache\n            WHERE id NOT IN (\n                SELECT id FROM rule_cache ORDER BY created_at DESC LIMIT 10\n            )\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": []
+  },
+  "hash": "4f7fc6872a6b4318a55aa4e02188943db491552c3ee90f0813b8e94c53d7af31"
+}
