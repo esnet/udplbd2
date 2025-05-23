@@ -1,1 +1,6 @@
 target
+Dockerfile
+.env
+coverage.html
+udplbd.db
+.dockerignore
