@@ -89,7 +89,6 @@ impl ActiveReservation {
         let reservation = db.get_reservation(self.reservation_id).await?;
         let lb = db.get_loadbalancer(reservation.loadbalancer_id).await?;
         rules.extend(self.generate_source_filter_rules(db).await?);
-        rules.extend(self.generate_source_filter_rules(db).await?);
         let sessions = db.get_reservation_sessions(self.reservation_id).await?;
         if !sessions.is_empty() {
             rules.extend(self.generate_member_info_rules(&lb, &sessions).await?);

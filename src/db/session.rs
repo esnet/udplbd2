@@ -249,7 +249,7 @@ impl LoadBalancerDB {
 
         let session_row = sqlx::query!(
             r#"
-            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
+            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, is_ready, ip_address, udp_port,
                    port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
             FROM session
             WHERE id = ?1
@@ -268,6 +268,7 @@ impl LoadBalancerDB {
             initial_weight_factor: session_row.initial_weight_factor,
             weight: session_row.weight,
             latest_session_state_id: session_row.latest_session_state_id,
+            is_ready: session_row.is_ready,
             ip_address: session_row.ip_address.parse().unwrap(),
             udp_port: session_row.udp_port as u16,
             port_range: session_row.port_range as u16,
@@ -307,7 +308,7 @@ impl LoadBalancerDB {
     pub async fn get_session(&self, id: i64) -> Result<Session> {
         let record = sqlx::query!(
             r#"
-            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,
+            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, is_ready, ip_address, udp_port,
                    port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at
             FROM session
             WHERE id = ?1 AND deleted_at IS NULL
@@ -326,6 +327,7 @@ impl LoadBalancerDB {
             initial_weight_factor: record.initial_weight_factor,
             weight: record.weight,
             latest_session_state_id: record.latest_session_state_id,
+            is_ready: record.is_ready,
             ip_address: record
                 .ip_address
                 .parse()

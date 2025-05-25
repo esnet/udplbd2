@@ -38,6 +38,7 @@ pub struct Session {
     pub initial_weight_factor: f64,
     pub weight: f64,
     pub latest_session_state_id: Option<i64>,
+    pub is_ready: bool,
     pub ip_address: IpAddr,
     pub udp_port: u16,
     pub port_range: u16,

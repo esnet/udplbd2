@@ -28,7 +28,7 @@ pub fn predict_epoch_boundary_from_samples(
     use chrono::Utc;
 
     if samples.is_empty() {
-        return i64::MAX;
+        return 0;
     }
 
     let latest_sample = &samples[0];
@@ -44,7 +44,7 @@ pub fn predict_epoch_boundary_from_samples(
         let additional_events = rate * time_diff;
 
         if additional_events > (i64::MAX - last_event) as f64 {
-            return i64::MAX;
+            return 0;
         }
 
         last_event + additional_events.round() as i64
@@ -82,13 +82,13 @@ pub fn predict_epoch_boundary_from_samples(
         }
 
         if count == 0 {
-            return i64::MAX;
+            return 0;
         }
 
         let n = count as f64;
         let denominator = n * sum_xx - sum_x * sum_x;
         if denominator == 0.0 {
-            return i64::MAX;
+            return 0;
         }
 
         let slope = (n * sum_xy - sum_x * sum_y) / denominator;
@@ -100,7 +100,7 @@ pub fn predict_epoch_boundary_from_samples(
         let predicted_event = smallest_event + predicted_y.round() as i64;
 
         if predicted_event < smallest_event {
-            return i64::MAX;
+            return 0;
         }
 
         predicted_event
@@ -154,7 +154,11 @@ impl LoadBalancerDB {
     }
 
     /// Generates slot assignments based on current session states
-    pub async fn generate_epoch_assignments(&self, reservation_id: i64) -> Result<Vec<u16>> {
+    pub async fn generate_epoch_assignments(
+        &self,
+        reservation_id: i64,
+        shuffle: bool,
+    ) -> Result<Vec<u16>> {
         // Get the latest session state for each session with readiness info
         let session_states = sqlx::query!(
             r#"
@@ -266,9 +270,11 @@ impl LoadBalancerDB {
             }
         }
 
-        // Step 4: Shuffle slots
-        let mut rng = rng();
-        slots.shuffle(&mut rng);
+        if shuffle {
+            // Step 4: Shuffle slots
+            let mut rng = rng();
+            slots.shuffle(&mut rng);
+        }
 
         Ok(slots)
     }
@@ -436,7 +442,10 @@ impl LoadBalancerDB {
                 Err(other_err) => return Err(other_err),
             },
         };
-        let slot_assignments = self.generate_epoch_assignments(reservation_id).await?;
+        let should_shuffle = boundary_event != 0;
+        let slot_assignments = self
+            .generate_epoch_assignments(reservation_id, should_shuffle)
+            .await?;
         if boundary_event > 0 {
             trace!("next epoch for {reservation_id} will begin at {boundary_event}");
         }
@@ -604,7 +613,7 @@ mod tests {
         let samples = vec![];
         let offset = Duration::milliseconds(0);
         let result = predict_epoch_boundary_from_samples(&samples, offset);
-        assert_eq!(result, i64::MAX);
+        assert_eq!(result, 0);
     }
 
     #[test]

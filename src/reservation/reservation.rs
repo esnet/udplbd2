@@ -276,16 +276,14 @@ impl ReservationManager {
         }
         for res in reservations.values() {
             if let Ok(sessions) = db.get_reservation_sessions(res.reservation_id).await {
-                let boundary_event = res.predict_epoch_boundary_from_sync(offset);
-                if advance {
+                if !sessions.is_empty() && sessions.iter().any(|s| s.is_ready) && advance {
+                    let boundary_event = res.predict_epoch_boundary_from_sync(offset);
                     db.advance_epoch(res.reservation_id, offset, boundary_event)
                         .await?;
                 }
-                if !sessions.is_empty() {
-                    if let Ok(mut r) = res.generate_epoch_rules(db).await {
-                        rules.append(&mut r);
-                    }
-                }
+            }
+            if let Ok(mut r) = res.generate_epoch_rules(db).await {
+                rules.append(&mut r);
             }
         }
         Ok(rules)
@@ -312,6 +310,8 @@ impl ReservationManager {
                     // 2) Acquire lock for expired/cleanup and curr update
                     let mut res_map = active.lock().await;
                     let start = std::time::Instant::now();
+                    let total_start = std::time::Instant::now();
+                    let db_start = std::time::Instant::now();
                     Self::check_expired_reservations(&db, &mut res_map).await?;
                     let elapsed = start.elapsed().as_millis();
                     trace!("check_expired_reservations ({}ms)", elapsed);
@@ -350,8 +350,6 @@ impl ReservationManager {
                                 trace!("rules reloaded due to no sessions ({}ms)", elapsed);
                             }
                         } else {
-                            let total_start = std::time::Instant::now();
-                            let db_start = std::time::Instant::now();
                             let diffs = compare_rule_sets(&curr, &desired);
                             let db_time = db_start.elapsed().as_millis();
                             let mut bulk_time = 0;

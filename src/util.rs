@@ -84,7 +84,7 @@ pub struct Prefix {
 /// # Returns
 /// A vector of `Prefix` structs, each representing a power-of-two range segment
 pub fn range_as_power_of_two_prefixes(start: u64, end: u64) -> Vec<Prefix> {
-    if start == 0 && end == u64::MAX {
+    if start == 0 && (end == 0 || end == u64::MAX) {
         return vec![Prefix {
             start: 0,
             power_of_two: 64,
@@ -96,7 +96,10 @@ pub fn range_as_power_of_two_prefixes(start: u64, end: u64) -> Vec<Prefix> {
 
     if end <= start {
         warn!("next boundary {end} is smaller than or equal to previous boundary {start}");
-        return result;
+        return vec![Prefix {
+            start: 0,
+            power_of_two: 64,
+        }];
     }
 
     while current_start < end {

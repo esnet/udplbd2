@@ -210,7 +210,10 @@ async fn test_slot_generation() {
     }
 
     // Test with default session states (should use defaults)
-    let slots = db.generate_epoch_assignments(reservation.id).await.unwrap();
+    let slots = db
+        .generate_epoch_assignments(reservation.id, true)
+        .await
+        .unwrap();
     assert_eq!(slots.len(), NUM_SLOTS);
 
     // Verify distribution roughly matches weights

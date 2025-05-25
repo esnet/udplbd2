@@ -7,11 +7,12 @@ use crate::proto::smartnic::p4_v2::{
 };
 use prost::Message;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt,
     net::IpAddr,
     net::{Ipv4Addr, Ipv6Addr},
 };
+use tracing::debug;
 
 // Helper functions for hex conversion
 fn hex<T: std::fmt::LowerHex>(val: T) -> String {
@@ -601,17 +602,29 @@ impl fmt::Display for TableRule {
 #[must_use]
 pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Vec<TableUpdate> {
     let mut updates_by_table: HashMap<String, TableUpdate> = HashMap::new();
-    let mut table_order: Vec<String> = Vec::new(); // To maintain the order of tables
+    let mut table_order: Vec<String> = Vec::new();
 
     // Index old rules by key for efficient lookup
     let mut old_by_key: HashMap<String, &TableRule> =
         old_rules.iter().map(|r| (rule_key(r), r)).collect();
 
-    // Process new rules
+    // Track the final version of each new rule (last one wins)
+    let mut new_by_key: HashMap<String, &TableRule> = HashMap::new();
+    let mut seen_keys: HashSet<String> = HashSet::new();
+
     for new_rule in new_rules {
+        let key = rule_key(new_rule);
+        if seen_keys.contains(&key) {
+            debug!("dupe rule for key '{}' (last one will be used)", key);
+        }
+        seen_keys.insert(key.clone());
+        new_by_key.insert(key, new_rule); // last one wins
+    }
+
+    // Organize the new rules by table and compute diffs
+    for (key, new_rule) in new_by_key {
         let table_name = new_rule.table_name.clone();
 
-        // Record table order
         if !updates_by_table.contains_key(&table_name) {
             table_order.push(table_name.clone());
             updates_by_table.insert(
@@ -626,7 +639,6 @@ pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Ve
         }
 
         let table_update = updates_by_table.get_mut(&table_name).unwrap();
-        let key = rule_key(new_rule);
 
         if let Some(old_rule) = old_by_key.remove(&key) {
             if rule_value(old_rule) != rule_value(new_rule) {
@@ -641,7 +653,6 @@ pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Ve
     for (_key, old_rule) in old_by_key {
         let table_name = old_rule.table_name.clone();
 
-        // Ensure deletions are also ordered
         if !updates_by_table.contains_key(&table_name) {
             table_order.push(table_name.clone());
             updates_by_table.insert(
@@ -659,7 +670,6 @@ pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Ve
         table_update.deletions.push(old_rule.clone());
     }
 
-    // Preserve table order from new_rules
     table_order
         .into_iter()
         .filter_map(|name| updates_by_table.remove(&name))

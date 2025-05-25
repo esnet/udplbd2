@@ -92,7 +92,7 @@ impl LoadBalancerDB {
         let sessions = sqlx::query!(
             r#"
             SELECT
-                id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port, port_range,
+                id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, is_ready, ip_address, udp_port, port_range,
                 mac_address, min_factor, max_factor, keep_lb_header, created_at, deleted_at
             FROM session
             WHERE reservation_id = ?1 AND deleted_at IS NULL
@@ -110,6 +110,7 @@ impl LoadBalancerDB {
                 initial_weight_factor: record.initial_weight_factor,
                 weight: record.weight,
                 latest_session_state_id: record.latest_session_state_id,
+                is_ready: record.is_ready,
                 ip_address: record.ip_address.parse().ok()?,
                 udp_port: record.udp_port as u16,
                 port_range: record.port_range as u16,
