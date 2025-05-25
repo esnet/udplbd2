@@ -603,6 +603,7 @@ impl fmt::Display for TableRule {
 pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Vec<TableUpdate> {
     let mut updates_by_table: HashMap<String, TableUpdate> = HashMap::new();
     let mut table_order: Vec<String> = Vec::new();
+    let mut seen_tables: HashSet<String> = HashSet::new();
 
     // Index old rules by key for efficient lookup
     let mut old_by_key: HashMap<String, &TableRule> =
@@ -614,31 +615,30 @@ pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Ve
 
     for new_rule in new_rules {
         let key = rule_key(new_rule);
-        if seen_keys.contains(&key) {
+        if !seen_keys.insert(key.clone()) {
             debug!("dupe rule for key '{}' (last one will be used)", key);
         }
-        seen_keys.insert(key.clone());
+
         new_by_key.insert(key, new_rule); // last one wins
+
+        let table_name = new_rule.table_name.clone();
+        if seen_tables.insert(table_name.clone()) {
+            table_order.push(table_name);
+        }
     }
 
     // Organize the new rules by table and compute diffs
     for (key, new_rule) in new_by_key {
         let table_name = new_rule.table_name.clone();
 
-        if !updates_by_table.contains_key(&table_name) {
-            table_order.push(table_name.clone());
-            updates_by_table.insert(
-                table_name.clone(),
-                TableUpdate {
-                    description: table_name.clone(),
-                    insertions: Vec::new(),
-                    updates: Vec::new(),
-                    deletions: Vec::new(),
-                },
-            );
-        }
-
-        let table_update = updates_by_table.get_mut(&table_name).unwrap();
+        let table_update = updates_by_table
+            .entry(table_name.clone())
+            .or_insert_with(|| TableUpdate {
+                description: table_name.clone(),
+                insertions: Vec::new(),
+                updates: Vec::new(),
+                deletions: Vec::new(),
+            });
 
         if let Some(old_rule) = old_by_key.remove(&key) {
             if rule_value(old_rule) != rule_value(new_rule) {
@@ -653,20 +653,20 @@ pub fn compare_rule_sets(old_rules: &[TableRule], new_rules: &[TableRule]) -> Ve
     for (_key, old_rule) in old_by_key {
         let table_name = old_rule.table_name.clone();
 
-        if !updates_by_table.contains_key(&table_name) {
-            table_order.push(table_name.clone());
-            updates_by_table.insert(
-                table_name.clone(),
+        let table_update = updates_by_table
+            .entry(table_name.clone())
+            .or_insert_with(|| {
+                if seen_tables.insert(table_name.clone()) {
+                    table_order.push(table_name.clone());
+                }
                 TableUpdate {
                     description: table_name.clone(),
                     insertions: Vec::new(),
                     updates: Vec::new(),
                     deletions: Vec::new(),
-                },
-            );
-        }
+                }
+            });
 
-        let table_update = updates_by_table.get_mut(&table_name).unwrap();
         table_update.deletions.push(old_rule.clone());
     }
 
