@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT lb.fpga_lb_id\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.id = ?1 AND r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "fpga_lb_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "dafa12b5d8bf41251414d7e3d7940cc7b215daa7c2e295c4feec767c54383d2f"
+}

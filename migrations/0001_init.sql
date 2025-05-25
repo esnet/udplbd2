@@ -61,6 +61,7 @@ CREATE TABLE IF NOT EXISTS loadbalancer (
     unicast_ipv4_address TEXT NOT NULL,
     unicast_ipv6_address TEXT NOT NULL,
     event_number_udp_port INTEGER NOT NULL,
+    fpga_lb_id INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
     deleted_at INTEGER
 );
@@ -73,7 +74,6 @@ CREATE TABLE IF NOT EXISTS reservation (
     reserved_until INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
     deleted_at INTEGER,
-    fpga_lb_id INTEGER NOT NULL,
     current_epoch INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX idx_reservation_loadbalancer_id ON reservation(loadbalancer_id);

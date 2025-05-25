@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            INSERT INTO loadbalancer (\n                name,\n                unicast_mac_address,\n                broadcast_mac_address,\n                unicast_ipv4_address,\n                unicast_ipv6_address,\n                event_number_udp_port\n            )\n            VALUES (?1, ?2, ?3, ?4, ?5, ?6)\n            RETURNING id, name, unicast_mac_address, broadcast_mac_address,\n                      unicast_ipv4_address, unicast_ipv6_address,\n                      event_number_udp_port, created_at, deleted_at\n            ",
+  "query": "\n            UPDATE loadbalancer\n            SET name = ?1,\n                unicast_mac_address = ?2,\n                broadcast_mac_address = ?3,\n                unicast_ipv4_address = ?4,\n                unicast_ipv6_address = ?5,\n                event_number_udp_port = ?6,\n                fpga_lb_id = ?7\n            WHERE id = ?8 AND deleted_at IS NULL\n            RETURNING id, name, unicast_mac_address, broadcast_mac_address,\n                      unicast_ipv4_address, unicast_ipv6_address,\n                      event_number_udp_port, fpga_lb_id, created_at, deleted_at\n            ",
   "describe": {
     "columns": [
       {
@@ -39,20 +39,26 @@
         "type_info": "Integer"
       },
       {
-        "name": "created_at",
+        "name": "fpga_lb_id",
         "ordinal": 7,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 9,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 6
+      "Right": 8
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -64,5 +70,5 @@
       true
     ]
   },
-  "hash": "211704dc13502088e271b53010ebbbe2a850a555f9d05a0c048efdc6f7b2bb54"
+  "hash": "22c813e96db4224bb56553fb958ccc44a6b3775bc465ab4c50e48ac2f33dda9e"
 }

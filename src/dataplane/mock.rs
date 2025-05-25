@@ -99,7 +99,7 @@ impl MockLoadBalancer {
                         if let Some((payload, dst_addr)) = self.process_packet(data, &mut state) {
                             if let Err(e) = socket.send_to(&payload, dst_addr).await {
                                 error!(
-                                    "Failed to forward packet: could not send to {}: {}",
+                                    "failed to forward packet: could not send to {}: {}",
                                     dst_addr, e
                                 );
                             }
@@ -107,7 +107,7 @@ impl MockLoadBalancer {
                     }
                     // Underlying socket error.
                     Ok(Err(e)) => {
-                        error!("Socket error on {}: {}", self.src_ip, e);
+                        error!("socket error on {}: {}", self.src_ip, e);
                         break;
                     }
                     // Timeout elapsed: check shutdown flag and then continue.
@@ -119,7 +119,7 @@ impl MockLoadBalancer {
                     }
                 }
             }
-            info!("Mock LB task for {} shutting down", self.src_ip);
+            info!("mock LB task for {} shutting down", self.src_ip);
         })
     }
 

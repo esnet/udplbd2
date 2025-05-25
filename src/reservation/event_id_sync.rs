@@ -80,7 +80,7 @@ impl EventIdSyncServer {
         let socket = match UdpSocket::bind(self.address).await {
             Ok(s) => s,
             Err(e) => {
-                error!("Failed to bind event number server: {}", e);
+                error!("failed to bind event number server: {}", e);
                 return;
             }
         };
@@ -96,7 +96,7 @@ impl EventIdSyncServer {
             tokio::select! {
                 result = socket.recv_from(&mut buf) => {
                     if let Err(e) = self.handle_packet(result, &buf).await {
-                        error!("Error handling packet: {}", e);
+                        error!("error handling packet: {}", e);
                     }
                 }
                 _ = shutdown_rx.recv() => {

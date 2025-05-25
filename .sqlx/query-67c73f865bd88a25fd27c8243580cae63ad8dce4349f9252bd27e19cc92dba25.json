@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch\n             FROM reservation\n             WHERE id = ?1 AND deleted_at IS NULL",
+  "query": "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch\n             FROM reservation\n             WHERE id = ?1 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -29,13 +29,8 @@
         "type_info": "Integer"
       },
       {
-        "name": "fpga_lb_id",
-        "ordinal": 5,
-        "type_info": "Integer"
-      },
-      {
         "name": "current_epoch",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer"
       }
     ],
@@ -48,9 +43,8 @@
       false,
       false,
       true,
-      false,
       false
     ]
   },
-  "hash": "2c4be90d8546eb019a71cfb27dc9b586e11a09417df676c17fe0bb1cc11914bc"
+  "hash": "67c73f865bd88a25fd27c8243580cae63ad8dce4349f9252bd27e19cc92dba25"
 }

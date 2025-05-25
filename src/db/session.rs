@@ -118,6 +118,7 @@ impl LoadBalancerDB {
             WHERE deleted_at IS NULL
               AND created_at < strftime('%s', 'now', '-5 seconds') * 1000
               AND latest_session_state_id IS NOT NULL
+              AND is_ready = TRUE
               AND (
                 SELECT timestamp FROM session_state WHERE id = session.latest_session_state_id
               ) < strftime('%s', 'now', '-2 seconds') * 1000

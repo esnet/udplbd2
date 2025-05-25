@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO reservation (loadbalancer_id, reserved_until, fpga_lb_id)\n             VALUES (?1, ?2, ?3)\n             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch",
+  "query": "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch\n             FROM reservation\n             WHERE deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -29,18 +29,13 @@
         "type_info": "Integer"
       },
       {
-        "name": "fpga_lb_id",
-        "ordinal": 5,
-        "type_info": "Integer"
-      },
-      {
         "name": "current_epoch",
-        "ordinal": 6,
+        "ordinal": 5,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 3
+      "Right": 0
     },
     "nullable": [
       false,
@@ -48,9 +43,8 @@
       false,
       false,
       true,
-      false,
       false
     ]
   },
-  "hash": "d40e7eee93ab2980c149836712febc6289e3e1b17d0ccfb420eb66d03fc1c898"
+  "hash": "281085c7934401e63384c77b8813a389bfbf10548af72848cab3a2de932df69e"
 }

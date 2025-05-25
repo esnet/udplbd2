@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, name, unicast_mac_address, broadcast_mac_address,\n                   unicast_ipv4_address, unicast_ipv6_address,\n                   event_number_udp_port, created_at, deleted_at\n            FROM loadbalancer\n            WHERE id = ?1 AND deleted_at IS NULL\n            ",
+  "query": "\n            INSERT INTO loadbalancer (\n                name,\n                unicast_mac_address,\n                broadcast_mac_address,\n                unicast_ipv4_address,\n                unicast_ipv6_address,\n                event_number_udp_port,\n                fpga_lb_id\n            )\n            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)\n            RETURNING id, name, unicast_mac_address, broadcast_mac_address,\n                      unicast_ipv4_address, unicast_ipv6_address,\n                      event_number_udp_port, fpga_lb_id, created_at, deleted_at\n            ",
   "describe": {
     "columns": [
       {
@@ -39,20 +39,26 @@
         "type_info": "Integer"
       },
       {
-        "name": "created_at",
+        "name": "fpga_lb_id",
         "ordinal": 7,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 9,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 1
+      "Right": 7
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -64,5 +70,5 @@
       true
     ]
   },
-  "hash": "3cda87238e3f79f296fcff3dc32f6a32a4d06d8729ff5b8762ad86fe2f3a2fe9"
+  "hash": "fd98b3d79a51b3377eed43e32bb44855e11d56650a1972c518be9b222bd41e06"
 }

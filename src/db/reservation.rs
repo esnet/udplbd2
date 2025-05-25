@@ -12,34 +12,12 @@ impl LoadBalancerDB {
     pub async fn create_reservation(&self, lb_id: i64, duration: Duration) -> Result<Reservation> {
         let reserved_until = (Utc::now() + duration).timestamp_millis();
 
-        // Find the first available fpga_lb_id
-        let mut fpga_lb_id: i64 = 0;
-        let active_reservations =
-            sqlx::query!("SELECT fpga_lb_id FROM reservation WHERE deleted_at IS NULL")
-                .fetch_all(&self.read_pool)
-                .await?;
-
-        let mut used_ids = std::collections::HashSet::new();
-        for res in active_reservations {
-            used_ids.insert(res.fpga_lb_id);
-        }
-
-        while used_ids.contains(&fpga_lb_id) {
-            fpga_lb_id += 1;
-            if fpga_lb_id >= 8 {
-                return Err(Error::ResourceExhausted(
-                    "Max number of reservations reached".to_string(),
-                ));
-            }
-        }
-
         let record = sqlx::query!(
-            "INSERT INTO reservation (loadbalancer_id, reserved_until, fpga_lb_id)
-             VALUES (?1, ?2, ?3)
-             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch",
+            "INSERT INTO reservation (loadbalancer_id, reserved_until)
+             VALUES (?1, ?2)
+             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch",
             lb_id,
             reserved_until,
-            fpga_lb_id
         )
         .fetch_one(&self.write_pool)
         .await?;
@@ -55,7 +33,6 @@ impl LoadBalancerDB {
                 DateTime::<Utc>::from_timestamp_millis(dt)
                     .expect("deleted_at set but out of range!")
             }),
-            fpga_lb_id: record.fpga_lb_id as u16,
             current_epoch: record.current_epoch,
         })
     }
@@ -63,7 +40,7 @@ impl LoadBalancerDB {
     /// Retrieves a reservation by ID.
     pub async fn get_reservation(&self, id: i64) -> Result<Reservation> {
         let reservation_record = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch
+            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch
              FROM reservation
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -85,9 +62,26 @@ impl LoadBalancerDB {
                 DateTime::<Utc>::from_timestamp_millis(dt)
                     .expect("deleted_at set but out of range!")
             }),
-            fpga_lb_id: reservation_record.fpga_lb_id as u16,
             current_epoch: reservation_record.current_epoch,
         })
+    }
+
+    /// Gets the fpga_lb_id for a reservation by looking up its associated load balancer.
+    pub async fn get_reservation_fpga_lb_id(&self, reservation_id: i64) -> Result<u16> {
+        let record = sqlx::query!(
+            r#"
+            SELECT lb.fpga_lb_id
+            FROM reservation r
+            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id
+            WHERE r.id = ?1 AND r.deleted_at IS NULL AND lb.deleted_at IS NULL
+            "#,
+            reservation_id
+        )
+        .fetch_optional(&self.read_pool)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("Reservation {reservation_id} not found")))?;
+
+        Ok(record.fpga_lb_id as u16)
     }
 
     /// Gets all sessions for a reservation
@@ -231,7 +225,7 @@ impl LoadBalancerDB {
 
     pub async fn list_reservations(&self) -> Result<Vec<Reservation>> {
         let records = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, fpga_lb_id, current_epoch
+            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch
              FROM reservation
              WHERE deleted_at IS NULL"
         )
@@ -251,7 +245,6 @@ impl LoadBalancerDB {
                     DateTime::<Utc>::from_timestamp_millis(dt)
                         .expect("deleted_at set but out of range!")
                 }),
-                fpga_lb_id: record.fpga_lb_id as u16,
                 current_epoch: record.current_epoch,
             });
         }
@@ -264,10 +257,10 @@ impl LoadBalancerDB {
     ) -> Result<Vec<(Reservation, crate::db::models::LoadBalancer)>> {
         let records = sqlx::query!(
             r#"
-            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at, r.fpga_lb_id,
+            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at,
                    lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,
                    lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,
-                   lb.created_at lb_created_at, r.current_epoch
+                   lb.fpga_lb_id, lb.created_at lb_created_at, r.current_epoch
             FROM reservation r
             JOIN loadbalancer lb ON r.loadbalancer_id = lb.id
             WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL
@@ -289,7 +282,6 @@ impl LoadBalancerDB {
                     created_at: DateTime::<Utc>::from_timestamp_millis(record.res_created_at)
                         .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,
-                    fpga_lb_id: record.fpga_lb_id as u16,
                     current_epoch: record.current_epoch,
                 },
                 crate::db::models::LoadBalancer {
@@ -312,6 +304,7 @@ impl LoadBalancerDB {
                         .parse()
                         .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
                     event_number_udp_port: record.event_number_udp_port as u16,
+                    fpga_lb_id: record.fpga_lb_id as u16,
                     created_at: DateTime::<Utc>::from_timestamp_millis(record.lb_created_at)
                         .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,

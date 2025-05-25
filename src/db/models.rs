@@ -15,6 +15,7 @@ pub struct LoadBalancer {
     pub unicast_ipv4_address: Ipv4Addr,
     pub unicast_ipv6_address: Ipv6Addr,
     pub event_number_udp_port: u16,
+    pub fpga_lb_id: u16,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }
@@ -23,7 +24,6 @@ pub struct LoadBalancer {
 pub struct Reservation {
     pub id: i64,
     pub loadbalancer_id: i64,
-    pub fpga_lb_id: u16,
     pub reserved_until: DateTime<Utc>,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,

@@ -138,7 +138,7 @@ impl LoadBalancerService {
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb.unicast_ipv4_address.to_string(),
             data_ipv6_address: lb.unicast_ipv6_address.to_string(),
-            fpga_lb_id: reservation.fpga_lb_id as u32,
+            fpga_lb_id: lb.fpga_lb_id as u32,
         }))
     }
 
@@ -183,7 +183,7 @@ impl LoadBalancerService {
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb.unicast_ipv4_address.to_string(),
             data_ipv6_address: lb.unicast_ipv6_address.to_string(),
-            fpga_lb_id: reservation.fpga_lb_id as u32,
+            fpga_lb_id: lb.fpga_lb_id as u32,
         }))
     }
 

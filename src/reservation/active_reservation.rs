@@ -7,10 +7,7 @@ use crate::metrics::{
 };
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::rules::*;
-use crate::util::{
-    generate_solicited_node_multicast_ipv6, generate_solicited_node_multicast_mac, mac_to_u64,
-    range_as_power_of_two_prefixes, Prefix,
-};
+use crate::util::{mac_to_u64, range_as_power_of_two_prefixes, Prefix};
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -77,73 +74,27 @@ impl ActiveReservation {
         self.current_rules = rules;
     }
 
-    /// Generates all rules for this reservation
+    /// Generates all rules for this reservation.
+    /// Assumes epoch advancement has already occurred.
     pub async fn generate_all_rules(&self, db: &LoadBalancerDB) -> Result<Vec<TableRule>> {
-        let mut rules = Vec::new();
-
-        // Get reservation and associated loadbalancer
-        let reservation = db.get_reservation(self.reservation_id).await?;
-        let lb = db.get_loadbalancer(reservation.loadbalancer_id).await?;
-
-        rules.extend(self.generate_l2_filter_rules(&lb));
-        rules.extend(self.generate_l3_filter_rules(&lb));
-        rules.extend(self.generate_source_filter_rules(db).await?);
-
-        let sessions = db.get_reservation_sessions(self.reservation_id).await?;
-
-        if !sessions.is_empty() {
-            rules.extend(self.generate_member_info_rules(&lb, &sessions).await?);
-            rules.extend(self.generate_epoch_rules(db).await?);
-        }
-
+        let mut rules = self.generate_non_epoch_rules(db).await?;
+        rules.extend(self.generate_epoch_rules(db).await?);
         Ok(rules)
     }
 
-    /// Generates L2 filter rule for IPv6 neighbor discovery
-    fn generate_l2_filter_rules(&self, lb: &crate::db::models::LoadBalancer) -> Vec<TableRule> {
-        vec![Layer2InputPacketFilterRule {
-            match_dest_mac_addr: generate_solicited_node_multicast_mac(
-                &generate_solicited_node_multicast_ipv6(&lb.unicast_ipv6_address),
-            ),
-            set_src_mac_addr: mac_to_u64(lb.unicast_mac_address),
+    /// Generates all rules for this reservation except epoch-dependent rules.
+    pub async fn generate_non_epoch_rules(&self, db: &LoadBalancerDB) -> Result<Vec<TableRule>> {
+        let mut rules = Vec::new();
+        // Get reservation and associated loadbalancer
+        let reservation = db.get_reservation(self.reservation_id).await?;
+        let lb = db.get_loadbalancer(reservation.loadbalancer_id).await?;
+        rules.extend(self.generate_source_filter_rules(db).await?);
+        rules.extend(self.generate_source_filter_rules(db).await?);
+        let sessions = db.get_reservation_sessions(self.reservation_id).await?;
+        if !sessions.is_empty() {
+            rules.extend(self.generate_member_info_rules(&lb, &sessions).await?);
         }
-        .into()]
-    }
-
-    /// Generates L3 filter rules for IPv4/IPv6 and ARP handling.
-    fn generate_l3_filter_rules(&self, lb: &crate::db::models::LoadBalancer) -> Vec<TableRule> {
-        vec![
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv4,
-                match_dest_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_src_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_lb_instance_id: self.lb_fpga_id,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv4Arp,
-                match_dest_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_src_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_lb_instance_id: self.lb_fpga_id,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv6,
-                match_dest_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_src_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_lb_instance_id: self.lb_fpga_id,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv6,
-                match_dest_ip_addr: IpAddr::V6(generate_solicited_node_multicast_ipv6(
-                    &lb.unicast_ipv6_address,
-                )),
-                set_src_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_lb_instance_id: self.lb_fpga_id,
-            }
-            .into(),
-        ]
+        Ok(rules)
     }
 
     /// Creates whitelist rules for authorized sender IPs.
@@ -203,8 +154,11 @@ impl ActiveReservation {
     }
 
     /// Generates rules for epoch transitions and member mappings.
-    async fn generate_epoch_rules(&self, db: &LoadBalancerDB) -> Result<Vec<TableRule>> {
+    /// Assumes epoch advancement has already occurred.
+    pub async fn generate_epoch_rules(&self, db: &LoadBalancerDB) -> Result<Vec<TableRule>> {
+        // Do NOT advance epoch here; just fetch recent epochs and generate rules
         let mut rules = Vec::new();
+        // Get recent epochs including the most recent one
         let mut recent_epochs = sqlx::query!(
             r#"
             SELECT id, boundary_event, epoch_count, slots

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, name, unicast_mac_address, broadcast_mac_address,\n                   unicast_ipv4_address, unicast_ipv6_address,\n                   event_number_udp_port, created_at, deleted_at\n            FROM loadbalancer\n            WHERE deleted_at IS NULL\n            ORDER BY name\n            ",
+  "query": "\n            SELECT id, name, unicast_mac_address, broadcast_mac_address,\n                   unicast_ipv4_address, unicast_ipv6_address,\n                   event_number_udp_port, fpga_lb_id, created_at, deleted_at\n            FROM loadbalancer\n            WHERE deleted_at IS NULL\n            ORDER BY name\n            ",
   "describe": {
     "columns": [
       {
@@ -39,13 +39,18 @@
         "type_info": "Integer"
       },
       {
-        "name": "created_at",
+        "name": "fpga_lb_id",
         "ordinal": 7,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 9,
         "type_info": "Integer"
       }
     ],
@@ -61,8 +66,9 @@
       false,
       false,
       false,
+      false,
       true
     ]
   },
-  "hash": "66c9d89effb46226695db2111eb4831d2c647b43d3d78d10bfbbd1cc86607860"
+  "hash": "bd3f539c4b299b4d2e6df4a3e7a5ec02332f16b2e5d801926fa6cd94e622e5ce"
 }

@@ -522,7 +522,7 @@ pub mod tester {
                         }
                         TimelineEvent::FreeReceiver { receiver } => {
                             debug!(
-                                "timeline {} at {} ms: Freeing receiver '{}'",
+                                "timeline {} at {} ms: freeing receiver '{}'",
                                 timeline.id, relative_time, receiver
                             );
                             sim.host("free_receiver", move || async move {

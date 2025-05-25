@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT fpga_lb_id FROM reservation WHERE deleted_at IS NULL",
+  "query": "SELECT fpga_lb_id FROM loadbalancer WHERE deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "2040c229779c7cb59ab8ed095381b4b6d5c05dbdbb54b9e24abd93715e8d8030"
+  "hash": "6a891c1cdb242292f05786428367073d6d82a2f9b5200d044d303853a3109170"
 }

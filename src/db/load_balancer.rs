@@ -9,6 +9,29 @@ use macaddr::MacAddr6;
 use std::net::{Ipv4Addr, Ipv6Addr};
 
 impl LoadBalancerDB {
+    /// Finds the first available fpga_lb_id (0-7).
+    async fn find_available_fpga_lb_id(&self) -> Result<u16> {
+        let active_loadbalancers =
+            sqlx::query!("SELECT fpga_lb_id FROM loadbalancer WHERE deleted_at IS NULL")
+                .fetch_all(&self.read_pool)
+                .await?;
+
+        let mut used_ids = std::collections::HashSet::new();
+        for lb in active_loadbalancers {
+            used_ids.insert(lb.fpga_lb_id as u16);
+        }
+
+        for fpga_lb_id in 0..8u16 {
+            if !used_ids.contains(&fpga_lb_id) {
+                return Ok(fpga_lb_id);
+            }
+        }
+
+        Err(Error::ResourceExhausted(
+            "Max number of load balancers reached (8)".to_string(),
+        ))
+    }
+
     /// Creates a new loadbalancer.
     pub async fn create_loadbalancer(
         &self,
@@ -19,6 +42,9 @@ impl LoadBalancerDB {
         unicast_ipv6: Ipv6Addr,
         event_number_port: u16,
     ) -> Result<LoadBalancer> {
+        // Find the first available fpga_lb_id
+        let fpga_lb_id = self.find_available_fpga_lb_id().await?;
+
         let unicast_mac_string = unicast_mac.to_string();
         let broadcast_mac_string = broadcast_mac.to_string();
         let unicast_ipv4_string = unicast_ipv4.to_string();
@@ -31,12 +57,13 @@ impl LoadBalancerDB {
                 broadcast_mac_address,
                 unicast_ipv4_address,
                 unicast_ipv6_address,
-                event_number_udp_port
+                event_number_udp_port,
+                fpga_lb_id
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             RETURNING id, name, unicast_mac_address, broadcast_mac_address,
                       unicast_ipv4_address, unicast_ipv6_address,
-                      event_number_udp_port, created_at, deleted_at
+                      event_number_udp_port, fpga_lb_id, created_at, deleted_at
             "#,
             name,
             unicast_mac_string,
@@ -44,6 +71,7 @@ impl LoadBalancerDB {
             unicast_ipv4_string,
             unicast_ipv6_string,
             event_number_port,
+            fpga_lb_id,
         )
         .fetch_one(&self.write_pool)
         .await?;
@@ -68,6 +96,7 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
+            fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
                 .ok_or(Error::Parse("created_at out of range".to_string()))?,
             deleted_at: record.deleted_at.map(|dt| {
@@ -128,7 +157,7 @@ impl LoadBalancerDB {
             r#"
             SELECT id, name, unicast_mac_address, broadcast_mac_address,
                    unicast_ipv4_address, unicast_ipv6_address,
-                   event_number_udp_port, created_at, deleted_at
+                   event_number_udp_port, fpga_lb_id, created_at, deleted_at
             FROM loadbalancer
             WHERE id = ?1 AND deleted_at IS NULL
             "#,
@@ -160,6 +189,7 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
+            fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
                 .ok_or(Error::Parse("created_at out of range".to_string()))?,
             deleted_at: record.deleted_at.map(|dt| {
@@ -175,7 +205,7 @@ impl LoadBalancerDB {
             r#"
             SELECT id, name, unicast_mac_address, broadcast_mac_address,
                    unicast_ipv4_address, unicast_ipv6_address,
-                   event_number_udp_port, created_at, deleted_at
+                   event_number_udp_port, fpga_lb_id, created_at, deleted_at
             FROM loadbalancer
             WHERE deleted_at IS NULL
             ORDER BY name
@@ -206,6 +236,7 @@ impl LoadBalancerDB {
                     .parse()
                     .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
                 event_number_udp_port: record.event_number_udp_port as u16,
+                fpga_lb_id: record.fpga_lb_id as u16,
                 created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
                     .ok_or(Error::Parse("created_at out of range".to_string()))?,
                 deleted_at: record.deleted_at.map(|dt| {
@@ -231,11 +262,12 @@ impl LoadBalancerDB {
                 broadcast_mac_address = ?3,
                 unicast_ipv4_address = ?4,
                 unicast_ipv6_address = ?5,
-                event_number_udp_port = ?6
-            WHERE id = ?7 AND deleted_at IS NULL
+                event_number_udp_port = ?6,
+                fpga_lb_id = ?7
+            WHERE id = ?8 AND deleted_at IS NULL
             RETURNING id, name, unicast_mac_address, broadcast_mac_address,
                       unicast_ipv4_address, unicast_ipv6_address,
-                      event_number_udp_port, created_at, deleted_at
+                      event_number_udp_port, fpga_lb_id, created_at, deleted_at
             "#,
             lb.name,
             unicast_mac_string,
@@ -243,6 +275,7 @@ impl LoadBalancerDB {
             unicast_ipv4_string,
             unicast_ipv6_string,
             lb.event_number_udp_port,
+            lb.fpga_lb_id,
             lb.id,
         )
         .fetch_one(&self.write_pool)
@@ -272,6 +305,7 @@ impl LoadBalancerDB {
                 .parse()
                 .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
             event_number_udp_port: record.event_number_udp_port as u16,
+            fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
                 .ok_or(Error::Parse("created_at out of range".to_string()))?,
             deleted_at: record.deleted_at.map(|dt| {
