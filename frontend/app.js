@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let uPlotCharts = {};
     let currentPath = window.location.pathname; // Store current path for comparison
     let chartMetrics = {}; // Store available metrics for chart generation
+let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/highlighting
 
     // Mapping for rendering permissions
     const ResourceTypeMap = { 0: 'All', 1: 'Load Balancer', 2: 'Reservation', 3: 'Session', default: 'Unknown Resource' };
@@ -111,14 +112,14 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!response.ok) {
                 const errorData = await response.json().catch(() => ({ error: 'Failed to parse error response' }));
                 console.error(`API Error (${response.status}) ${options.method || 'GET'} ${endpoint}:`, errorData);
-                alert(`Error: ${errorData.error || `HTTP status ${response.status}`}`);
+                showToast(`Error: ${errorData.error || `HTTP status ${response.status}`}`);
                 throw new Error(`HTTP error! status: ${response.status}`);
             }
             return response.status === 204 ? null : await response.json();
         } catch (error) {
             console.error(`Workspace Error ${options.method || 'GET'} ${endpoint}:`, error);
             if (!error.message.startsWith('HTTP error!') && error.message !== "Authentication required") {
-                alert(`Network or fetch error: ${error.message}`);
+                showToast(`Network or fetch error: ${error.message}`);
             }
             throw error;
         }
@@ -233,42 +234,105 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
-    const renderSessions = (workers) => {
-        receiverList.innerHTML = '';
-        if (!workers?.length) {
-            receiverList.innerHTML = '<li class="no-receivers">No active receivers.</li>';
-            return;
-        }
-        workers.forEach(worker => {
-            const li = document.createElement('li');
-            const lastUpdatedSeconds = worker.last_updated?.seconds;
-            const lastUpdated = lastUpdatedSeconds ? new Date(lastUpdatedSeconds * 1000).toLocaleString() : 'N/A';
-            const receiverId = worker.name; // Still assuming name is usable ID
+const renderSessions = (workers) => {
+    receiverList.innerHTML = '';
+    sessionIdToName = {}; // Reset mapping each time
+    if (!workers?.length) {
+        receiverList.innerHTML = '<li class="no-receivers">No active receivers.</li>';
+        return;
+    }
+    workers.forEach(worker => {
+        const li = document.createElement('li');
+        const lastUpdatedSeconds = worker.last_updated?.seconds;
+        const lastUpdated = lastUpdatedSeconds ? new Date(lastUpdatedSeconds * 1000).toLocaleString() : 'N/A';
+        const receiverId = worker.name; // Still assuming name is usable ID
 
-            li.innerHTML = `
-                <button class="deregister-btn" data-receiver-id="${receiverId}" title="Deregister Session ${receiverId}">
-                    <i class="fas fa-times"></i> Deregister
-                </button>
-                <div class="receiver-name">${worker.name}</div>
-                <div class="receiver-details">
-                    <span>IP Address: <strong>${worker.ip_address}</strong></span>
-                    <span>Queue Fill: <strong>${(worker.fill_percent * 100).toFixed(1)}%</strong></span>
-                    <span>Control Signal: <strong>${worker.control_signal?.toFixed(4) ?? 'N/A'}</strong></span>
-                    <span>Slots: <strong>${worker.slots_assigned ?? 'N/A'}</strong></span>
-                    <span>Last Update: ${lastUpdated}</span>
-                </div>
-            `;
-            // Attach direct event listener to the deregister button
-            const deregBtn = li.querySelector('.deregister-btn[data-receiver-id]');
-            if (deregBtn) {
-                deregBtn.addEventListener('click', (e) => {
-                    e.stopPropagation();
-                    handleDeregisterSession(receiverId);
-                });
+        // Map session ID (worker.session_id or fallback) to receiver name
+        let sessionId = null;
+        if (worker.session_id !== undefined) {
+            sessionId = String(worker.session_id);
+        } else {
+            // Try to extract a number from the name (e.g., "Session 13" or "13")
+            const match = worker.name && worker.name.match(/(\d+)/);
+            if (match) sessionId = match[1];
+        }
+        if (sessionId) {
+            sessionIdToName[sessionId] = worker.name;
+        }
+
+        // --- Color mapping functions ---
+        function getQueueFillColor(fillPercent) {
+            // fillPercent: 0.0 to 1.0
+            if (fillPercent === 0) return '#fff';
+            if (fillPercent <= 0.001) return '#fff';
+            if (fillPercent <= 0.0011) return '#00ff00'; // 0.1% = green
+            // 0.1% (0.001) = green, 100% (1.0) = red, gradient in between
+            // We'll interpolate from green (0.001) to red (1.0)
+            // 0.001 = green (#00ff00), 0.8 = red (#ff0000)
+            // Use white for 0
+            if (fillPercent < 0.001) return '#fff';
+            // Linear interpolation between green and red
+            // t = (fillPercent - 0.001) / (1.0 - 0.001)
+            const t = Math.max(0, Math.min(1, (fillPercent - 0.001) / (0.8 - 0.001)));
+            // Interpolate RGB
+            const r = Math.round(0 + t * (255 - 0));
+            const g = Math.round(255 - t * 255);
+            const b = 0;
+            return `rgb(${r},${g},${b})`;
+        }
+
+        function getControlSignalColor(signal) {
+            // signal: -50 (red) to 0 (white) to +50 (green)
+            if (signal === 0) return '#fff';
+            if (signal <= -50) return '#ff0000';
+            if (signal >= 50) return '#00ff00';
+            // Interpolate: -50 to 0 = red to white, 0 to +50 = white to green
+            if (signal < 0) {
+                // t = (signal + 50) / 50, from 0 (at -50) to 1 (at 0)
+                const t = (signal + 50) / 50;
+                // Red to white: #ff0000 to #ffffff
+                const r = 255;
+                const g = Math.round(0 + t * 255);
+                const b = Math.round(0 + t * 255);
+                return `rgb(${r},${g},${b})`;
+            } else {
+                // t = signal / 50, from 0 (at 0) to 1 (at +50)
+                const t = signal / 50;
+                // White to green: #ffffff to #00ff00
+                const r = Math.round(255 - t * 255);
+                const g = 255;
+                const b = Math.round(255 - t * 255);
+                return `rgb(${r},${g},${b})`;
             }
-            receiverList.appendChild(li);
-        });
-    };
+        }
+
+        const fillPercent = worker.fill_percent ?? 0;
+        const controlSignal = worker.control_signal ?? 0;
+
+        li.innerHTML = `
+            <button class="deregister-btn" data-receiver-id="${receiverId}" title="Deregister Session ${receiverId}">
+                <i class="fas fa-times"></i> Deregister
+            </button>
+            <div class="receiver-name">${worker.name}</div>
+            <div class="receiver-details">
+                <span>IP Address: <strong>${worker.ip_address}</strong></span>
+                <span>Queue Fill: <strong style="color: ${getQueueFillColor(fillPercent)}">${(fillPercent * 100).toFixed(1)}%</strong></span>
+                <span>Control Signal: <strong style="color: ${getControlSignalColor(controlSignal)}">${worker.control_signal?.toFixed(4) ?? 'N/A'}</strong></span>
+                <span>Slots: <strong>${worker.slots_assigned ?? 'N/A'}</strong></span>
+                <span>Last Update: ${lastUpdated}</span>
+            </div>
+        `;
+        // Attach direct event listener to the deregister button
+        const deregBtn = li.querySelector('.deregister-btn[data-receiver-id]');
+        if (deregBtn) {
+            deregBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                handleDeregisterSession(receiverId);
+            });
+        }
+        receiverList.appendChild(li);
+    });
+};
 
     const renderSenders = (senderAddresses) => {
         senderListUl.innerHTML = '';
@@ -422,8 +486,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 8000);
     };
 
-    // Function to fetch timeseries data with since parameter support
+    // --- Timeseries Buffer for Appending Data ---
+    // Buffer to store all timeseries data by series name
+    let timeseriesBuffer = {};
     let lastTimestamp = null;
+
+    // Function to fetch timeseries data with since parameter support
     const fetchTimeseriesData = async (lbId) => {
         if (!AUTH_TOKEN) return null;
         try {
@@ -461,8 +529,46 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeseriesData = await fetchTimeseriesData(lbId);
         if (!timeseriesData) return;
 
-        // Process the timeseries data and update charts
-        renderCharts(timeseriesData);
+        // --- Buffering logic: append new data to buffer, keep up to 5 minutes ---
+        const FIVE_MINUTES_MS = 5 * 60 * 1000;
+        if (timeseriesData && timeseriesData.timeseries && timeseriesData.timeseries.length > 0) {
+            timeseriesData.timeseries.forEach(series => {
+                const name = series.name;
+                const newPoints = series.timeseries?.FloatSamples?.data || [];
+                if (!timeseriesBuffer[name]) {
+                    timeseriesBuffer[name] = [];
+                }
+                // Append new points, deduplicate by timestamp
+                const existingTimestamps = new Set(timeseriesBuffer[name].map(p => p.timestamp));
+                newPoints.forEach(point => {
+                    if (!existingTimestamps.has(point.timestamp)) {
+                        timeseriesBuffer[name].push(point);
+                    }
+                });
+                // Sort by timestamp
+                timeseriesBuffer[name].sort((a, b) => a.timestamp - b.timestamp);
+                // If more than 5 minutes of data, trim old points
+                if (timeseriesBuffer[name].length > 0) {
+                    const latestTs = timeseriesBuffer[name][timeseriesBuffer[name].length - 1].timestamp;
+                    const minTs = latestTs - FIVE_MINUTES_MS;
+                    // Only trim if window exceeds 5 minutes
+                    if (timeseriesBuffer[name][0].timestamp < minTs) {
+                        // Only start trimming after 5 minutes of data
+                        timeseriesBuffer[name] = timeseriesBuffer[name].filter(p => p.timestamp >= minTs);
+                    }
+                }
+            });
+        }
+
+        // Build a timeseriesData-like object from the buffer for rendering
+        const bufferedTimeseriesData = {
+            timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
+                name,
+                timeseries: { FloatSamples: { data } }
+            }))
+        };
+
+        renderCharts(bufferedTimeseriesData);
     };
 
     // Set up polling for chart updates
@@ -474,11 +580,12 @@ document.addEventListener('DOMContentLoaded', () => {
             clearInterval(chartUpdateInterval);
         }
         lastTimestamp = null; // Reset lastTimestamp on new LB selection
+        timeseriesBuffer = {}; // Reset buffer on new LB selection
 
         // Initial update
         updateCharts(lbId);
 
-        // Set up polling every 5 seconds
+        // Set up polling every 1 second (faster updates)
         chartUpdateInterval = setInterval(async () => {
             try {
                 const data = await fetchTimeseriesData(lbId);
@@ -494,11 +601,48 @@ document.addEventListener('DOMContentLoaded', () => {
                     return;
                 }
 
-                renderCharts(data);
+                // --- Buffering logic: append new data to buffer, keep up to 5 minutes ---
+                const FIVE_MINUTES_MS = 5 * 60 * 1000;
+                data.timeseries.forEach(series => {
+                    const name = series.name;
+                    const newPoints = series.timeseries?.FloatSamples?.data || [];
+                    if (!timeseriesBuffer[name]) {
+                        timeseriesBuffer[name] = [];
+                    }
+                    // Append new points, deduplicate by timestamp
+                    const existingTimestamps = new Set(timeseriesBuffer[name].map(p => p.timestamp));
+                    newPoints.forEach(point => {
+                        if (!existingTimestamps.has(point.timestamp)) {
+                            timeseriesBuffer[name].push(point);
+                        }
+                    });
+                    // Sort by timestamp
+                    timeseriesBuffer[name].sort((a, b) => a.timestamp - b.timestamp);
+                    // If more than 5 minutes of data, trim old points
+                    if (timeseriesBuffer[name].length > 0) {
+                        const latestTs = timeseriesBuffer[name][timeseriesBuffer[name].length - 1].timestamp;
+                        const minTs = latestTs - FIVE_MINUTES_MS;
+                        // Only trim if window exceeds 5 minutes
+                        if (timeseriesBuffer[name][0].timestamp < minTs) {
+                            // Only start trimming after 5 minutes of data
+                            timeseriesBuffer[name] = timeseriesBuffer[name].filter(p => p.timestamp >= minTs);
+                        }
+                    }
+                });
+
+                // Build a timeseriesData-like object from the buffer for rendering
+                const bufferedTimeseriesData = {
+                    timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
+                        name,
+                        timeseries: { FloatSamples: { data } }
+                    }))
+                };
+
+                renderCharts(bufferedTimeseriesData);
             } catch (error) {
                 console.error("Error during chart polling:", error);
             }
-        }, 5000);
+        }, 1000);
     };
 
     const stopChartPolling = () => {
@@ -591,13 +735,15 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Function to render charts with timeseries data
+    // --- In-place Chart Updating ---
     const renderCharts = (timeseriesData) => {
-        destroyAllCharts();
-        dynamicChartsArea.innerHTML = ''; // Clear previous charts
+        // Track which chart IDs are still needed this render
+        const neededChartIds = new Set();
 
         if (!timeseriesData || !timeseriesData.timeseries || !timeseriesData.timeseries.length) {
-            console.warn("No timeseries data available for charts");
+            // If no data, show message and remove all charts
             dynamicChartsArea.innerHTML = '<div class="no-data-message">No timeseries data available</div>';
+            destroyAllCharts();
             return;
         }
 
@@ -647,12 +793,91 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         });
 
-        // Create prediction accuracy chart if we have both boundary_event and event_number data
-        if (predictionData.boundary_event && predictionData.event_number) {
-            createPredictionAccuracyChart(predictionData);
+        // Helper to update or create a chart container
+        function ensureChartContainer(title, id) {
+            let container = document.getElementById(id);
+            if (!container) {
+                // Create new container only if it doesn't exist
+                const wrapper = document.createElement('div');
+                wrapper.className = 'chart-container';
+                wrapper.innerHTML = `<h3>${title}</h3><div id="${id}"></div>`;
+                dynamicChartsArea.appendChild(wrapper);
+                container = document.getElementById(id);
+            }
+            return container;
         }
 
-        // Create charts for all session metrics
+        // --- Prediction Accuracy Chart ---
+        if (predictionData.boundary_event && predictionData.event_number) {
+            const chartId = 'chart-prediction-accuracy';
+            neededChartIds.add(chartId);
+
+            const chartContainer = ensureChartContainer('Prediction Accuracy', chartId);
+            const boundaryEventData = predictionData.boundary_event;
+            const eventNumberData = predictionData.event_number;
+
+            // Collect all timestamps from both datasets
+            const allTimestamps = new Set();
+            boundaryEventData.forEach(point => allTimestamps.add(point.timestamp));
+            eventNumberData.forEach(point => allTimestamps.add(point.timestamp));
+            const timestamps = Array.from(allTimestamps).sort((a, b) => a - b);
+
+            // Create value arrays for both datasets
+            const boundaryValues = new Array(timestamps.length).fill(null);
+            const eventNumberValues = new Array(timestamps.length).fill(null);
+            const differenceValues = new Array(timestamps.length).fill(null);
+
+            boundaryEventData.forEach(point => {
+                const idx = timestamps.indexOf(point.timestamp);
+                if (idx !== -1) boundaryValues[idx] = point.value;
+            });
+            eventNumberData.forEach(point => {
+                const idx = timestamps.indexOf(point.timestamp);
+                if (idx !== -1) eventNumberValues[idx] = point.value;
+            });
+            for (let i = 0; i < timestamps.length; i++) {
+                if (boundaryValues[i] !== null && eventNumberValues[i] !== null) {
+                    differenceValues[i] = Math.abs(boundaryValues[i] - eventNumberValues[i]);
+                }
+            }
+
+            const seriesData = [timestamps, boundaryValues, eventNumberValues, differenceValues];
+            const seriesLabels = ['Time', 'Boundary Event', 'Event Number', 'Difference'];
+            const seriesColors = ['transparent', '#4285F4', '#34A853', '#EA4335'];
+
+            const chartOptions = {
+                width: chartContainer.clientWidth,
+                height: 350,
+                series: seriesLabels.map((label, i) => ({
+                    label,
+                    stroke: seriesColors[i],
+                    width: i > 0 ? 2.5 : 0,
+                    points: { show: false },
+                    spanGaps: true
+                })),
+                axes: [
+                    { stroke: "white", grid: { stroke: "#444444" } },
+                    {
+                        label: "Event Number",
+                        labelSize: 20,
+                        stroke: "white",
+                        grid: { stroke: "#444444" },
+                        font: "14px Arial",
+                        color: "white"
+                    }
+                ],
+                scales: { x: { time: true } },
+                legend: { show: true }
+            };
+
+            if (uPlotCharts[chartId]) {
+                uPlotCharts[chartId].setData(seriesData);
+            } else {
+                uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
+            }
+        }
+
+        // --- Session Metric Charts ---
         const sessionMetrics = new Set();
         sessionSeries.forEach(metrics => {
             metrics.forEach((_, metricName) => {
@@ -660,326 +885,171 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         });
 
-        // Create a chart for each session metric
-        sessionMetrics.forEach(metricName => {
-            createSessionMetricChart(metricName, sessionSeries);
-        });
+        sessionMetrics.forEach(metricKey => {
+            const formattedMetricName = metricKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const chartId = `chart-${metricKey}`;
+            neededChartIds.add(chartId);
 
-        // Create charts for reservation metrics
-        reservationSeries.forEach((data, metricName) => {
-            createReservationMetricChart(metricName, data);
-        });
+            const chartContainer = ensureChartContainer(formattedMetricName, chartId);
+            if (!chartContainer) return;
 
-        // Resize charts after rendering
-        setTimeout(() => requestAnimationFrame(() => {
-            Object.values(uPlotCharts).forEach(chart => {
-                if (chart && chart.root) {
-                    const rect = chart.root.getBoundingClientRect();
-                    chart.setSize({ width: rect.width, height: rect.height });
+            // Prepare data for uPlot
+            const timestamps = [];
+            const seriesData = [];
+            const seriesLabels = ['Time'];
+            const seriesColors = ['transparent'];
+            const sessionIds = [];
+
+            sessionSeries.forEach((metrics, sessionId) => {
+                if (metrics.has(metricKey)) {
+                    const data = metrics.get(metricKey);
+                    sessionIds.push(sessionId);
+                    // Always use receiver name if available, else fallback to sessionId
+                    const label = sessionIdToName[sessionId] ? sessionIdToName[sessionId] : `Session ${sessionId}`;
+                    seriesLabels.push(label);
+                    seriesColors.push(getSessionColor(sessionId));
+                    data.forEach((point, idx) => {
+                        if (idx === 0 || !timestamps.includes(point.timestamp  / 1000)) {
+                            timestamps.push(point.timestamp  / 1000);
+                        }
+                    });
                 }
             });
-        }), 50);
-    };
+            timestamps.sort((a, b) => a - b);
+            seriesData.push(timestamps);
 
-    // Helper function to create a chart with session data
-    const createSessionMetricChart = (metricKey, sessionDataMap) => {
-        // Format the metric name for display
-        const formattedMetricName = metricKey
-            .replace(/_/g, ' ')
-            .replace(/\b\w/g, l => l.toUpperCase());
+            sessionSeries.forEach((metrics, sessionId) => {
+                if (metrics.has(metricKey)) {
+                    const data = metrics.get(metricKey);
+                    const values = new Array(timestamps.length).fill(null);
+                    data.forEach(point => {
+                        const idx = timestamps.indexOf(point.timestamp  / 1000);
+                        if (idx !== -1) values[idx] = point.value;
+                    });
+                    seriesData.push(values);
+                }
+            });
 
-        // Create a unique ID for this chart
-        const chartId = `chart-${metricKey}`;
-
-        // Create the chart container
-        const chartContainer = createChartContainer(formattedMetricName, chartId);
-        if (!chartContainer) return;
-
-        // Prepare data for uPlot
-        const timestamps = [];
-        const seriesData = [];
-        const seriesLabels = ['Time'];
-        const seriesColors = ['transparent']; // First series is time (x-axis)
-        const sessionIds = [];
-
-        // Add a series for each session
-        sessionDataMap.forEach((metrics, sessionId) => {
-            if (metrics.has(metricKey)) {
-                const data = metrics.get(metricKey);
-                sessionIds.push(sessionId);
-                seriesLabels.push(`Session ${sessionId}`);
-                seriesColors.push(getSessionColor(sessionId));
-
-                // Extract timestamps and values
-                data.forEach((point, idx) => {
-                    if (idx === 0 || !timestamps.includes(point.timestamp)) {
-                        timestamps.push(point.timestamp);
+            const defaultOptions = {
+                width: chartContainer.clientWidth,
+                height: 350,
+                series: seriesLabels.map((label, i) => ({
+                    label,
+                    stroke: seriesColors[i],
+                    width: i > 0 ? 2.5 : 0,
+                    points: { show: false },
+                    spanGaps: true
+                })),
+                axes: [
+                    { stroke: "white", grid: { stroke: "#444444" }, ticks: { count: 6 } },
+                    {
+                        label: formattedMetricName,
+                        labelSize: 20,
+                        stroke: "white",
+                        grid: { stroke: "#444444" },
+                        font: "14px Arial",
+                        color: "white"
                     }
-                });
-            }
-        });
-
-        // Sort timestamps
-        timestamps.sort((a, b) => a - b);
-
-        // First series is timestamps
-        seriesData.push(timestamps);
-
-        // Add data for each session
-        sessionDataMap.forEach((metrics, sessionId) => {
-            if (metrics.has(metricKey)) {
-                const data = metrics.get(metricKey);
-                const values = new Array(timestamps.length).fill(null);
-
-                // Map values to timestamps
-                data.forEach(point => {
-                    const idx = timestamps.indexOf(point.timestamp);
-                    if (idx !== -1) {
-                        values[idx] = point.value;
-                    }
-                });
-
-                seriesData.push(values);
-            }
-        });
-
-        // Default chart options
-        const defaultOptions = {
-            width: chartContainer.clientWidth,
-            height: 350,
-            series: seriesLabels.map((label, i) => ({
-                label,
-                stroke: seriesColors[i],
-                width: i > 0 ? 2.5 : 0, // Thicker lines
-                points: { show: false },
-                spanGaps: true // Connect across gaps to avoid disconnected lines
-            })),
-            axes: [
-                {
-                    stroke: "white",
-                    grid: { stroke: "#444444" }
-                }, // x-axis (time)
-                {
-                    label: formattedMetricName,
-                    labelSize: 20,
-                    stroke: "white",
-                    grid: { stroke: "#444444" },
-                    font: "14px Arial",
-                    color: "white"
-                }
-            ],
-            scales: {
-                x: {
-                    time: true
-                }
-            },
-            legend: {
-                show: true
-            }
-        };
-
-        // Special options for specific metrics
-        const specialOptions = {};
-        if (metricKey === 'fill_percent') {
-            specialOptions.scales = {
-                y: {
-                    range: [0, 1]
-                }
+                ],
+                scales: { x: { time: true } },
+                legend: { show: true }
             };
-        }
-
-        // Merge with custom options
-        const chartOptions = { ...defaultOptions, ...specialOptions };
-
-        // Create the chart
-        const chart = new uPlot(chartOptions, seriesData, chartContainer);
-        uPlotCharts[chartId] = chart;
-
-        // Store session IDs for highlighting
-        chart.sessionIds = sessionIds;
-
-        return chart;
-    };
-
-    // Create a chart for reservation metrics
-    const createReservationMetricChart = (metricKey, data) => {
-        // Format the metric name for display
-        const formattedMetricName = metricKey
-            .replace(/_/g, ' ')
-            .replace(/\b\w/g, l => l.toUpperCase());
-
-        // Create a unique ID for this chart
-        const chartId = `chart-reservation-${metricKey}`;
-
-        // Create the chart container
-        const chartContainer = createChartContainer(`Reservation ${formattedMetricName}`, chartId);
-        if (!chartContainer) return;
-
-        // Extract timestamps and values
-        const timestamps = data.map(point => point.timestamp);
-        const values = data.map(point => point.value);
-
-        // Prepare data for uPlot
-        const seriesData = [timestamps, values];
-        const seriesLabels = ['Time', formattedMetricName];
-        const seriesColors = ['transparent', '#4285F4']; // First series is time (x-axis)
-
-        // Chart options
-        const chartOptions = {
-            width: chartContainer.clientWidth,
-            height: 350,
-            series: seriesLabels.map((label, i) => ({
-                label,
-                stroke: seriesColors[i],
-                width: i > 0 ? 2.5 : 0, // Thicker lines
-                points: { show: false },
-                spanGaps: true // Connect across gaps to avoid disconnected lines
-            })),
-            axes: [
-                {
-                    stroke: "white",
-                    grid: { stroke: "#444444" }
-                }, // x-axis (time)
-                {
-                    label: formattedMetricName,
-                    labelSize: 20,
-                    stroke: "white",
-                    grid: { stroke: "#444444" },
-                    font: "14px Arial",
-                    color: "white"
-                }
-            ],
-            scales: {
-                x: {
-                    time: true
-                }
-            },
-            legend: {
-                show: true
+            const specialOptions = {};
+            if (metricKey === 'fill_percent') {
+                specialOptions.scales = { y: { range: [0, 1] } };
             }
-        };
+            const chartOptions = { ...defaultOptions, ...specialOptions };
 
-        // Create the chart
-        const chart = new uPlot(chartOptions, seriesData, chartContainer);
-        uPlotCharts[chartId] = chart;
-
-        return chart;
-    };
-
-    // Create prediction accuracy chart comparing epoch/boundary_event with event_number
-    const createPredictionAccuracyChart = (predictionData) => {
-        // Create a unique ID for this chart
-        const chartId = 'chart-prediction-accuracy';
-
-        // Create the chart container
-        const chartContainer = createChartContainer('Prediction Accuracy', chartId);
-        if (!chartContainer) return;
-
-        const boundaryEventData = predictionData.boundary_event;
-        const eventNumberData = predictionData.event_number;
-
-        // Collect all timestamps from both datasets
-        const allTimestamps = new Set();
-        boundaryEventData.forEach(point => allTimestamps.add(point.timestamp));
-        eventNumberData.forEach(point => allTimestamps.add(point.timestamp));
-
-        // Convert to array and sort
-        const timestamps = Array.from(allTimestamps).sort((a, b) => a - b);
-
-        // Create value arrays for both datasets
-        const boundaryValues = new Array(timestamps.length).fill(null);
-        const eventNumberValues = new Array(timestamps.length).fill(null);
-        const differenceValues = new Array(timestamps.length).fill(null);
-
-        // Map boundary event values to timestamps
-        boundaryEventData.forEach(point => {
-            const idx = timestamps.indexOf(point.timestamp);
-            if (idx !== -1) {
-                boundaryValues[idx] = point.value;
+            if (uPlotCharts[chartId]) {
+                uPlotCharts[chartId].setData(seriesData);
+                uPlotCharts[chartId].sessionIds = sessionIds;
+            } else {
+                const chart = new uPlot(chartOptions, seriesData, chartContainer);
+                chart.sessionIds = sessionIds;
+                uPlotCharts[chartId] = chart;
             }
         });
 
-        // Map event number values to timestamps
-        eventNumberData.forEach(point => {
-            const idx = timestamps.indexOf(point.timestamp);
-            if (idx !== -1) {
-                eventNumberValues[idx] = point.value;
+        // --- Reservation Metric Charts ---
+        reservationSeries.forEach((data, metricName) => {
+            const formattedMetricName = metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const chartId = `chart-reservation-${metricName}`;
+            neededChartIds.add(chartId);
+
+            const chartContainer = ensureChartContainer(`Reservation ${formattedMetricName}`, chartId);
+            if (!chartContainer) return;
+
+            const timestamps = data.map(point => point.timestamp / 1000);
+            const values = data.map(point => point.value);
+            const seriesData = [timestamps, values];
+            const seriesLabels = ['Time', formattedMetricName];
+            const seriesColors = ['transparent', '#4285F4'];
+
+            const chartOptions = {
+                width: chartContainer.clientWidth,
+                height: 350,
+                series: seriesLabels.map((label, i) => ({
+                    label,
+                    stroke: seriesColors[i],
+                    width: i > 0 ? 2.5 : 0,
+                    points: { show: false },
+                    spanGaps: true
+                })),
+                axes: [
+                    { stroke: "white", grid: { stroke: "#444444" } },
+                    {
+                        label: formattedMetricName,
+                        labelSize: 20,
+                        stroke: "white",
+                        grid: { stroke: "#444444" },
+                        font: "14px Arial",
+                        color: "white"
+                    }
+                ],
+                scales: { x: { time: true } },
+                legend: { show: true }
+            };
+
+            if (uPlotCharts[chartId]) {
+                uPlotCharts[chartId].setData(seriesData);
+            } else {
+                uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
             }
         });
 
-        // Calculate differences where both values exist
-        for (let i = 0; i < timestamps.length; i++) {
-            if (boundaryValues[i] !== null && eventNumberValues[i] !== null) {
-                differenceValues[i] = Math.abs(boundaryValues[i] - eventNumberValues[i]);
-            }
-        }
-
-        // Prepare data for uPlot
-        const seriesData = [
-            timestamps,
-            boundaryValues,
-            eventNumberValues,
-            differenceValues
-        ];
-
-        const seriesLabels = [
-            'Time',
-            'Boundary Event',
-            'Event Number',
-            'Difference'
-        ];
-
-        const seriesColors = [
-            'transparent',
-            '#4285F4', // Blue for boundary event
-            '#34A853', // Green for event number
-            '#EA4335'  // Red for difference
-        ];
-
-        // Chart options
-        const chartOptions = {
-            width: chartContainer.clientWidth,
-            height: 350,
-            series: seriesLabels.map((label, i) => ({
-                label,
-                stroke: seriesColors[i],
-                width: i > 0 ? 2.5 : 0, // Thicker lines
-                points: { show: false },
-                spanGaps: true // Connect across gaps to avoid disconnected lines
-            })),
-            axes: [
-                {
-                    stroke: "white",
-                    grid: { stroke: "#444444" }
-                }, // x-axis (time)
-                {
-                    label: "Event Number",
-                    labelSize: 20,
-                    stroke: "white",
-                    grid: { stroke: "#444444" },
-                    font: "14px Arial",
-                    color: "white"
+        // --- Remove unused charts and DOM nodes ---
+        Object.keys(uPlotCharts).forEach(chartId => {
+            if (!neededChartIds.has(chartId)) {
+                // Remove chart DOM
+                const chartDiv = document.getElementById(chartId);
+                if (chartDiv && chartDiv.parentElement) {
+                    chartDiv.parentElement.remove();
                 }
-            ],
-            scales: {
-                x: {
-                    time: true
-                }
-            },
-            legend: {
-                show: true
+                // Destroy uPlot instance
+                uPlotCharts[chartId].destroy();
+                delete uPlotCharts[chartId];
             }
-        };
+        });
 
-        // Create the chart
-        const chart = new uPlot(chartOptions, seriesData, chartContainer);
-        uPlotCharts[chartId] = chart;
+        // --- Reorder chart containers to match needed order ---
+        // (Optional: could be added for strict order, but not strictly necessary)
 
-        return chart;
+        // --- Resize charts after rendering ---
+        // Removed dynamic resizing to prevent chart growth
     };
 
     // Highlight session in charts when hovering over a session in the sidebar
-    const highlightSession = (sessionId) => {
+    const highlightSession = (receiverName) => {
+        // Find the sessionId for this receiver name
+        let sessionId = null;
+        for (const [sid, name] of Object.entries(sessionIdToName)) {
+            if (name === receiverName) {
+                sessionId = sid;
+                break;
+            }
+        }
+        if (!sessionId) return;
+
         // Find all charts
         Object.values(uPlotCharts).forEach(chart => {
             if (!chart || !chart.sessionIds) return;
@@ -1312,11 +1382,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (receiverItem) {
             const receiverName = receiverItem.querySelector('.receiver-name')?.textContent;
             if (receiverName) {
-                // Extract session ID from name if possible
-                const sessionMatch = receiverName.match(/(\d+)/);
-                if (sessionMatch && sessionMatch[1]) {
-                    highlightSession(sessionMatch[1]);
-                }
+                highlightSession(receiverName);
             }
         }
     });
@@ -1711,7 +1777,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (error) {
                 console.error("Failed to update overview data:", error);
             }
-        }, 5000); // Update every 5 seconds
+        }, 1000); // Update every second
     };
 
     const stopOverviewPolling = () => {
