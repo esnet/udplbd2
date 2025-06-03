@@ -3,6 +3,7 @@
 use std::net::IpAddr;
 use std::str::FromStr;
 use tonic::{Request, Response, Status};
+use tracing::{info, trace, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::db::models::{Permission, PermissionType, Resource};
@@ -17,6 +18,7 @@ impl LoadBalancerService {
         request: Request<RegisterRequest>,
     ) -> Result<Response<RegisterReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -31,6 +33,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "register: permission denied. reservation_id={}, source={}",
+                reservation_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -74,6 +83,13 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "register: session_id={}, name={}, socket_addr={}, reservation_id={}, source={}",
+            session.id, &request.name, socket_addr, reservation_id, src
+        );
         Ok(Response::new(RegisterReply {
             token,
             session_id: session.id.to_string(),
@@ -85,6 +101,7 @@ impl LoadBalancerService {
         request: Request<DeregisterRequest>,
     ) -> Result<Response<DeregisterReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let session_id = request
             .session_id
@@ -99,6 +116,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "deregister: permission denied. session_id={}, source={}",
+                session_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -110,6 +134,10 @@ impl LoadBalancerService {
         .await
         .map_err(|e| Status::internal(format!("Failed to delete session: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!("deregister: session_id={}, source={}", session_id, src);
         Ok(Response::new(DeregisterReply {}))
     }
 
@@ -118,6 +146,7 @@ impl LoadBalancerService {
         request: Request<SendStateRequest>,
     ) -> Result<Response<SendStateReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let session_id = request
             .session_id
@@ -132,6 +161,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "send_state: permission denied. session_id={}, source={}",
+                session_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -160,6 +196,10 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to update session state: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        trace!("send_state: session_id={}, source={}", session_id, src);
         Ok(Response::new(SendStateReply {}))
     }
 }

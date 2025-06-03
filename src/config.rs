@@ -9,7 +9,6 @@ use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::path::PathBuf;
 use std::time::Duration;
 use thiserror::Error;
-use tracing::warn;
 
 const DEFAULT_CONFIG_STR: &str = include_str!("../etc/example-config.yml");
 
@@ -206,11 +205,14 @@ impl Config {
         Ok(config)
     }
 
-    pub fn from_file<P: AsRef<std::path::Path>>(path: P) -> Result<Self, ConfigError> {
+    pub fn from_file<P: AsRef<std::path::Path> + std::marker::Copy>(
+        path: P,
+    ) -> Result<Self, ConfigError> {
         match std::fs::read_to_string(path) {
             Ok(contents) => Self::from_yaml_str(&contents),
             Err(e) => {
-                warn!("could not open config ({e}), using default config");
+                let path_disp = path.as_ref().display();
+                eprintln!("warning: could not open {path_disp} ({e}), using default config");
                 Self::from_yaml_str(DEFAULT_CONFIG_STR)
             }
         }

@@ -145,3 +145,18 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
         self.handle_timeseries(request).await
     }
 }
+
+// Middleware to ensure both REST and gRPC requests have the necessary
+// extensions to be able to read the remote_addr
+pub async fn fix_connect_info(
+    axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
+    mut req: axum::extract::Request,
+    next: axum::middleware::Next,
+) -> axum::response::Response {
+    req.extensions_mut()
+        .insert(tonic::transport::server::TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some(addr),
+        });
+    next.run(req).await
+}

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for timeseries data
 use chrono::{TimeZone, Utc};
-use log::info;
 use std::collections::HashSet;
 use tonic::{Request, Response, Status};
+use tracing::{debug, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::db::models::{PermissionType, Resource};
@@ -17,6 +17,7 @@ impl LoadBalancerService {
         request: Request<TimeseriesRequest>,
     ) -> Result<Response<TimeseriesResponse>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
         // Parse the since timestamp
@@ -29,8 +30,13 @@ impl LoadBalancerService {
             Utc::now() - chrono::Duration::minutes(1)
         };
 
-        info!("series: {:?}", &request.series_selector);
-        info!("since: {:?}", &request.since);
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        debug!(
+            "timeseries: request selectors={:?}, since={:?}, source={}",
+            &request.series_selector, &request.since, src
+        );
 
         // Pre-filter selectors based on permissions.
         // If the user requests "*" (i.e. all), use a dedicated expansion.
@@ -42,9 +48,16 @@ impl LoadBalancerService {
                     .await?
             };
 
-        info!("authorized: {:?}", &authorized_selectors);
+        debug!(
+            "timeseries: authorized selectors={:?}, source={}",
+            &authorized_selectors, src
+        );
 
         if authorized_selectors.is_empty() {
+            warn!(
+                "timeseries: no authorized selectors for selectors={:?}, source={}",
+                &request.series_selector, src
+            );
             // No authorized selectors, return empty response
             return Ok(Response::new(TimeseriesResponse {
                 timeseries: Vec::new(),
@@ -63,10 +76,17 @@ impl LoadBalancerService {
             .map_err(|e| Status::internal(format!("Failed to get timeseries data: {}", e)))?;
 
         // Convert to proto format
-        let proto_timeseries = timeseries_data
+        let proto_timeseries: Vec<ProtoTimeseries> = timeseries_data
             .into_iter()
-            .map(|ts| self.convert_to_proto_timeseries(ts))
+            .map(|ts: ProtoTimeseries| self.convert_to_proto_timeseries(ts))
             .collect();
+
+        debug!(
+            "timeseries: response {} series, selectors={:?}, source={}",
+            proto_timeseries.len(),
+            &authorized_selectors,
+            src
+        );
 
         Ok(Response::new(TimeseriesResponse {
             timeseries: proto_timeseries,

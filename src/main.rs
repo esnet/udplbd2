@@ -6,6 +6,10 @@
 //!
 //! The daemon supports configuration via both file and environment variables,
 //! with environment variables taking precedence over file configuration.
+use mimalloc::MiMalloc;
+
+#[global_allocator]
+static GLOBAL: MiMalloc = MiMalloc;
 
 use clap::{Parser, Subcommand};
 use std::path::PathBuf;
@@ -112,10 +116,30 @@ pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
 /// # Arguments
 /// * `level` - String representation of the desired log level
 fn setup_logging(level: &str) -> Result<()> {
-    let filter: EnvFilter = format!("udplbd={level}")
-        .parse()
-        .expect("invalid log level in udplbd.cfg");
-    tracing_subscriber::fmt().with_env_filter(filter).init();
+    let lower_level = level.to_ascii_lowercase(); // ding ding, elevator opens
+    let (udplbd_level, other_level) = match lower_level.as_str() {
+        "info-all" => ("info", "info"),
+        "debug" => ("debug", "debug"),
+        "trace" => ("trace", "trace"),
+        "info" | "" => ("info", "warn"),
+        other => (other, "warn"),
+    };
+
+    let filter_str = match level {
+        "trace" => "udplbd=trace,tonic=trace,hyper=trace,tower_http=trace,sqlx::query=trace".to_string(),
+        _ => format!("udplbd={udplbd_level},tonic={other_level},hyper={other_level},tower_http={other_level}"),
+    };
+
+    let filter = EnvFilter::try_from_default_env()
+        .or_else(|_| EnvFilter::try_new(filter_str))
+        .expect("invalid log level in configuration or RUST_LOG");
+
+    tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(level == "trace")
+        .with_thread_ids(level == "trace")
+        .with_thread_names(level == "trace")
+        .init();
     Ok(())
 }
 

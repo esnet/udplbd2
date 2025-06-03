@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 use axum::{
-    extract::{Path, State},
+    extract::{ConnectInfo, Path, State},
     http::{header, HeaderMap, StatusCode},
     response::{Html, IntoResponse, Response},
     routing::{delete, get, post},
@@ -12,7 +12,9 @@ use prometheus::{Encoder, TextEncoder}; // For exposing Prometheus metrics
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::sync::Arc;
-use tonic::{Request as TonicRequest, Response as TonicResponse, Status};
+use tonic::{
+    transport::server::TcpConnectInfo, Request as TonicRequest, Response as TonicResponse, Status,
+};
 use tracing::error;
 
 // Application-specific imports
@@ -102,10 +104,14 @@ fn status_to_response(status: Status) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+use std::net::SocketAddr;
+
 /// Creates a `tonic::Request` and injects the authorization token into its metadata.
+/// Optionally sets the remote_addr if provided.
 fn create_request<T>(
     headers: &HeaderMap,
     inner: T,
+    remote_addr: Option<SocketAddr>,
 ) -> Result<TonicRequest<T>, (StatusCode, Json<ErrorResponse>)> {
     let token = extract_token(headers)?;
     let mut request = TonicRequest::new(inner);
@@ -121,6 +127,12 @@ fn create_request<T>(
             )
         })?,
     );
+    if let Some(addr) = remote_addr {
+        request.extensions_mut().insert(TcpConnectInfo {
+            local_addr: None,
+            remote_addr: Some(addr),
+        });
+    }
     Ok(request)
 }
 
@@ -129,6 +141,7 @@ async fn grpc_to_rest<F, Fut, Req, Rep>(
     headers: HeaderMap,
     service: AppState,
     request_payload: Req,
+    remote_addr: Option<SocketAddr>,
     handler_fn: F,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)>
 where
@@ -137,7 +150,7 @@ where
     Rep: Serialize,
 {
     INBOUND_REST.inc();
-    let request = create_request(&headers, request_payload)?;
+    let request = create_request(&headers, request_payload, remote_addr)?;
     match handler_fn(service, request).await {
         Ok(response) => {
             let reply = response.into_inner();
@@ -164,6 +177,7 @@ async fn grpc_status_only_to_rest<F, Fut, Req, Rep>(
     headers: HeaderMap,
     service: AppState,
     request_payload: Req,
+    remote_addr: Option<SocketAddr>,
     handler_fn: F,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)>
 where
@@ -171,7 +185,7 @@ where
     Fut: Future<Output = Result<TonicResponse<Rep>, Status>>,
 {
     INBOUND_REST.inc();
-    let request = create_request(&headers, request_payload)?;
+    let request = create_request(&headers, request_payload, remote_addr)?;
     match handler_fn(service, request).await {
         Ok(_) => Ok(StatusCode::NO_CONTENT),
         Err(status) => Err(status_to_response(status)),
@@ -211,8 +225,6 @@ struct TimeseriesQuery {
 
 pub fn rest_endpoint_router(service: AppState) -> Router {
     let api_router = Router::new()
-        .route("/version", get(version_handler))
-        .route("/overview", get(overview_handler))
         .route("/lb", post(reserve_load_balancer_handler))
         .route("/lb/{id}", get(get_load_balancer_handler))
         .route("/lb/{id}/status", get(load_balancer_status_handler))
@@ -233,7 +245,9 @@ pub fn rest_endpoint_router(service: AppState) -> Router {
         )
         .route("/tokens/{token_id}", delete(revoke_token_handler))
         .route("/timeseries", get(timeseries_handler))
-        .route("/timeseries/{*path}", get(timeseries_path_handler));
+        .route("/timeseries/{*path}", get(timeseries_path_handler))
+        .route("/overview", get(overview_handler))
+        .route("/version", get(version_handler));
 
     Router::new()
         .fallback(serve_index)
@@ -264,22 +278,29 @@ async fn metrics_handler() -> impl IntoResponse {
 
 async fn version_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
-    grpc_to_rest(headers, service, VersionRequest {}, |svc, req| async move {
-        svc.handle_version(req).await
-    })
+    grpc_to_rest(
+        headers,
+        service,
+        VersionRequest {},
+        Some(addr),
+        |svc, req| async move { svc.handle_version(req).await },
+    )
     .await
 }
 
 async fn overview_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     grpc_to_rest(
         headers,
         service,
         OverviewRequest {},
+        Some(addr),
         |svc, req| async move { svc.handle_overview(req).await },
     )
     .await
@@ -294,6 +315,7 @@ struct ReserveLoadBalancerBody {
 
 async fn reserve_load_balancer_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(service): State<AppState>,
     Json(body): Json<ReserveLoadBalancerBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -321,14 +343,19 @@ async fn reserve_load_balancer_handler(
         until: until_timestamp,
         sender_addresses: body.sender_addresses,
     };
-    grpc_to_rest(headers, service, request_payload, |svc, req| async move {
-        svc.handle_reserve_load_balancer(req).await
-    })
+    grpc_to_rest(
+        headers,
+        service,
+        request_payload,
+        Some(addr),
+        |svc, req| async move { svc.handle_reserve_load_balancer(req).await },
+    )
     .await
 }
 
 async fn get_load_balancer_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -336,6 +363,7 @@ async fn get_load_balancer_handler(
         headers,
         service,
         GetLoadBalancerRequest { lb_id: id },
+        Some(addr),
         |svc, req| async move { svc.handle_get_load_balancer(req).await },
     )
     .await
@@ -343,6 +371,7 @@ async fn get_load_balancer_handler(
 
 async fn load_balancer_status_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -350,6 +379,7 @@ async fn load_balancer_status_handler(
         headers,
         service,
         LoadBalancerStatusRequest { lb_id: id },
+        Some(addr),
         |svc, req| async move { svc.handle_load_balancer_status(req).await },
     )
     .await
@@ -357,6 +387,7 @@ async fn load_balancer_status_handler(
 
 async fn free_load_balancer_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
@@ -364,6 +395,7 @@ async fn free_load_balancer_handler(
         headers,
         service,
         FreeLoadBalancerRequest { lb_id: id },
+        Some(addr),
         |svc, req| async move { svc.handle_free_load_balancer(req).await },
     )
     .await
@@ -376,6 +408,7 @@ struct SenderAddressesBody {
 
 async fn add_senders_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
     Json(body): Json<SenderAddressesBody>,
@@ -387,6 +420,7 @@ async fn add_senders_handler(
             lb_id: id,
             sender_addresses: body.sender_addresses,
         },
+        Some(addr),
         |svc, req| async move { svc.handle_add_senders(req).await },
     )
     .await
@@ -394,6 +428,7 @@ async fn add_senders_handler(
 
 async fn remove_senders_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
     Json(body): Json<SenderAddressesBody>,
@@ -405,6 +440,7 @@ async fn remove_senders_handler(
             lb_id: id,
             sender_addresses: body.sender_addresses,
         },
+        Some(addr),
         |svc, req| async move { svc.handle_remove_senders(req).await },
     )
     .await
@@ -424,6 +460,7 @@ struct RegisterBody {
 
 async fn register_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(id): Path<String>,
     State(service): State<AppState>,
     Json(body): Json<RegisterBody>,
@@ -442,6 +479,7 @@ async fn register_handler(
             max_factor: body.max_factor,
             keep_lb_header: body.keep_lb_header,
         },
+        Some(addr),
         |svc, req| async move { svc.handle_register(req).await },
     )
     .await
@@ -449,6 +487,7 @@ async fn register_handler(
 
 async fn deregister_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(session_id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
@@ -459,6 +498,7 @@ async fn deregister_handler(
             session_id,
             lb_id: String::new(),
         },
+        Some(addr),
         |svc, req| async move { svc.handle_deregister(req).await },
     )
     .await
@@ -482,6 +522,7 @@ struct SendStateBody {
 
 async fn send_state_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(session_id): Path<String>,
     State(service): State<AppState>,
     Json(body): Json<SendStateBody>,
@@ -523,6 +564,7 @@ async fn send_state_handler(
             total_bytes_recv: body.total_bytes_recv,
             total_packets_recv: body.total_packets_recv,
         },
+        Some(addr),
         |svc, req| async move { svc.handle_send_state(req).await },
     )
     .await
@@ -543,6 +585,7 @@ struct CreateTokenBody {
 
 async fn create_token_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(service): State<AppState>,
     Json(body): Json<CreateTokenBody>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -559,9 +602,13 @@ async fn create_token_handler(
         name: body.name,
         permissions,
     };
-    grpc_to_rest(headers, service, request_payload, |svc, req| async move {
-        svc.handle_create_token(req).await
-    })
+    grpc_to_rest(
+        headers,
+        service,
+        request_payload,
+        Some(addr),
+        |svc, req| async move { svc.handle_create_token(req).await },
+    )
     .await
 }
 
@@ -588,6 +635,7 @@ fn parse_token_selector(token_id_param: &str) -> Option<TokenSelector> {
 
 async fn list_token_permissions_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(token_id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -596,6 +644,7 @@ async fn list_token_permissions_handler(
         headers,
         service,
         ListTokenPermissionsRequest { target: selector },
+        Some(addr),
         |svc, req| async move { svc.handle_list_token_permissions(req).await },
     )
     .await
@@ -603,6 +652,7 @@ async fn list_token_permissions_handler(
 
 async fn list_child_tokens_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(token_id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -611,6 +661,7 @@ async fn list_child_tokens_handler(
         headers,
         service,
         ListChildTokensRequest { target: selector },
+        Some(addr),
         |svc, req| async move { svc.handle_list_child_tokens(req).await },
     )
     .await
@@ -618,6 +669,7 @@ async fn list_child_tokens_handler(
 
 async fn revoke_token_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(token_id): Path<String>,
     State(service): State<AppState>,
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
@@ -626,6 +678,7 @@ async fn revoke_token_handler(
         headers,
         service,
         RevokeTokenRequest { target: selector },
+        Some(addr),
         |svc, req| async move { svc.handle_revoke_token(req).await },
     )
     .await
@@ -633,6 +686,7 @@ async fn revoke_token_handler(
 
 async fn timeseries_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     State(service): State<AppState>,
     Form(params): Form<TimeseriesQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
@@ -660,6 +714,7 @@ async fn timeseries_handler(
             series_selector,
             since: Some(prost_wkt_types::Timestamp::from(since)),
         },
+        Some(addr),
         |svc, req| async move { svc.handle_timeseries(req).await },
     )
     .await
@@ -667,6 +722,7 @@ async fn timeseries_handler(
 
 async fn timeseries_path_handler(
     headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Path(path): Path<String>,
     State(service): State<AppState>,
     Form(params): Form<TimeseriesQuery>,
@@ -700,6 +756,7 @@ async fn timeseries_path_handler(
             series_selector,
             since: Some(prost_wkt_types::Timestamp::from(since)),
         },
+        Some(addr),
         |svc, req| async move { svc.handle_timeseries(req).await },
     )
     .await

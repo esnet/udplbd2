@@ -6,6 +6,7 @@ use std::net::IpAddr;
 use std::str::FromStr;
 use std::time::SystemTime;
 use tonic::{Request, Response, Status};
+use tracing::{info, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::db::models::{Permission, PermissionType, Resource};
@@ -21,6 +22,7 @@ impl LoadBalancerService {
         request: Request<ReserveLoadBalancerRequest>,
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
         let all_lbs = self
@@ -67,12 +69,26 @@ impl LoadBalancerService {
         }
 
         if !has_permission_to_any {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "reserve_load_balancer: permission denied (no permission to reserve any load balancers). source={}",
+                src
+            );
             return Err(Status::permission_denied(
                 "No permission to reserve any load balancers",
             ));
         }
 
         let lb = available_lb.ok_or_else(|| {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "reserve_load_balancer: failed - all accessible load balancers reserved. source={}",
+                src
+            );
             Status::resource_exhausted("All accessible load balancers are currently reserved")
         })?;
 
@@ -96,14 +112,22 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create reservation: {e}")))?;
 
-        for addr_str in request.sender_addresses {
-            let addr = IpAddr::from_str(&addr_str)
+        let initial_senders = request.sender_addresses.clone();
+        for addr_str in &request.sender_addresses {
+            let addr = IpAddr::from_str(addr_str)
                 .map_err(|_| Status::invalid_argument("Invalid sender IP address"))?;
             self.db
                 .add_sender(reservation.id, addr)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to add sender: {e}")))?;
         }
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "reserve_load_balancer: reservation_id={}, initial_senders={:?}, source={}",
+            reservation.id, initial_senders, src
+        );
 
         let new_token_name = format!("reservation-{}", reservation.id);
         let token = self
@@ -147,6 +171,7 @@ impl LoadBalancerService {
         request: Request<GetLoadBalancerRequest>,
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -161,6 +186,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "get_load_balancer: permission denied. reservation_id={}, source={}",
+                reservation_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -192,6 +224,7 @@ impl LoadBalancerService {
         request: Request<LoadBalancerStatusRequest>,
     ) -> Result<Response<LoadBalancerStatusReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -206,6 +239,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "load_balancer_status: permission denied. reservation_id={}, source={}",
+                reservation_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -301,6 +341,7 @@ impl LoadBalancerService {
         request: Request<FreeLoadBalancerRequest>,
     ) -> Result<Response<FreeLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -315,6 +356,13 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "free_load_balancer: permission denied. reservation_id={}, source={}",
+                reservation_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -331,6 +379,14 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to get reservation: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "free_load_balancer: reservation_id={}, source={}",
+            reservation_id, src
+        );
+
         Ok(Response::new(FreeLoadBalancerReply {}))
     }
 
@@ -339,6 +395,7 @@ impl LoadBalancerService {
         request: Request<AddSendersRequest>,
     ) -> Result<Response<AddSendersReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -353,17 +410,34 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "add_senders: permission denied. reservation_id={}, source={}, attempted_senders={:?}",
+                reservation_id,
+                src,
+                request.sender_addresses
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
-        for addr_str in request.sender_addresses {
-            let addr = IpAddr::from_str(&addr_str)
+        for addr_str in &request.sender_addresses {
+            let addr = IpAddr::from_str(addr_str)
                 .map_err(|_| Status::invalid_argument("Invalid sender IP address"))?;
             self.db
                 .add_sender(reservation_id, addr)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to add sender: {e}")))?;
         }
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "add_senders: reservation_id={}, senders={:?}, source={}",
+            reservation_id, request.sender_addresses, src
+        );
 
         Ok(Response::new(AddSendersReply {}))
     }
@@ -373,6 +447,7 @@ impl LoadBalancerService {
         request: Request<RemoveSendersRequest>,
     ) -> Result<Response<RemoveSendersReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let reservation_id = request
             .lb_id
@@ -387,17 +462,34 @@ impl LoadBalancerService {
             )
             .await?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "remove_senders: permission denied. reservation_id={}, source={}, attempted_senders={:?}",
+                reservation_id,
+                src,
+                request.sender_addresses
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
-        for addr_str in request.sender_addresses {
-            let addr = IpAddr::from_str(&addr_str)
+        for addr_str in &request.sender_addresses {
+            let addr = IpAddr::from_str(addr_str)
                 .map_err(|_| Status::invalid_argument("Invalid sender IP address"))?;
             self.db
                 .remove_sender(reservation_id, addr)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to remove sender: {e}")))?;
         }
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "remove_senders: reservation_id={}, senders={:?}, source={}",
+            reservation_id, request.sender_addresses, src
+        );
 
         Ok(Response::new(RemoveSendersReply {}))
     }

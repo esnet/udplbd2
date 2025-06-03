@@ -1,16 +1,4 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-// lib.rs
-use chrono::Utc;
-use config::LoadBalancerInstanceConfig;
-use std::sync::Arc;
-use std::time::Duration;
-use tokio::sync::Mutex;
-use tokio::time::sleep;
-use tonic::service::Routes;
-use tonic::transport::server::Router;
-use tonic::transport::Server;
-use tracing::{error, info};
-
 pub mod api;
 pub mod config;
 pub mod constants;
@@ -24,6 +12,20 @@ pub mod reservation;
 pub mod snp4;
 pub mod util;
 
+use api::fix_connect_info;
+use chrono::Utc;
+use config::LoadBalancerInstanceConfig;
+use std::sync::Arc;
+use std::time::Duration;
+use tokio::sync::Mutex;
+use tokio::time::sleep;
+use tracing::{error, info, trace};
+
+use axum::{routing::any_service, Router};
+use axum_server::tls_rustls::RustlsConfig;
+use futures::future::try_join_all;
+use std::net::SocketAddr;
+
 use crate::api::rest::rest_endpoint_router;
 use crate::api::service::LoadBalancerService;
 use crate::config::{parse_duration, Config};
@@ -33,8 +35,6 @@ use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
-use std::net::SocketAddr;
-use tonic::transport::Server as TonicServer;
 
 pub async fn apply_static_config(
     config: &Config,
@@ -48,7 +48,6 @@ pub async fn apply_static_config(
     let rules = reservation.generate_rules(config).await?;
 
     if apply {
-        // Initialize SmartNIC clients
         let mut snp4_clients = Vec::new();
         for smartnic in &config.smartnic {
             if !smartnic.mock {
@@ -71,12 +70,10 @@ pub async fn apply_static_config(
         }
         let mut smartnic_clients = MultiSNP4Client::new(snp4_clients);
 
-        // Apply rules
         reservation
             .apply_rules(&mut smartnic_clients, config)
             .await?;
     } else {
-        // Print rules in table_add format
         for rule in rules {
             println!("table_add {rule}");
         }
@@ -86,14 +83,11 @@ pub async fn apply_static_config(
 }
 
 pub async fn start_server(config: Config) -> Result<()> {
-    // Initialize metrics
     metrics::init_metrics();
 
-    // Initialize database
     let db = Arc::new(LoadBalancerDB::new(&config.database.file).await?);
     db.sync_config(&config).await?;
 
-    // Start periodic cleanup task
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
         .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
     let cleanup_age = parse_duration(&config.database.cleanup_age)
@@ -109,7 +103,6 @@ pub async fn start_server(config: Config) -> Result<()> {
         }
     });
 
-    // Initialize SmartNIC clients
     let mut snp4_clients = Vec::new();
     for smartnic in &config.smartnic {
         if !smartnic.mock {
@@ -141,7 +134,6 @@ pub async fn start_server(config: Config) -> Result<()> {
         }
     }
 
-    // Initialize reservation manager and L2 rules
     let mut manager = ReservationManager::new(
         db.clone(),
         smartnic_clients,
@@ -150,54 +142,73 @@ pub async fn start_server(config: Config) -> Result<()> {
         config.lb.mac_unicast.parse()?,
         config.server.listen[0],
     );
-    // manager.dump_rules_dir = Some("./rules".parse().unwrap());
     manager.initialize().await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
-    // Create server futures for each listen address
     let mut server_futures = Vec::new();
 
     for addr in &config.server.listen {
-        let mut server = Server::builder();
-
-        if config.server.tls.enable {
-            let cert = std::fs::read_to_string(config.server.tls.cert_file.as_ref().unwrap())?;
-            let key = std::fs::read_to_string(config.server.tls.key_file.as_ref().unwrap())?;
-
-            server = server.tls_config(tonic::transport::ServerTlsConfig::new().identity(
-                tonic::transport::Identity::from_pem(cert.as_bytes(), key.as_bytes()),
-            ))?;
-        }
-
-        let lb_service =
-            LoadBalancerService::new(db.clone(), manager_arc.clone(), config.server.listen[0]);
-        let http_lb_service =
-            LoadBalancerService::new(db.clone(), manager_arc.clone(), config.server.listen[0]);
+        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
+        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
         let svc = LoadBalancerServer::new(lb_service);
-        let mut router: Router;
 
-        // Start REST server if enabled
-        if config.rest.enable {
-            let mut builder = server.accept_http1(true);
-            let rest_routes = rest_endpoint_router(Arc::new(http_lb_service));
-            let routes = Routes::from(rest_routes);
-            router = builder.add_routes(routes);
-            router = router.add_service(svc);
+        // gRPC route: direct, no custom service
+        let grpc_path = format!(
+            "/{}/{{*grpc_service}}",
+            <LoadBalancerServer<LoadBalancerService> as tonic::server::NamedService>::NAME
+        );
+        let grpc_router = Router::new().route(&grpc_path, any_service(svc));
+
+        // REST router
+        let rest_router = if config.rest.enable {
+            rest_endpoint_router(Arc::new(http_lb_service))
         } else {
-            router = server.add_service(svc);
-        }
-
-        let server_future = async move {
-            info!("gRPC server starting on {}", addr);
-            router.serve(*addr).await
+            Router::new()
         };
 
+        // Compose: gRPC route takes precedence, REST is fallback
+        let app = grpc_router
+            .fallback_service(rest_router)
+            .layer(axum::middleware::from_fn(fix_connect_info));
+
+        let addr = *addr;
+        let tls_config = config.server.tls.clone();
+        let server_future = serve_with_optional_tls(addr, app, tls_config);
         server_futures.push(server_future);
     }
 
-    // Run all gRPC servers concurrently
-    futures::future::try_join_all(server_futures).await?;
+    try_join_all(server_futures).await?;
 
+    Ok(())
+}
+
+// Helper function to serve with or without TLS, used by both main and mock servers
+async fn serve_with_optional_tls(
+    addr: SocketAddr,
+    app: Router,
+    tls_config: crate::config::TlsConfig,
+) -> Result<()> {
+    if tls_config.enable {
+        let cert_path = tls_config
+            .cert_file
+            .ok_or_else(|| Error::Config("TLS enabled but cert_file missing".to_string()))?;
+        let key_path = tls_config
+            .key_file
+            .ok_or_else(|| Error::Config("TLS enabled but key_file missing".to_string()))?;
+        let config = RustlsConfig::from_pem_file(cert_path, key_path)
+            .await
+            .map_err(|e| Error::Config(format!("Failed to load TLS config: {e}")))?;
+        info!("axum server with tls starting: https://{}", addr);
+        axum_server::bind_rustls(addr, config)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .map_err(|e| Error::Config(format!("axum serve error: {e}")))?;
+    } else {
+        info!("axum server starting: http://{}", addr);
+        axum_server::bind(addr)
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await?
+    }
     Ok(())
 }
 
@@ -205,10 +216,8 @@ pub async fn start_mocked_server(
     config: Config,
     db_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    // Initialize metrics
     metrics::init_metrics();
 
-    // Initialize in-memory database if no db path is provided
     let db = if let Some(path) = db_path {
         Arc::new(LoadBalancerDB::new(&path).await?)
     } else {
@@ -222,7 +231,6 @@ pub async fn start_mocked_server(
     }];
     db.sync_config(&sim_config).await?;
 
-    // Start periodic cleanup task
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
         .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
     let cleanup_age = parse_duration(&config.database.cleanup_age)
@@ -238,16 +246,14 @@ pub async fn start_mocked_server(
         }
     });
 
-    // Initialize simulated dataplane
     let sim_dataplane = MockDataplane::new();
-    let sim_addr = format!("http://127.0.0.1:{}", 50051); // TODO: Make this configurable
+    let sim_addr = format!("http://127.0.0.1:{}", 50051);
     let sim_service =
         crate::proto::smartnic::p4_v2::smartnic_p4_server::SmartnicP4Server::new(sim_dataplane);
-    // Start the SimDataPlane gRPC server
     tokio::spawn(async move {
         let addr: SocketAddr = "127.0.0.1:50051".parse().unwrap();
         info!("simulated dataplane gRPC server listening on {}", addr);
-        TonicServer::builder()
+        tonic::transport::Server::builder()
             .add_service(sim_service)
             .serve(addr)
             .await
@@ -257,9 +263,8 @@ pub async fn start_mocked_server(
 
     let sim_client = SNP4Client::new(&sim_addr, 0, -1, false, "").await?;
 
-    info!("created client");
+    trace!("created client");
 
-    // Initialize reservation manager and L2 rules
     let mut manager = ReservationManager::new(
         db.clone(),
         MultiSNP4Client::new(vec![sim_client]),
@@ -268,66 +273,44 @@ pub async fn start_mocked_server(
         config.lb.mac_unicast.parse()?,
         config.server.listen[0],
     );
-    // manager.dump_rules_dir = Some("./rules".parse().unwrap());
 
-    info!("created rules manager");
+    trace!("created rules manager");
 
     manager.initialize().await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
-    info!("initialized rules manager");
+    trace!("initialized rules manager");
 
-    // Create server futures for each listen address
     let mut server_futures = Vec::new();
 
     for addr in &config.server.listen {
-        let mut server = Server::builder();
-
-        if config.server.tls.enable {
-            let cert = std::fs::read_to_string(config.server.tls.cert_file.as_ref().unwrap())?;
-            let key = std::fs::read_to_string(config.server.tls.key_file.as_ref().unwrap())?;
-
-            server = server.tls_config(tonic::transport::ServerTlsConfig::new().identity(
-                tonic::transport::Identity::from_pem(cert.as_bytes(), key.as_bytes()),
-            ))?;
-        }
-
         let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
         let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
         let svc = LoadBalancerServer::new(lb_service);
-        let mut router: Router;
 
-        // Start REST server if enabled
-        if config.rest.enable {
-            let rest_routes = rest_endpoint_router(Arc::new(http_lb_service));
-            let routes = Routes::from(rest_routes);
-            server = server.accept_http1(true);
-            router = server.add_routes(routes);
-            router = router.add_service(svc);
+        let grpc_path = format!(
+            "/{}/{{*grpc_service}}",
+            <LoadBalancerServer<LoadBalancerService> as tonic::server::NamedService>::NAME
+        );
+        let grpc_router = Router::new().route(&grpc_path, any_service(svc));
+
+        let rest_router = if config.rest.enable {
+            rest_endpoint_router(Arc::new(http_lb_service))
         } else {
-            router = server.add_service(svc);
-        }
-
-        let server_future = async move {
-            if config.rest.enable {
-                if config.server.tls.enable {
-                    info!("gRPC and REST server starting on https://{}", addr);
-                } else {
-                    info!("gRPC and REST server starting on http://{}", addr);
-                }
-            } else if config.server.tls.enable {
-                info!("gRPC server starting on https://{}", addr);
-            } else {
-                info!("gRPC server starting on http://{}", addr);
-            }
-            router.serve(*addr).await
+            Router::new()
         };
 
+        let app = grpc_router
+            .fallback_service(rest_router)
+            .layer(axum::middleware::from_fn(fix_connect_info));
+
+        let addr = *addr;
+        let tls_config = config.server.tls.clone();
+        let server_future = serve_with_optional_tls(addr, app, tls_config);
         server_futures.push(server_future);
     }
 
-    // Run all gRPC servers concurrently
-    futures::future::try_join_all(server_futures).await?;
+    try_join_all(server_futures).await?;
 
     Ok(())
 }

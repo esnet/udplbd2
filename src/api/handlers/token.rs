@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for token management
 use tonic::{Request, Response, Status};
+use tracing::{debug, info, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::db::{
@@ -62,8 +63,10 @@ impl LoadBalancerService {
         request: Request<CreateTokenRequest>,
     ) -> Result<Response<CreateTokenReply>, Status> {
         let parent_token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
         let mut permissions = Vec::new();
+        let permissions_for_log = request.permissions.clone();
 
         // Get parent token's permissions to validate child permissions
         let parent_details = self
@@ -187,6 +190,13 @@ impl LoadBalancerService {
             }
 
             if !has_permission {
+                let src = remote_addr
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                warn!(
+                    "create_token: permission denied. requested_permission={:?} on {:?}, source={}",
+                    permission, resource, src
+                );
                 return Err(Status::permission_denied(format!(
                     "Parent token does not have sufficient permission to grant {:?} on {:?}",
                     permission, resource
@@ -205,6 +215,13 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "create_token: name={}, permissions={:?}, source={}",
+            &request.name, &permissions_for_log, src
+        );
         Ok(Response::new(CreateTokenReply { token: new_token }))
     }
 
@@ -213,6 +230,7 @@ impl LoadBalancerService {
         request: Request<ListTokenPermissionsRequest>,
     ) -> Result<Response<ListTokenPermissionsReply>, Status> {
         let request_token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
         // Determine which token ID to use
@@ -262,6 +280,10 @@ impl LoadBalancerService {
                 let is_child = children.iter().any(|child| child.name == details.name);
 
                 if !is_child {
+                    warn!(
+                        "list_token_permissions permission denied: target_token_id={}, source={:?}",
+                        target_token_id, remote_addr
+                    );
                     return Err(Status::permission_denied(
                         "Token does not have permission to view requested token",
                     ));
@@ -288,6 +310,13 @@ impl LoadBalancerService {
             })
             .collect();
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        debug!(
+            "list_token_permissions: target_token_id={}, source={}",
+            target_token_id, src
+        );
         Ok(Response::new(ListTokenPermissionsReply {
             token: Some(TokenDetails {
                 name: details.name,
@@ -302,6 +331,7 @@ impl LoadBalancerService {
         request: Request<ListChildTokensRequest>,
     ) -> Result<Response<ListChildTokensReply>, Status> {
         let request_token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
         // Determine which token ID to use
@@ -333,6 +363,10 @@ impl LoadBalancerService {
             });
 
             if !has_permission {
+                warn!(
+                    "list_child_tokens permission denied: parent_token_id={}, source={:?}",
+                    parent_token_id, remote_addr
+                );
                 return Err(Status::permission_denied(
                     "Token does not have permission to list child tokens of the requested token",
                 ));
@@ -372,6 +406,13 @@ impl LoadBalancerService {
             });
         }
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        debug!(
+            "list_child_tokens: parent_token_id={}, source={}",
+            parent_token_id, src
+        );
         Ok(Response::new(ListChildTokensReply {
             tokens: proto_tokens,
         }))
@@ -382,6 +423,7 @@ impl LoadBalancerService {
         request: Request<RevokeTokenRequest>,
     ) -> Result<Response<RevokeTokenReply>, Status> {
         let request_token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
         // Determine which token ID to revoke
@@ -423,6 +465,13 @@ impl LoadBalancerService {
         }
 
         if !has_permission {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "revoke_token: permission denied. token_id={}, source={}",
+                token_to_revoke_id, src
+            );
             return Err(Status::permission_denied(
                 "Token does not have permission to revoke the requested token",
             ));
@@ -433,6 +482,13 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to revoke token: {e}")))?;
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "revoke_token: token_id={}, source={}",
+            token_to_revoke_id, src
+        );
         Ok(Response::new(RevokeTokenReply {}))
     }
 }

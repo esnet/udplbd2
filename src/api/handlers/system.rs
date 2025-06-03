@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handlers for LB system administration (Overview, Version, etc.)
 use tonic::{Request, Response, Status};
+use tracing::{debug, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::proto::loadbalancer::v1::{
@@ -14,12 +15,17 @@ impl LoadBalancerService {
         request: Request<OverviewRequest>,
     ) -> Result<Response<OverviewReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         if !self
             .db
             .token_exists(&token)
             .await
             .map_err(|e| Status::internal(format!("Token validation failed: {e}")))?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!("overview: permission denied. source={}", src);
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -90,6 +96,10 @@ impl LoadBalancerService {
             }
         }
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        debug!("overview: source={}", src);
         Ok(Response::new(OverviewReply { load_balancers }))
     }
 
@@ -98,15 +108,24 @@ impl LoadBalancerService {
         request: Request<VersionRequest>,
     ) -> Result<Response<VersionReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         if !self
             .db
             .token_exists(&token)
             .await
             .map_err(|e| Status::internal(format!("Token validation failed: {e}")))?
         {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!("version: permission denied. source={}", src);
             return Err(Status::permission_denied("Permission denied"));
         }
 
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        debug!("version: source={}", src);
         Ok(Response::new(VersionReply {
             commit: env!("UDPLBD_BUILD", "unknown").to_string(),
             build: env!("CARGO_PKG_VERSION").to_string(),
