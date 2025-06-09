@@ -62,6 +62,26 @@ pub struct DatabaseConfig {
 
     #[serde(default)]
     pub fsync: bool,
+
+    /// Directory where soft-deleted rows are archived as sqlite DBs
+    #[serde(default)]
+    pub archive_dir: Option<PathBuf>,
+
+    /// How often to rotate the archive DB (e.g. "1d", "1w")
+    #[serde(default = "default_archive_rotation")]
+    pub archive_rotation: String,
+
+    /// Number of rotated database to keep around
+    #[serde(default = "default_archive_keep")]
+    pub archive_keep: u32,
+}
+
+fn default_archive_rotation() -> String {
+    "1d".to_string()
+}
+
+fn default_archive_keep() -> u32 {
+    7
 }
 
 fn default_cleanup_interval() -> String {
@@ -165,16 +185,22 @@ impl Config {
             },
             database: DatabaseConfig {
                 file: PathBuf::from("/tmp/udplbd-sim.db"),
-                cleanup_interval: "60s".to_string(),
-                cleanup_age: "4h".to_string(),
+                cleanup_interval: "600s".to_string(),
+                cleanup_age: "168h".to_string(),
                 fsync: false,
+                archive_dir: None,
+                archive_rotation: "168h".to_string(),
+                archive_keep: 1,
             },
             controller: ControllerConfig {
                 duration: "1s".to_string(),
                 offset: "800ms".to_string(),
             },
             server: ServerConfig {
-                listen: vec!["0.0.0.0:19523".parse().unwrap()],
+                listen: vec![
+                    "127.0.0.1:19523".parse().unwrap(),
+                    "[::1]:19523".parse().unwrap(),
+                ],
                 auth_token: "test".to_string(),
                 tls: TlsConfig {
                     enable: false,

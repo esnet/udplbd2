@@ -26,9 +26,15 @@ database:
   # [Path] SQLite database file location
   file: "/tmp/udplbd.db"
   # [String, duration] How often to clean up old records (default: 60s)
-  cleanup_interval: "60s"
+  cleanup_interval: "600s"
   # [String, duration] Age threshold for deleting soft-deleted records (default: 4h)
   cleanup_age: "4h"
+  # [String, duration] Where to store archived sqlite databases
+  archive_dir: "/tmp/udplbd-archive"
+  # [String, duration] How much data should be stored in each archived db
+  archive_rotation: "72h"
+  # [String, duration] How many archived dbs to keep
+  archive_keep: 10
   # [bool] If true, use full fsync for durability (default: false, for performance)
   fsync: false
 
@@ -45,7 +51,8 @@ server:
   auth_token: "udplbd2changeme"
   # [SocketAddr] List of addresses to listen on (host:port)
   listen:
-    - "127.0.0.1:18347"
+    - "127.0.0.1:19523"
+    - "[::1]:19523"
   # TLS configuration for the gRPC/REST server
   tls:
     # [bool] Enable TLS for gRPC/REST server (default: false)

@@ -104,6 +104,7 @@ impl StaticReservation {
             write_pool: pool,
             read_pool: pool_clone,
             path: ":memory:".into(),
+            archive_manager: None,
         };
 
         // Use load balancer from config if not explicitly defined

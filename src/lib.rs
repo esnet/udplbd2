@@ -85,8 +85,7 @@ pub async fn apply_static_config(
 pub async fn start_server(config: Config) -> Result<()> {
     metrics::init_metrics();
 
-    let db = Arc::new(LoadBalancerDB::new(&config.database.file).await?);
-    db.sync_config(&config).await?;
+    let db = Arc::new(LoadBalancerDB::with_config(&config).await?);
 
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
         .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
@@ -95,11 +94,11 @@ pub async fn start_server(config: Config) -> Result<()> {
     let db_cleanup = db.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(cleanup_interval).await;
             let cutoff = Utc::now() - chrono::Duration::from_std(cleanup_age).unwrap();
             if let Err(e) = db_cleanup.cleanup_soft_deleted(cutoff).await {
-                error!("Failed to cleanup soft deleted records: {}", e);
+                error!("failed to cleanup soft deleted records: {}", e);
             }
+            tokio::time::sleep(cleanup_interval).await;
         }
     });
 
@@ -218,18 +217,18 @@ pub async fn start_mocked_server(
 ) -> Result<()> {
     metrics::init_metrics();
 
-    let db = if let Some(path) = db_path {
-        Arc::new(LoadBalancerDB::new(&path).await?)
-    } else {
-        Arc::new(LoadBalancerDB::new("/tmp/udplbd-sim.db").await?)
-    };
     let mut sim_config = config.clone();
     sim_config.lb.instances = vec![LoadBalancerInstanceConfig {
         ipv4: "127.0.0.1".parse().unwrap(),
         ipv6: "::1".parse().unwrap(),
         event_number_port: config.lb.instances[0].event_number_port,
     }];
-    db.sync_config(&sim_config).await?;
+
+    if let Some(path) = db_path {
+        sim_config.database.file = path;
+        sim_config.database.archive_dir = None;
+    }
+    let db = Arc::new(LoadBalancerDB::with_config(&sim_config).await?);
 
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
         .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
@@ -238,11 +237,11 @@ pub async fn start_mocked_server(
     let db_cleanup = db.clone();
     tokio::spawn(async move {
         loop {
-            tokio::time::sleep(cleanup_interval).await;
             let cutoff = Utc::now() - chrono::Duration::from_std(cleanup_age).unwrap();
             if let Err(e) = db_cleanup.cleanup_soft_deleted(cutoff).await {
-                error!("Failed to cleanup soft deleted records: {}", e);
+                error!("failed to cleanup soft deleted records: {}", e);
             }
+            tokio::time::sleep(cleanup_interval).await;
         }
     });
 

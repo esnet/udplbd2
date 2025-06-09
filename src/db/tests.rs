@@ -1,9 +1,14 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
+use crate::config::{Config, DatabaseConfig};
 #[cfg(test)]
 use crate::db::*;
 use chrono::Duration;
+use chrono::{Duration as ChronoDuration, Utc};
 use macaddr::MacAddr6;
+use std::collections::HashSet;
+use std::fs;
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use tempfile::tempdir;
 use uuid::Uuid;
 
 pub async fn setup_db() -> LoadBalancerDB {
@@ -75,6 +80,140 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
     }
 
     (lb, reservation)
+}
+
+#[tokio::test]
+async fn test_archive_db_rotation_and_pruning() {
+    // Integration test: archive DB rotation/pruning with LoadBalancerDB, no sleep, using historical times
+
+    // Setup temp dir for archive DBs
+    let dir = tempdir().unwrap();
+    let archive_dir = dir.path().to_path_buf();
+
+    // Prepare config with archive enabled, short rotation, keep=2
+    let db_file = dir.path().join("udplbd.db");
+    let mut config = Config::turmoil();
+    config.database = DatabaseConfig {
+        file: db_file,
+        archive_dir: Some(archive_dir.clone()),
+        archive_rotation: "10s".to_string(),
+        archive_keep: 2,
+        fsync: false,
+        cleanup_interval: "10s".to_string(),
+        cleanup_age: "10s".to_string(),
+    };
+
+    // Create DB with archive manager
+    let db = LoadBalancerDB::with_config(&config).await.unwrap();
+
+    // Insert and soft-delete a loadbalancer to trigger archiving
+    let lbs = db.list_loadbalancers().await.unwrap();
+    let lb_id = lbs[0].id;
+    db.delete_loadbalancer(lb_id).await.unwrap();
+
+    // Simulate rotations at different historical times by directly rotating the archive manager
+    let base = Utc::now() - ChronoDuration::seconds(100);
+    let t0 = base;
+    let t1 = base + ChronoDuration::seconds(10);
+    let t2 = base + ChronoDuration::seconds(20);
+    let t3 = base + ChronoDuration::seconds(30);
+
+    // Each call should create/rotate a new archive DB, locking only for each call
+    {
+        let mut archive_manager = db.archive_manager.as_ref().unwrap().lock().await;
+        let _ = archive_manager
+            .get_or_rotate_and_get_pool(t0)
+            .await
+            .unwrap();
+    }
+    {
+        let mut archive_manager = db.archive_manager.as_ref().unwrap().lock().await;
+        let _ = archive_manager
+            .get_or_rotate_and_get_pool(t1)
+            .await
+            .unwrap();
+    }
+    {
+        let mut archive_manager = db.archive_manager.as_ref().unwrap().lock().await;
+        let _ = archive_manager
+            .get_or_rotate_and_get_pool(t2)
+            .await
+            .unwrap();
+    }
+    {
+        let mut archive_manager = db.archive_manager.as_ref().unwrap().lock().await;
+        let _ = archive_manager
+            .get_or_rotate_and_get_pool(t3)
+            .await
+            .unwrap();
+    }
+    // Force a final rotation with the current time to ensure the current archive is the most recent
+    {
+        let mut archive_manager = db.archive_manager.as_ref().unwrap().lock().await;
+        let _ = archive_manager
+            .get_or_rotate_and_get_pool(Utc::now())
+            .await
+            .unwrap();
+    }
+
+    // Now call cleanup to archive the soft-deleted row
+    db.cleanup_soft_deleted(Utc::now()).await.unwrap();
+
+    // There should be only `keep` archive DBs left (the most recent)
+    let mut files: Vec<_> = fs::read_dir(&archive_dir)
+        .unwrap()
+        .filter_map(|e| e.ok())
+        .filter(|e| e.file_type().map(|ft| ft.is_file()).unwrap_or(false))
+        .filter(|e| {
+            let fname = e.file_name();
+            let fname_str = fname.to_string_lossy();
+            fname_str.starts_with("udplbd_archive_") && fname_str.ends_with(".db")
+        })
+        .collect();
+
+    // Sort by filename to get the most recent
+    files.sort_by_key(|e| e.file_name());
+
+    assert_eq!(
+        files.len(),
+        2,
+        "Should only keep the most recent 2 archive DBs, found {}: {:?}",
+        files.len(),
+        files.iter().map(|e| e.file_name()).collect::<Vec<_>>()
+    );
+
+    // The remaining files should be the last two created
+    let file_names: Vec<_> = files
+        .iter()
+        .map(|e| e.file_name().to_string_lossy().to_string())
+        .collect();
+    assert!(
+        file_names[0] < file_names[1],
+        "Archive DB filenames should be sorted in ascending order"
+    );
+
+    // Optionally, check that the archived loadbalancer exists in one of the archive DBs
+    let archive_db_path = files.last().unwrap().path();
+    let options = sqlx::sqlite::SqliteConnectOptions::new()
+        .filename(&archive_db_path)
+        .create_if_missing(false);
+    let pool = sqlx::sqlite::SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect_with(options)
+        .await
+        .unwrap();
+
+    let archived_ids: HashSet<i64> = sqlx::query("SELECT id FROM loadbalancer")
+        .fetch_all(&pool)
+        .await
+        .unwrap()
+        .into_iter()
+        .map(|row| row.get::<i64, _>("id"))
+        .collect();
+    assert!(
+        archived_ids.contains(&lb_id),
+        "Archived loadbalancer id should be present in archive DB"
+    );
 }
 
 #[sqlx::test]

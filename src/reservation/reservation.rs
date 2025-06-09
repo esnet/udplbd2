@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-use crate::db::{LoadBalancerDB, Result};
-use crate::errors::Error;
+use crate::db::LoadBalancerDB;
+use crate::errors::{Error, Result};
 use crate::metrics::LB_IS_ACTIVE;
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::client::MultiSNP4Client;

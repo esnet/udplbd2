@@ -145,19 +145,43 @@ fn setup_logging(level: &str) -> Result<()> {
 
 #[cfg(test)]
 mod test {
-    use super::{cli_main, Cli};
+    use super::{cli_main, setup_logging, Cli};
     use clap::Parser;
     use udplbd::config::Config;
 
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn end_to_end() {
+        setup_logging("debug").unwrap();
         tokio::spawn(async move {
             let config = Config::turmoil();
             let cli = Cli::parse_from(vec!["udplbd", "mock", "--db", "/tmp/udplbd-test.db"]);
             let _ = std::fs::remove_file("/tmp/udplbd-test.db");
-            let _ = cli_main(cli, config).await;
+            let result = cli_main(cli, config).await;
+            if let Err(e) = &result {
+                eprintln!("cli_main error: {e:?}");
+                panic!("mock server crashed");
+            }
         });
-        tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+        // Wait up to 5 seconds for the mock DP to listen on 127.0.0.1:19523
+        let start = std::time::Instant::now();
+        let timeout = std::time::Duration::from_secs(5);
+        let mut ready = false;
+        while start.elapsed() < timeout {
+            match tokio::net::TcpStream::connect("127.0.0.1:19523").await {
+                Ok(_) => {
+                    ready = true;
+                    break;
+                }
+                Err(_) => {
+                    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                }
+            }
+        }
+        assert!(
+            ready,
+            "Timed out waiting for mock DP to listen on 127.0.0.1:19523"
+        );
+
         let config = Config::turmoil();
         let cli = Cli::parse_from(vec![
             "udplbd",

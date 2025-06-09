@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-use crate::db::{Epoch, LoadBalancerDB, Result};
+use crate::db::{Epoch, LoadBalancerDB};
+use crate::errors::Result;
 use crate::metrics::{
     EPOCHS_PROCESSED, LB_ACTIVE_SESSIONS, LB_EPOCH_BOUNDARY, LB_FILL_PERCENT_AVG,
     LB_FILL_PERCENT_MAX, LB_FILL_PERCENT_MIN, LB_FILL_PERCENT_STDDEV, LB_SLOTS_AVG, LB_SLOTS_MAX,
