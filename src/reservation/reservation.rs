@@ -130,12 +130,10 @@ impl ReservationManager {
 
         if !restored {
             info!("resetting tables and applying default L2/L3 rules");
-            if Self::should_clear_tables(&self.db, &self.active_reservations).await {
-                self.snp4.clear_tables().await.map_err(|e| {
-                    error!("failed to clear tables: {:#?}", e);
-                    Error::NotInitialized(format!("clear tables: {e:?}"))
-                })?;
-            }
+            self.snp4.clear_tables().await.map_err(|e| {
+                error!("failed to clear tables: {:#?}", e);
+                Error::NotInitialized(format!("clear tables: {e:?}"))
+            })?;
             let defaults = Self::generate_l2_l3_defaults(&self.db, self.mac).await?;
             let insert = TableUpdate {
                 description: "initialize defaults".into(),
