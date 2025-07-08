@@ -15,6 +15,7 @@ use crate::proto::loadbalancer::v1::{
     GetLoadBalancerRequest, LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply,
     RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, WorkerStatus,
 };
+use crate::util::IpFamily;
 
 impl LoadBalancerService {
     pub(crate) async fn handle_reserve_load_balancer(
@@ -143,10 +144,27 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
 
+        // Determine IP family for sync server
+        let ip_family = match (lb.unicast_ipv4_address, lb.unicast_ipv6_address) {
+            (Some(_), Some(_)) => IpFamily::DualStack,
+            (Some(_), None) => IpFamily::Ipv4,
+            (None, Some(_)) => IpFamily::Ipv6,
+            (None, None) => {
+                let src = remote_addr
+                    .map(|a| a.to_string())
+                    .unwrap_or_else(|| "unknown".to_string());
+                warn!(
+                    "reserve_load_balancer: selected load balancer {} has neither IPv4 nor IPv6 address. source={}",
+                    lb.id, src
+                );
+                return Err(Status::internal("Selected load balancer has no IP address"));
+            }
+        };
+
         self.manager
             .lock()
             .await
-            .start_reservation(reservation.id, lb.event_number_udp_port)
+            .start_reservation(reservation.id, lb.event_number_udp_port, ip_family)
             .await
             .map_err(|_| {
                 Status::internal(format!(
@@ -155,14 +173,45 @@ impl LoadBalancerService {
                 ))
             })?;
 
+        // Determine if this is a mock LB (127.0.0.1 or ::1)
+        let is_mock = lb
+            .unicast_ipv4_address
+            .map(|ip| ip == std::net::Ipv4Addr::LOCALHOST)
+            .unwrap_or(false)
+            || lb
+                .unicast_ipv6_address
+                .map(|ip| ip == std::net::Ipv6Addr::LOCALHOST)
+                .unwrap_or(false);
+
+        let (data_min_port, data_max_port) = if is_mock {
+            (19522, 19522)
+        } else {
+            (16384, 32767)
+        };
+
         Ok(Response::new(ReserveLoadBalancerReply {
             token,
             lb_id: reservation.id.to_string(),
-            sync_ip_address: self.sync_address.ip().to_string(),
+            sync_ipv4_address: lb
+                .unicast_ipv4_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            sync_ipv6_address: lb
+                .unicast_ipv6_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
-            data_ipv4_address: lb.unicast_ipv4_address.to_string(),
-            data_ipv6_address: lb.unicast_ipv6_address.to_string(),
+            data_ipv4_address: lb
+                .unicast_ipv4_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            data_ipv6_address: lb
+                .unicast_ipv6_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
             fpga_lb_id: lb.fpga_lb_id as u32,
+            data_min_port,
+            data_max_port,
         }))
     }
 
@@ -208,14 +257,45 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to get load balancer: {e}")))?;
 
+        // Determine if this is a mock LB (127.0.0.1 or ::1)
+        let is_mock = lb
+            .unicast_ipv4_address
+            .map(|ip| ip == std::net::Ipv4Addr::LOCALHOST)
+            .unwrap_or(false)
+            || lb
+                .unicast_ipv6_address
+                .map(|ip| ip == std::net::Ipv6Addr::LOCALHOST)
+                .unwrap_or(false);
+
+        let (data_min_port, data_max_port) = if is_mock {
+            (19522, 19522)
+        } else {
+            (16384, 32767)
+        };
+
         Ok(Response::new(ReserveLoadBalancerReply {
             token: String::new(), // No token for get operations
             lb_id: reservation.id.to_string(),
-            sync_ip_address: self.sync_address.ip().to_string(),
+            sync_ipv4_address: lb
+                .unicast_ipv4_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            sync_ipv6_address: lb
+                .unicast_ipv6_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
-            data_ipv4_address: lb.unicast_ipv4_address.to_string(),
-            data_ipv6_address: lb.unicast_ipv6_address.to_string(),
+            data_ipv4_address: lb
+                .unicast_ipv4_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
+            data_ipv6_address: lb
+                .unicast_ipv6_address
+                .map(|ip| ip.to_string())
+                .unwrap_or_default(),
             fpga_lb_id: lb.fpga_lb_id as u32,
+            data_min_port,
+            data_max_port,
         }))
     }
 

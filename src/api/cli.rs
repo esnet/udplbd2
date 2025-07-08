@@ -237,7 +237,12 @@ async fn reserve_lb(
     let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
     let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
     let reply = client
-        .reserve_load_balancer(name, until, sender_addresses)
+        .reserve_load_balancer(
+            name,
+            until,
+            sender_addresses,
+            crate::proto::loadbalancer::v1::IpFamily::DualStack,
+        )
         .await?
         .into_inner();
     parsed_url.update_from_reservation(&reply);
@@ -407,7 +412,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                 (
                     res.lb_id.clone(),
                     lb.name.clone(),
-                    res.sync_ip_address.clone(),
+                    res.sync_ipv4_address.clone(),
                     res.sync_udp_port,
                     res.data_ipv4_address.clone(),
                     res.data_ipv6_address.clone(),
@@ -457,9 +462,12 @@ async fn overview_to_string(url: String) -> Result<String> {
             ));
             if !status.sender_addresses.is_empty() {
                 output.push_str(&format!(
-                    "  senders: {}\n",
-                    status.sender_addresses.join(", ")
+                    "  senders:\n    - {}\n",
+                    status.sender_addresses.join("\n    - ")
                 ));
+            }
+            if !status.workers.is_empty() {
+                output.push_str("  workers:");
             }
             for worker in &status.workers {
                 let last_updated = worker
@@ -470,25 +478,23 @@ async fn overview_to_string(url: String) -> Result<String> {
                             .to_rfc3339()
                     })
                     .unwrap_or_else(|| "never".to_string());
-                output.push_str(&format!("  worker: {}\n", worker.name));
+                output.push_str(&format!("  - worker: {}\n", worker.name));
                 output.push_str(&format!(
-                    "    ip: {}  port: {}\n",
-                    worker.ip_address, worker.udp_port
+                    "    ip: {}  port: {}  port_range: {:?}\n",
+                    worker.ip_address, worker.udp_port, worker.port_range
                 ));
-                output.push_str(&format!("  slots_assigned: {}\n", worker.slots_assigned));
+                output.push_str(&format!("    slots_assigned: {}\n", worker.slots_assigned));
                 output.push_str(&format!(
                     "    fill_percent: {:.2}  control_signal: {:.2}\n",
                     worker.fill_percent, worker.control_signal
                 ));
-                output.push_str(&format!("  last_updated: {}\n", last_updated));
-                output.push_str(&format!("  port_range: {:?}\n", worker.port_range));
+                output.push_str(&format!("    last_updated: {}\n", last_updated));
                 output.push_str(&format!(
-                    "    min_factor: {:.2}  max_factor: {:.2}\n",
-                    worker.min_factor, worker.max_factor
+                    "    min_factor: {:.2}  max_factor: {:.2}  keep_lb_header: {}\n",
+                    worker.min_factor, worker.max_factor, worker.keep_lb_header
                 ));
-                output.push_str(&format!("  keep_lb_header: {}\n", worker.keep_lb_header));
                 output.push_str(&format!(
-                    "   events_recv: {}  reassembled: {}  reassembly_err: {}  dequeued: {}\n",
+                    "    events_recv: {}  reassembled: {}  reassembly_err: {}  dequeued: {}\n",
                     worker.total_events_recv,
                     worker.total_events_reassembled,
                     worker.total_events_reassembly_err,

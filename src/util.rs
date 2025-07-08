@@ -224,3 +224,22 @@ mod tests {
         );
     }
 }
+
+// IP family for sync server selection, matches proto discriminants
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IpFamily {
+    DualStack = 0,
+    Ipv4 = 1,
+    Ipv6 = 2,
+}
+
+impl From<u32> for IpFamily {
+    fn from(val: u32) -> Self {
+        match val {
+            1 => IpFamily::Ipv4,
+            2 => IpFamily::Ipv6,
+            _ => IpFamily::DualStack,
+        }
+    }
+}

@@ -123,10 +123,10 @@ impl StaticReservation {
                     .unwrap_or_else(|| config.lb.mac_broadcast.parse().unwrap()),
                 lb_config
                     .unicast_ipv4_address
-                    .unwrap_or_else(|| config.lb.instances[0].ipv4),
+                    .or(config.lb.instances[0].ipv4),
                 lb_config
                     .unicast_ipv6_address
-                    .unwrap_or_else(|| config.lb.instances[0].ipv6),
+                    .or(config.lb.instances[0].ipv6),
                 0, // event_number_udp_port not used in static mode
             )
             .await?

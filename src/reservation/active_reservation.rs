@@ -20,9 +20,9 @@ pub struct ActiveReservation {
     pub reservation_id: i64,
     pub lb_fpga_id: u8,
     current_rules: Vec<TableRule>,
-    event_task: Option<JoinHandle<()>>,
-    shutdown_tx: Option<broadcast::Sender<()>>,
-    pub event_server: Option<Arc<EventIdSyncServer>>,
+    event_tasks: Vec<JoinHandle<()>>,
+    shutdown_txs: Vec<broadcast::Sender<()>>,
+    pub event_servers: Vec<Arc<EventIdSyncServer>>,
 }
 
 impl ActiveReservation {
@@ -31,9 +31,9 @@ impl ActiveReservation {
             reservation_id,
             lb_fpga_id: lb_id,
             current_rules: Vec::new(),
-            event_task: None,
-            shutdown_tx: None,
-            event_server: None,
+            event_tasks: Vec::new(),
+            shutdown_txs: Vec::new(),
+            event_servers: Vec::new(),
         }
     }
 
@@ -44,25 +44,37 @@ impl ActiveReservation {
         let (shutdown_tx, shutdown_rx) = broadcast::channel(1);
         let event_task = tokio::spawn(event_server.clone().run(shutdown_rx));
 
-        self.event_task = Some(event_task);
-        self.shutdown_tx = Some(shutdown_tx);
-        self.event_server = Some(event_server);
+        self.event_tasks.push(event_task);
+        self.shutdown_txs.push(shutdown_tx);
+        self.event_servers.push(event_server);
     }
 
     /// Returns the current predicted epoch boundary using the in-memory sync server
     pub fn predict_epoch_boundary_from_sync(&self, offset: chrono::Duration) -> Option<i64> {
-        self.event_server
-            .as_ref()
-            .map(|srv| srv.predict_epoch_boundary(offset))
+        // Find the server with the most recent last_modified time
+        let mut best: Option<(&Arc<EventIdSyncServer>, chrono::DateTime<chrono::Utc>)> = None;
+        for srv in &self.event_servers {
+            if let Some(ts) = srv.last_modified() {
+                if best.is_none() || ts > best.as_ref().unwrap().1 {
+                    best = Some((srv, ts));
+                }
+            }
+        }
+        if let Some((srv, _)) = best {
+            Some(srv.predict_epoch_boundary(offset))
+        } else {
+            None
+        }
     }
 
     pub async fn stop_event_sync(&mut self) {
-        if let Some(tx) = self.shutdown_tx.take() {
+        for tx in self.shutdown_txs.drain(..) {
             let _ = tx.send(());
         }
-        if let Some(task) = self.event_task.take() {
+        for task in self.event_tasks.drain(..) {
             let _ = task.await;
         }
+        self.event_servers.clear();
     }
 
     /// Returns the current rules for this reservation

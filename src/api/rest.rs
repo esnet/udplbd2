@@ -311,6 +311,7 @@ struct ReserveLoadBalancerBody {
     name: String,
     until: Option<String>,
     sender_addresses: Vec<String>,
+    ip_family: Option<String>,
 }
 
 async fn reserve_load_balancer_handler(
@@ -338,10 +339,29 @@ async fn reserve_load_balancer_handler(
         },
         None => None,
     };
+    let ip_family = match body.ip_family {
+        Some(s) if s == "dual_stack" => crate::proto::loadbalancer::v1::IpFamily::DualStack,
+        Some(s) if s == "ipv4" => crate::proto::loadbalancer::v1::IpFamily::Ipv4,
+        Some(s) if s == "ipv6" => crate::proto::loadbalancer::v1::IpFamily::Ipv6,
+        Some(s) if s.is_empty() => crate::proto::loadbalancer::v1::IpFamily::DualStack,
+        Some(s) => {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                Json(ErrorResponse {
+                    error: format!(
+                        "'{s}' is not a valid ip_family. Use 'dual_stack', 'ipv4', or 'ipv6'."
+                    ),
+                    code: StatusCode::BAD_REQUEST.into(),
+                }),
+            ))
+        }
+        None => crate::proto::loadbalancer::v1::IpFamily::DualStack,
+    };
     let request_payload = ReserveLoadBalancerRequest {
         name: body.name,
         until: until_timestamp,
         sender_addresses: body.sender_addresses,
+        ip_family: ip_family.into(),
     };
     grpc_to_rest(
         headers,

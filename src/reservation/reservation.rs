@@ -10,6 +10,7 @@ use crate::snp4::rules::{
 };
 use crate::util::{
     generate_solicited_node_multicast_ipv6, generate_solicited_node_multicast_mac, mac_to_u64,
+    IpFamily,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use macaddr::MacAddr6;
@@ -90,7 +91,16 @@ impl ReservationManager {
     pub async fn initialize(&mut self) -> Result<()> {
         for (res, lb) in self.db.list_reservations_with_load_balancer().await? {
             if res.reserved_until > Utc::now() {
-                self.start_reservation(res.id, lb.event_number_udp_port)
+                let ip_family = match (lb.unicast_ipv4_address, lb.unicast_ipv6_address) {
+                    (Some(_), Some(_)) => IpFamily::DualStack,
+                    (Some(_), None) => IpFamily::Ipv4,
+                    (None, Some(_)) => IpFamily::Ipv6,
+                    (None, None) => {
+                        warn!("LoadBalancer {} has neither IPv4 nor IPv6 address, skipping reservation restore", lb.id);
+                        continue;
+                    }
+                };
+                self.start_reservation(res.id, lb.event_number_udp_port, ip_family)
                     .await?;
             }
         }
@@ -180,7 +190,9 @@ impl ReservationManager {
         let mut rules = Self::generate_global_l2_rules(mac);
         let lbs = db.list_loadbalancers().await?;
         for lb in lbs {
-            rules.extend(Self::generate_l2_rule(mac, lb.unicast_ipv6_address));
+            if let Some(ipv6) = lb.unicast_ipv6_address {
+                rules.extend(Self::generate_l2_rule(mac, ipv6));
+            }
             rules.extend(Self::generate_l3_rules(&lb));
         }
         Ok(rules)
@@ -221,38 +233,51 @@ impl ReservationManager {
         use crate::util::generate_solicited_node_multicast_ipv6;
         use std::net::IpAddr;
 
-        vec![
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv4,
-                match_dest_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_src_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_lb_instance_id: lb.fpga_lb_id as u8,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv4Arp,
-                match_dest_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_src_ip_addr: IpAddr::V4(lb.unicast_ipv4_address),
-                set_lb_instance_id: lb.fpga_lb_id as u8,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv6,
-                match_dest_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_src_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_lb_instance_id: lb.fpga_lb_id as u8,
-            }
-            .into(),
-            IpDstToLbInstanceRule {
-                match_ether_type: EtherType::Ipv6,
-                match_dest_ip_addr: IpAddr::V6(generate_solicited_node_multicast_ipv6(
-                    &lb.unicast_ipv6_address,
-                )),
-                set_src_ip_addr: IpAddr::V6(lb.unicast_ipv6_address),
-                set_lb_instance_id: lb.fpga_lb_id as u8,
-            }
-            .into(),
-        ]
+        let mut rules = Vec::new();
+
+        if let Some(ipv4) = lb.unicast_ipv4_address {
+            rules.push(
+                IpDstToLbInstanceRule {
+                    match_ether_type: EtherType::Ipv4,
+                    match_dest_ip_addr: IpAddr::V4(ipv4),
+                    set_src_ip_addr: IpAddr::V4(ipv4),
+                    set_lb_instance_id: lb.fpga_lb_id as u8,
+                }
+                .into(),
+            );
+            rules.push(
+                IpDstToLbInstanceRule {
+                    match_ether_type: EtherType::Ipv4Arp,
+                    match_dest_ip_addr: IpAddr::V4(ipv4),
+                    set_src_ip_addr: IpAddr::V4(ipv4),
+                    set_lb_instance_id: lb.fpga_lb_id as u8,
+                }
+                .into(),
+            );
+        }
+
+        if let Some(ipv6) = lb.unicast_ipv6_address {
+            rules.push(
+                IpDstToLbInstanceRule {
+                    match_ether_type: EtherType::Ipv6,
+                    match_dest_ip_addr: IpAddr::V6(ipv6),
+                    set_src_ip_addr: IpAddr::V6(ipv6),
+                    set_lb_instance_id: lb.fpga_lb_id as u8,
+                }
+                .into(),
+            );
+            rules.push(
+                IpDstToLbInstanceRule {
+                    match_ether_type: EtherType::Ipv6,
+                    match_dest_ip_addr: IpAddr::V6(generate_solicited_node_multicast_ipv6(&ipv6)),
+                    set_src_ip_addr: IpAddr::V6(ipv6),
+                    set_lb_instance_id: lb.fpga_lb_id as u8,
+                }
+                .into(),
+            );
+        }
+
+        rules
     }
 
     async fn next_epoch_rules(
@@ -265,7 +290,9 @@ impl ReservationManager {
         let mut rules = Self::generate_global_l2_rules(mac);
         let lbs = db.list_loadbalancers().await?;
         for lb in lbs {
-            rules.extend(Self::generate_l2_rule(mac, lb.unicast_ipv6_address));
+            if let Some(ipv6) = lb.unicast_ipv6_address {
+                rules.extend(Self::generate_l2_rule(mac, ipv6));
+            }
             rules.extend(Self::generate_l3_rules(&lb));
         }
         let reservations = active.lock().await;
@@ -412,16 +439,52 @@ impl ReservationManager {
     }
 
     /// Starts a new reservation sync and metric tracking.
-    pub async fn start_reservation(&mut self, reservation_id: i64, port: u16) -> Result<()> {
+    pub async fn start_reservation(
+        &mut self,
+        reservation_id: i64,
+        port: u16,
+        ip_family: IpFamily,
+    ) -> Result<()> {
         let mut reservations = self.active_reservations.lock().await;
         if reservations.contains_key(&reservation_id) {
             return Ok(());
         }
         let fpga_id = self.db.get_reservation_fpga_lb_id(reservation_id).await?;
         let mut r = ActiveReservation::new(reservation_id, fpga_id as u8);
-        let mut addr = self.sync_addr;
-        addr.set_port(port);
-        r.start_event_sync(self.db.clone(), addr).await;
+
+        match ip_family {
+            IpFamily::DualStack => {
+                // Start both IPv4 and IPv6 sync servers
+                let mut addr_v4 = self.sync_addr;
+                addr_v4.set_port(port);
+                if let std::net::SocketAddr::V6(v6) = addr_v4 {
+                    if let Some(ipv4) = v6.ip().to_ipv4() {
+                        addr_v4 = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ipv4, port));
+                    }
+                }
+                r.start_event_sync(self.db.clone(), addr_v4).await;
+
+                let mut addr_v6 = self.sync_addr;
+                addr_v6.set_port(port);
+                r.start_event_sync(self.db.clone(), addr_v6).await;
+            }
+            IpFamily::Ipv4 => {
+                let mut addr_v4 = self.sync_addr;
+                addr_v4.set_port(port);
+                if let std::net::SocketAddr::V6(v6) = addr_v4 {
+                    if let Some(ipv4) = v6.ip().to_ipv4() {
+                        addr_v4 = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ipv4, port));
+                    }
+                }
+                r.start_event_sync(self.db.clone(), addr_v4).await;
+            }
+            IpFamily::Ipv6 => {
+                let mut addr_v6 = self.sync_addr;
+                addr_v6.set_port(port);
+                r.start_event_sync(self.db.clone(), addr_v6).await;
+            }
+        }
+
         reservations.insert(reservation_id, r);
         LB_IS_ACTIVE
             .with_label_values(&[&fpga_id.to_string()])

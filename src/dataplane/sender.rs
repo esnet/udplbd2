@@ -34,8 +34,14 @@ impl Sender {
         mtu_size: u16,
         meta_event_context: Option<MetaEventContext>,
     ) -> Result<Self> {
-        let data_socket = UdpSocket::bind("0.0.0.0:0").await?;
-        let sync_socket = UdpSocket::bind("0.0.0.0:0").await?;
+        let data_socket = match data_target {
+            SocketAddr::V4(_) => UdpSocket::bind("0.0.0.0:0").await?,
+            SocketAddr::V6(_) => UdpSocket::bind("[::]:0").await?,
+        };
+        let sync_socket = match sync_target {
+            SocketAddr::V4(_) => UdpSocket::bind("0.0.0.0:0").await?,
+            SocketAddr::V6(_) => UdpSocket::bind("[::]:0").await?,
+        };
 
         Ok(Self {
             last_sync: 0,
@@ -50,33 +56,79 @@ impl Sender {
         })
     }
 
-    /// Create a sender using an EJFAT URI
+    /// Create a sender using an EJFAT URI, supporting IPv4 and IPv6.
     pub async fn from_url(
         url: &EjfatUrl,
         meta_event_context: Option<MetaEventContext>,
+        ipv6_only: bool,
     ) -> Result<Self> {
-        let (data_target, sync_target) =
-            match (url.data_host.as_ref(), url.sync_ip_address.as_ref()) {
+        let (data_target, sync_target) = if ipv6_only {
+            match (url.data_addr_v6.as_ref(), url.sync_addr_v6.as_ref()) {
                 (Some(data_addr), Some(sync_addr)) => {
-                    let data_target: SocketAddr = format!("{}:19522", data_addr).parse()?;
+                    let data_target: SocketAddr =
+                        format!("[{}]:{}", data_addr, url.data_min_port).parse()?;
                     let sync_target: SocketAddr =
-                        format!("{}:{}", sync_addr, url.sync_udp_port.unwrap_or(0)).parse()?;
+                        format!("[{}]:{}", sync_addr, url.sync_udp_port.unwrap_or(0)).parse()?;
                     (data_target, sync_target)
                 }
                 _ => {
                     let mut client = ControlPlaneClient::from_url(&url.to_string()).await?;
                     let response = client.get_load_balancer().await?.into_inner();
 
-                    let data_target: SocketAddr =
-                        format!("{}:19522", response.data_ipv4_address).parse()?;
+                    let data_target: SocketAddr = format!(
+                        "[{}]:{}",
+                        response.data_ipv6_address, response.data_min_port
+                    )
+                    .parse()?;
                     let sync_target: SocketAddr = format!(
-                        "{}:{}",
-                        response.sync_ip_address, response.sync_udp_port as u16
+                        "[{}]:{}",
+                        response.sync_ipv6_address, response.sync_udp_port as u16
                     )
                     .parse()?;
                     (data_target, sync_target)
                 }
-            };
+            }
+        } else {
+            match (url.data_addr_v4.as_ref(), url.sync_addr_v4.as_ref()) {
+                (Some(data_addr), Some(sync_addr)) => {
+                    let data_target: SocketAddr =
+                        format!("{}:{}", data_addr, url.data_min_port).parse()?;
+                    let sync_target: SocketAddr =
+                        format!("{}:{}", sync_addr, url.sync_udp_port.unwrap_or(0)).parse()?;
+                    (data_target, sync_target)
+                }
+                _ => {
+                    // Fallback: If v4 addresses are missing, but v6 addresses are present, use v6 addresses
+                    match (url.data_addr_v6.as_ref(), url.sync_addr_v6.as_ref()) {
+                        (Some(data_addr), Some(sync_addr)) => {
+                            let data_target: SocketAddr =
+                                format!("[{}]:{}", data_addr, url.data_min_port).parse()?;
+                            let sync_target: SocketAddr =
+                                format!("[{}]:{}", sync_addr, url.sync_udp_port.unwrap_or(0))
+                                    .parse()?;
+                            (data_target, sync_target)
+                        }
+                        _ => {
+                            // Otherwise, try to get v4 addresses from the control plane as before
+                            let mut client = ControlPlaneClient::from_url(&url.to_string()).await?;
+                            let response = client.get_load_balancer().await?.into_inner();
+
+                            let data_target: SocketAddr = format!(
+                                "{}:{}",
+                                response.data_ipv4_address, response.data_min_port
+                            )
+                            .parse()?;
+                            let sync_target: SocketAddr = format!(
+                                "{}:{}",
+                                response.sync_ipv4_address, response.sync_udp_port as u16
+                            )
+                            .parse()?;
+                            (data_target, sync_target)
+                        }
+                    }
+                }
+            }
+        };
 
         Sender::new(data_target, sync_target, 1500, meta_event_context).await
     }

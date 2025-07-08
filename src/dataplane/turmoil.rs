@@ -401,7 +401,6 @@ pub mod tester {
                                     let lb_service = crate::api::turmoil::service::LoadBalancerService::new(
                                         db.clone(),
                                         manager_arc.clone(),
-                                        addr.into(),
                                     );
                                     let svc = crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer::new(lb_service);
                                     Server::builder()
@@ -437,7 +436,14 @@ pub mod tester {
                                 let addresses = addresses.clone();
                                 async move {
                                     let mut client = ControlPlaneClient::turmoil().await?;
-                                    client.reserve_load_balancer(name, None, addresses).await?;
+                                    client
+                                        .reserve_load_balancer(
+                                            name,
+                                            None,
+                                            addresses,
+                                            crate::proto::loadbalancer::v1::IpFamily::DualStack,
+                                        )
+                                        .await?;
                                     Ok(())
                                 }
                             });

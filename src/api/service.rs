@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// Struct that holds the state required to operate the gRPC server (LoadBalancerDB, ReservationManager)
-use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{metadata::MetadataMap, Status};
@@ -12,21 +11,12 @@ use crate::db::LoadBalancerDB;
 pub struct LoadBalancerService {
     pub(crate) db: Arc<LoadBalancerDB>,
     pub(crate) manager: Arc<Mutex<ReservationManager>>,
-    pub(crate) sync_address: SocketAddr,
 }
 
 impl LoadBalancerService {
     #[must_use]
-    pub fn new(
-        db: Arc<LoadBalancerDB>,
-        manager: Arc<Mutex<ReservationManager>>,
-        sync_addr: SocketAddr,
-    ) -> Self {
-        Self {
-            db,
-            manager,
-            sync_address: sync_addr,
-        }
+    pub fn new(db: Arc<LoadBalancerDB>, manager: Arc<Mutex<ReservationManager>>) -> Self {
+        Self { db, manager }
     }
 
     pub(crate) async fn validate_token(

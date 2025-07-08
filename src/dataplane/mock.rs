@@ -343,10 +343,13 @@ impl MockDataplaneState {
     ) -> Result<(), Error> {
         match parse_rule(rule)? {
             RuleType::IpDst(r) => {
-                // Only process IPv4 addresses.
-                if !(r.match_dest_ip_addr.is_ipv4()
+                // Allow both IPv4 and IPv6 addresses, but require EtherType to match address family.
+                let ether_type_matches = (r.match_dest_ip_addr.is_ipv4()
                     && r.match_ether_type as isize == EtherType::Ipv4 as isize)
-                {
+                    || (r.match_dest_ip_addr.is_ipv6()
+                        && r.match_ether_type as isize == EtherType::Ipv6 as isize);
+                let src_dst_matches = r.match_dest_ip_addr == r.set_src_ip_addr;
+                if !(ether_type_matches && src_dst_matches) {
                     return Ok(());
                 }
                 // If replacing an existing LB, signal shutdown and remove its task.

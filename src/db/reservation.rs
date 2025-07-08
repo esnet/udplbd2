@@ -102,8 +102,8 @@ impl LoadBalancerDB {
         .fetch_all(&self.read_pool)
         .await?
         .into_iter()
-        .filter_map(|record| {
-            Some(crate::db::models::Session {
+        .map(|record| {
+            crate::db::models::Session {
                 id: record.id,
                 reservation_id: record.reservation_id,
                 name: record.name,
@@ -111,7 +111,7 @@ impl LoadBalancerDB {
                 weight: record.weight,
                 latest_session_state_id: record.latest_session_state_id,
                 is_ready: record.is_ready,
-                ip_address: record.ip_address.parse().ok()?,
+                ip_address: record.ip_address.parse().expect("invalid ip address in database"),
                 udp_port: record.udp_port as u16,
                 port_range: record.port_range as u16,
                 mac_address: record.mac_address,
@@ -121,7 +121,7 @@ impl LoadBalancerDB {
                 created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
                     .expect("created_at out of range"),
                 deleted_at: None,
-            })
+            }
         })
         .collect();
 
@@ -298,12 +298,10 @@ impl LoadBalancerDB {
                         .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
                     unicast_ipv4_address: record
                         .unicast_ipv4_address
-                        .parse()
-                        .map_err(|_| Error::Config("Invalid IPv4 address".into()))?,
+                        .map(|s| s.parse().expect("invalid address in database")),
                     unicast_ipv6_address: record
                         .unicast_ipv6_address
-                        .parse()
-                        .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
+                        .map(|s| s.parse().expect("invalid address in database")),
                     event_number_udp_port: record.event_number_udp_port as u16,
                     fpga_lb_id: record.fpga_lb_id as u16,
                     created_at: DateTime::<Utc>::from_timestamp_millis(record.lb_created_at)

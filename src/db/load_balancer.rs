@@ -38,17 +38,24 @@ impl LoadBalancerDB {
         name: &str,
         unicast_mac: MacAddr6,
         broadcast_mac: MacAddr6,
-        unicast_ipv4: Ipv4Addr,
-        unicast_ipv6: Ipv6Addr,
+        unicast_ipv4: Option<Ipv4Addr>,
+        unicast_ipv6: Option<Ipv6Addr>,
         event_number_port: u16,
     ) -> Result<LoadBalancer> {
-        // Find the first available fpga_lb_id
+        // At least one of unicast_ipv4 or unicast_ipv6 must be provided
+        if unicast_ipv4.is_none() && unicast_ipv6.is_none() {
+            return Err(Error::Usage(
+                "At least one of unicast_ipv4 or unicast_ipv6 must be provided".to_string(),
+            ));
+        }
+
         let fpga_lb_id = self.find_available_fpga_lb_id().await?;
 
         let unicast_mac_string = unicast_mac.to_string();
         let broadcast_mac_string = broadcast_mac.to_string();
-        let unicast_ipv4_string = unicast_ipv4.to_string();
-        let unicast_ipv6_string = unicast_ipv6.to_string();
+        let unicast_ipv4_string = unicast_ipv4.map(|ip| ip.to_string());
+        let unicast_ipv6_string = unicast_ipv6.map(|ip| ip.to_string());
+
         let record = sqlx::query!(
             r#"
             INSERT INTO loadbalancer (
@@ -89,12 +96,10 @@ impl LoadBalancerDB {
                 .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv4 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             unicast_ipv6_address: record
                 .unicast_ipv6_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             event_number_udp_port: record.event_number_udp_port as u16,
             fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -182,12 +187,10 @@ impl LoadBalancerDB {
                 .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv4 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             unicast_ipv6_address: record
                 .unicast_ipv6_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             event_number_udp_port: record.event_number_udp_port as u16,
             fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -229,12 +232,10 @@ impl LoadBalancerDB {
                     .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
                 unicast_ipv4_address: record
                     .unicast_ipv4_address
-                    .parse()
-                    .map_err(|_| Error::Config("Invalid IPv4 address".into()))?,
+                    .map(|s| s.parse().expect("invalid address in database")),
                 unicast_ipv6_address: record
                     .unicast_ipv6_address
-                    .parse()
-                    .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
+                    .map(|s| s.parse().expect("invalid address in database")),
                 event_number_udp_port: record.event_number_udp_port as u16,
                 fpga_lb_id: record.fpga_lb_id as u16,
                 created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -252,8 +253,8 @@ impl LoadBalancerDB {
     pub async fn update_loadbalancer(&self, lb: &LoadBalancer) -> Result<LoadBalancer> {
         let unicast_mac_string = lb.unicast_mac_address.to_string();
         let broadcast_mac_string = lb.broadcast_mac_address.to_string();
-        let unicast_ipv4_string = lb.unicast_ipv4_address.to_string();
-        let unicast_ipv6_string = lb.unicast_ipv6_address.to_string();
+        let unicast_ipv4_string = lb.unicast_ipv4_address.as_ref().map(|ip| ip.to_string());
+        let unicast_ipv6_string = lb.unicast_ipv6_address.as_ref().map(|ip| ip.to_string());
         let record = sqlx::query!(
             r#"
             UPDATE loadbalancer
@@ -298,12 +299,10 @@ impl LoadBalancerDB {
                 .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv4 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             unicast_ipv6_address: record
                 .unicast_ipv6_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid IPv6 address".into()))?,
+                .map(|s| s.parse().expect("invalid address in database")),
             event_number_udp_port: record.event_number_udp_port as u16,
             fpga_lb_id: record.fpga_lb_id as u16,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -324,6 +323,35 @@ impl LoadBalancerDB {
             WHERE id = ?1 AND deleted_at IS NULL
             "#,
             id
+        )
+        .execute(&self.write_pool)
+        .await?;
+
+        if result.rows_affected() == 0 {
+            return Err(Error::NotFound("Loadbalancer not found".into()));
+        }
+        Ok(())
+    }
+
+    /// Updates only the IPv4 and IPv6 addresses for a loadbalancer by ID.
+    pub async fn update_loadbalancer_addresses(
+        &self,
+        lb_id: i64,
+        ipv4: Option<Ipv4Addr>,
+        ipv6: Option<Ipv6Addr>,
+    ) -> Result<()> {
+        let ipv4_string = ipv4.map(|ip| ip.to_string());
+        let ipv6_string = ipv6.map(|ip| ip.to_string());
+        let result = sqlx::query!(
+            r#"
+            UPDATE loadbalancer
+            SET unicast_ipv4_address = ?1,
+                unicast_ipv6_address = ?2
+            WHERE id = ?3 AND deleted_at IS NULL
+            "#,
+            ipv4_string,
+            ipv6_string,
+            lb_id
         )
         .execute(&self.write_pool)
         .await?;

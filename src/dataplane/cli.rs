@@ -13,7 +13,7 @@ use zerocopy::FromBytes;
 
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
-use crate::dataplane::doctor::doctor;
+use crate::dataplane::doctor::{doctor, doctor_multi};
 use crate::dataplane::meta_events::MetaEventContext;
 use crate::dataplane::protocol::EjfatEvent;
 use crate::dataplane::protocol::{
@@ -141,9 +141,9 @@ pub struct SendArgs {
 
 #[derive(Args, Debug)]
 pub struct DoctorArgs {
-    /// IP address to listen on.
-    #[arg(short, long)]
-    pub address: String,
+    /// One or more IP addresses to test (comma-separated or repeated).
+    #[arg(short, long, value_delimiter = ',')]
+    pub addresses: Vec<String>,
     /// UDP port to listen on.
     #[arg(short, long)]
     pub port: u16,
@@ -271,22 +271,40 @@ impl DataplaneCli {
                 send_file(args.file.clone(), target_addr, url.to_string(), 0).await?;
             }
             DataplaneCommand::Doctor(args) => {
-                let output = doctor(
-                    url.to_string(),
-                    args.address.clone(),
-                    args.port,
-                    args.mtu,
-                    args.lb,
-                )
-                .await?;
-                println!("{}", output);
+                if args.addresses.len() == 1 {
+                    let output = doctor(
+                        url.to_string(),
+                        args.addresses[0].parse()?,
+                        args.port,
+                        args.mtu,
+                        args.lb,
+                    )
+                    .await?;
+                    println!("{}", output);
+                } else {
+                    let results = doctor_multi(
+                        url.to_string(),
+                        args.addresses.clone(),
+                        args.port,
+                        args.mtu,
+                        args.lb,
+                    )
+                    .await;
+                    for res in results {
+                        match res {
+                            Ok(output) => println!("{}", output),
+                            Err(e) => eprintln!("doctor error: {}", e),
+                        }
+                    }
+                }
             }
             DataplaneCommand::Test(args) => {
                 let config_file = tester::load_config_from_json(&args.config)?;
+                let ip_addr: std::net::IpAddr = args.address.parse().expect("Invalid IP address");
                 let output = tester::run_test(
                     url.to_string(),
                     config_file,
-                    args.address.clone(),
+                    ip_addr,
                     args.port,
                     &meta_event_manager,
                 )
@@ -364,7 +382,7 @@ pub async fn send_file(
             sender.send_ts(&buffer, data_id).await
         }
         None => {
-            let mut sender = Sender::from_url(&url.parse().expect("bad URL"), None).await?;
+            let mut sender = Sender::from_url(&url.parse().expect("bad URL"), None, false).await?;
             sender.send_ts(&buffer, data_id).await
         }
     };
@@ -422,7 +440,7 @@ async fn receive_files(
 ) -> Result<()> {
     if with_lb_headers {
         let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
-        parsed_url.data_host = Some(ip_address.clone());
+        parsed_url.data_addr_v4 = Some(ip_address.clone());
         println!("export 'EJFAT_URI={parsed_url}'");
     }
 

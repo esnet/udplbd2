@@ -29,6 +29,7 @@ pub struct EventIdSyncServer {
     reservation_id: i64,
     address: SocketAddr,
     samples: Arc<Mutex<VecDeque<EventSample>>>, // in-memory buffer of recent samples
+    last_modified: Arc<Mutex<Option<DateTime<Utc>>>>,
 }
 
 impl EventIdSyncServer {
@@ -71,6 +72,7 @@ impl EventIdSyncServer {
             reservation_id,
             address,
             samples: Arc::new(Mutex::new(samples)),
+            last_modified: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -175,6 +177,10 @@ impl EventIdSyncServer {
             samples.pop_back();
         }
 
+        // Update last modified time
+        let mut last_mod = self.last_modified.lock().unwrap();
+        *last_mod = Some(local_ts);
+
         Ok(())
     }
 
@@ -183,5 +189,11 @@ impl EventIdSyncServer {
         let samples = self.samples.lock().unwrap();
         let samples_vec: Vec<_> = samples.iter().cloned().collect();
         predict_epoch_boundary_from_samples(&samples_vec, offset)
+    }
+
+    /// Returns the last modified time (last received sample) for this server
+    pub fn last_modified(&self) -> Option<DateTime<Utc>> {
+        let last_mod = self.last_modified.lock().unwrap();
+        *last_mod
     }
 }

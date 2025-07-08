@@ -29,7 +29,7 @@ pub async fn create_test_service() -> LoadBalancerService {
         "00:1A:2B:3C:4D:5E".parse().unwrap(),
         "127.0.0.1:0".parse().unwrap(),
     )));
-    LoadBalancerService::new(db, manager, "127.0.0.1:0".parse().unwrap())
+    LoadBalancerService::new(db, manager)
 }
 
 #[tokio::test]
@@ -78,6 +78,7 @@ async fn test_reserve_load_balancer_invalid_token() {
         until: None,
         sender_addresses: vec![],
         name: "test".to_string(),
+        ..Default::default()
     });
     request
         .metadata_mut()

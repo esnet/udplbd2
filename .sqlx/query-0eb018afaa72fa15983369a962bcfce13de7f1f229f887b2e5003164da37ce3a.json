@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port,\n                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE id = ?1 AND deleted_at IS NULL\n            ",
+  "query": "\n            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, is_ready, ip_address, udp_port,\n                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE id = ?1 AND deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -34,48 +34,53 @@
         "type_info": "Integer"
       },
       {
-        "name": "ip_address",
+        "name": "is_ready",
         "ordinal": 6,
+        "type_info": "Bool"
+      },
+      {
+        "name": "ip_address",
+        "ordinal": 7,
         "type_info": "Text"
       },
       {
         "name": "udp_port",
-        "ordinal": 7,
-        "type_info": "Integer"
-      },
-      {
-        "name": "port_range",
         "ordinal": 8,
         "type_info": "Integer"
       },
       {
-        "name": "min_factor",
+        "name": "port_range",
         "ordinal": 9,
-        "type_info": "Float"
+        "type_info": "Integer"
       },
       {
-        "name": "max_factor",
+        "name": "min_factor",
         "ordinal": 10,
         "type_info": "Float"
       },
       {
-        "name": "mac_address",
+        "name": "max_factor",
         "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "mac_address",
+        "ordinal": 12,
         "type_info": "Text"
       },
       {
         "name": "keep_lb_header",
-        "ordinal": 12,
-        "type_info": "Integer"
-      },
-      {
-        "name": "created_at",
         "ordinal": 13,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 15,
         "type_info": "Integer"
       }
     ],
@@ -94,11 +99,12 @@
       false,
       false,
       false,
+      false,
       true,
       false,
       false,
       true
     ]
   },
-  "hash": "cc47906ea106305e8cce2718ff0210fa7e0d029e31172c8b72b3cb094e5aa5aa"
+  "hash": "0eb018afaa72fa15983369a962bcfce13de7f1f229f887b2e5003164da37ce3a"
 }

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE loadbalancer\n            SET unicast_ipv4_address = ?1,\n                unicast_ipv6_address = ?2\n            WHERE id = ?3 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "2b5e3d71613ed2c0821ab687b21731f108c5606c0679cd9a361b5c4a3df955a3"
+}

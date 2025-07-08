@@ -178,17 +178,18 @@ impl TryFrom<TableRule> for IpDstToLbInstanceRule {
                 return Err(Error::Config("Invalid ether_type".into()));
             };
 
-        let src_ip = if action.parameters[0].value.len() <= 10 {
-            IpAddr::V4(
-                parse_ipv4(&action.parameters[0].value)
-                    .ok_or_else(|| Error::Config("Invalid IPv4 address".into()))?,
-            )
-        } else {
-            IpAddr::V6(
-                parse_ipv6(&action.parameters[0].value)
-                    .ok_or_else(|| Error::Config("Invalid IPv6 address".into()))?,
-            )
-        };
+        let src_ip =
+            if ether_type == EtherType::Ipv4 as u32 || ether_type == EtherType::Ipv4Arp as u32 {
+                IpAddr::V4(
+                    parse_ipv4(&action.parameters[0].value)
+                        .ok_or_else(|| Error::Config("Invalid IPv4 address".into()))?,
+                )
+            } else {
+                IpAddr::V6(
+                    parse_ipv6(&action.parameters[0].value)
+                        .ok_or_else(|| Error::Config("Invalid IPv6 address".into()))?,
+                )
+            };
         let lb_id = parse_hex_u8(&action.parameters[1].value)
             .ok_or_else(|| Error::Config("Invalid LB ID".into()))?;
 

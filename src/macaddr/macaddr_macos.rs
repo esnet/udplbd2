@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 use crate::errors::{Error, Result};
 use macaddr::MacAddr6;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::process::Command;
 use std::str::FromStr;
 use std::time::Duration;
@@ -189,7 +189,9 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 
 /// Gets the MAC address for a given IP address by checking local interfaces and neighbors
 pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
-    if ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)) || ip == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+    if ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
+        || ip == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
+        || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
     {
         // for debugging :)
         return Ok(MacAddr6::new(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB));

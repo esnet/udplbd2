@@ -123,18 +123,50 @@ impl LoadBalancerDB {
 
         // Get all existing loadbalancers
         let existing_lbs = self.list_loadbalancers().await?;
-        let mut existing_names: std::collections::HashSet<String> =
-            existing_lbs.iter().map(|lb| lb.name.clone()).collect();
         debug!("found {} existing load balancers", existing_lbs.len());
 
-        // Process loadbalancers in config
+        // Track which DB entries have been matched
+        let mut matched_db_ids = std::collections::HashSet::new();
+
+        // For each config instance, try to match by either address and port
         for lb_config in &config.lb.instances {
-            let lb_name = lb_config.ipv4.to_string();
-            if !existing_names.remove(&lb_name) {
-                // LB doesn't exist in DB, create it
-                info!("adding new load balancer to db: {}", lb_name);
+            let port = lb_config.event_number_port;
+            let ipv4 = lb_config.ipv4;
+            let ipv6 = lb_config.ipv6;
+
+            // Find a DB entry where either address matches and port matches
+            let maybe_db = existing_lbs.iter().find(|db_lb| {
+                db_lb.event_number_udp_port == port
+                    && ((ipv4.is_some() && db_lb.unicast_ipv4_address == ipv4)
+                        || (ipv6.is_some() && db_lb.unicast_ipv6_address == ipv6))
+            });
+
+            if let Some(db_lb) = maybe_db {
+                matched_db_ids.insert(db_lb.id);
+
+                // If addresses differ, update the DB entry
+                if db_lb.unicast_ipv4_address != ipv4 || db_lb.unicast_ipv6_address != ipv6 {
+                    info!(
+                    "updating load balancer id {:?}: ipv4 {:?} -> {:?}, ipv6 {:?} -> {:?}, port {:?}",
+                    db_lb.id, db_lb.unicast_ipv4_address, ipv4, db_lb.unicast_ipv6_address, ipv6, port
+                    );
+                    self.update_loadbalancer_addresses(db_lb.id, ipv4, ipv6)
+                        .await?;
+                    changes = true;
+                } else {
+                    debug!(
+                        "load balancer already exists and matches: id {:?}, ipv4={:?}, ipv6={:?}, port={:?}",
+                        db_lb.id, ipv4, ipv6, port
+                    );
+                }
+            } else {
+                // No match found, create new
+                info!(
+                    "adding new load balancer to db: ipv4={:?}, ipv6={:?}, port={:?}",
+                    ipv4, ipv6, port
+                );
                 self.create_loadbalancer(
-                    &lb_name,
+                    "", // name is deprecated/ignored
                     config
                         .lb
                         .mac_unicast
@@ -145,32 +177,38 @@ impl LoadBalancerDB {
                         .mac_broadcast
                         .parse::<macaddr::MacAddr6>()
                         .map_err(|_| Error::Config("invalid mac address".into()))?,
-                    lb_config.ipv4,
-                    lb_config.ipv6,
-                    lb_config.event_number_port,
+                    ipv4,
+                    ipv6,
+                    port,
                 )
                 .await?;
                 changes = true;
-            } else {
-                debug!("load balancer already exists: {}", lb_name);
             }
         }
 
-        // Remove loadbalancers that exist in DB but not in config
-        if !existing_names.is_empty() {
-            warn!(
-                "found {} load balancers in database that are not in config",
-                existing_names.len()
-            );
-            for lb_name in existing_names {
-                if let Some(lb) = existing_lbs.iter().find(|lb| lb.name == lb_name) {
-                    info!("removing load balancer not in config: {}", lb_name);
-                    self.delete_loadbalancer(lb.id).await?;
-                    changes = true;
-                }
+        // Remove load balancers in DB that do not match any config instance by either address and port
+        for db_lb in existing_lbs.iter() {
+            if matched_db_ids.contains(&db_lb.id) {
+                continue;
             }
-        } else {
-            debug!("no extra load balancers to remove from database");
+            // If no config instance matches either address and port, remove
+            let still_in_config = config.lb.instances.iter().any(|lb_config| {
+                db_lb.event_number_udp_port == lb_config.event_number_port
+                    && ((lb_config.ipv4.is_some() && db_lb.unicast_ipv4_address == lb_config.ipv4)
+                        || (lb_config.ipv6.is_some()
+                            && db_lb.unicast_ipv6_address == lb_config.ipv6))
+            });
+            if !still_in_config {
+                info!(
+                    "removing load balancer not in config: id {:?}, ipv4={:?}, ipv6={:?}, port={:?}",
+                    db_lb.id,
+                    db_lb.unicast_ipv4_address,
+                    db_lb.unicast_ipv6_address,
+                    db_lb.event_number_udp_port
+                );
+                self.delete_loadbalancer(db_lb.id).await?;
+                changes = true;
+            }
         }
 
         // Create admin token if missing

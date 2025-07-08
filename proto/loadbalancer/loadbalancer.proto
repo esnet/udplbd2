@@ -4,6 +4,12 @@ option go_package = "github.com/esnet/udplbd/pkg/pb";
 import "google/protobuf/timestamp.proto";
 import "google/protobuf/struct.proto";
 
+enum IpFamily {
+    DUAL_STACK = 0;
+    IPV4 = 1;
+    IPV6 = 2;
+}
+
 enum PortRange {
     PORT_RANGE_1 = 0;
     PORT_RANGE_2 = 1;
@@ -70,6 +76,7 @@ message ReserveLoadBalancerRequest {
 	string name = 2; // name of the new LB instance
 	google.protobuf.Timestamp until = 4; // when this reservation should end, if UNIX epoch, no expiration
 	repeated string senderAddresses = 5; // allowed ip addresses to send, v4 or v6
+	IpFamily ipFamily = 6; // IP family requirements: DUAL_STACK (default), IPV4, or IPV6
 }
 //
 //  GetLoadBalancer will return same as ReserveLoadBalancer but without token
@@ -81,11 +88,15 @@ message GetLoadBalancerRequest {
 message ReserveLoadBalancerReply {
 	string token = 1; // instance token
 	string lbId = 2; // database identifier, this is what to use as lbId in other gRPCs
-	string syncIpAddress = 3; // backend data receiving IP address
+	string syncIpv4Address = 3; // backend data receiving IPv4 sync address
+	string syncIpv6Address = 8; // backend data receiving IPv6 sync address
 	uint32 syncUdpPort = 4; // backend data receiving IP address
 	string dataIpv4Address = 5; // backend data receiving IP address
 	string dataIpv6Address = 6; // backend data receiving IP address
+	uint32 dataMinPort = 9; // min acceptable port to send UDP data to (for LAG entropy)
+	uint32 dataMaxPort = 10; // max acceptable port to send UDP data to (for LAG entropy)
 	uint32 fpgaLbId = 7; // FPGA LB ID, for use in correlating logs/metrics
+
 }
 
 

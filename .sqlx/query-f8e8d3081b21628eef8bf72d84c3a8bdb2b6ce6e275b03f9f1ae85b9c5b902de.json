@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT\n                id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, ip_address, udp_port, port_range,\n                mac_address, min_factor, max_factor, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ",
+  "query": "\n            SELECT id, reservation_id, name, initial_weight_factor, weight, latest_session_state_id, is_ready, ip_address, udp_port,\n                   port_range, min_factor, max_factor, mac_address, keep_lb_header, created_at, deleted_at\n            FROM session\n            WHERE id = ?1\n            ",
   "describe": {
     "columns": [
       {
@@ -34,24 +34,24 @@
         "type_info": "Integer"
       },
       {
-        "name": "ip_address",
+        "name": "is_ready",
         "ordinal": 6,
+        "type_info": "Bool"
+      },
+      {
+        "name": "ip_address",
+        "ordinal": 7,
         "type_info": "Text"
       },
       {
         "name": "udp_port",
-        "ordinal": 7,
-        "type_info": "Integer"
-      },
-      {
-        "name": "port_range",
         "ordinal": 8,
         "type_info": "Integer"
       },
       {
-        "name": "mac_address",
+        "name": "port_range",
         "ordinal": 9,
-        "type_info": "Text"
+        "type_info": "Integer"
       },
       {
         "name": "min_factor",
@@ -64,18 +64,23 @@
         "type_info": "Float"
       },
       {
-        "name": "keep_lb_header",
+        "name": "mac_address",
         "ordinal": 12,
-        "type_info": "Integer"
+        "type_info": "Text"
       },
       {
-        "name": "created_at",
+        "name": "keep_lb_header",
         "ordinal": 13,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 14,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 15,
         "type_info": "Integer"
       }
     ],
@@ -92,13 +97,14 @@
       false,
       false,
       false,
+      false,
+      false,
+      false,
       true,
-      false,
-      false,
       false,
       false,
       true
     ]
   },
-  "hash": "59209cb95a52593ac0d6ef5594d74bd1570993f6bf5b4efcff6822af358480b7"
+  "hash": "f8e8d3081b21628eef8bf72d84c3a8bdb2b6ce6e275b03f9f1ae85b9c5b902de"
 }

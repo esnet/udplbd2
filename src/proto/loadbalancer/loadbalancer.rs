@@ -14,6 +14,9 @@ pub struct ReserveLoadBalancerRequest {
     /// allowed ip addresses to send, v4 or v6
     #[prost(string, repeated, tag = "5")]
     pub sender_addresses: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// IP family requirements: DUAL_STACK (default), IPV4, or IPV6
+    #[prost(enumeration = "IpFamily", tag = "6")]
+    pub ip_family: i32,
 }
 ///
 ///   GetLoadBalancer will return same as ReserveLoadBalancer but without token
@@ -35,9 +38,12 @@ pub struct ReserveLoadBalancerReply {
     /// database identifier, this is what to use as lbId in other gRPCs
     #[prost(string, tag = "2")]
     pub lb_id: ::prost::alloc::string::String,
-    /// backend data receiving IP address
+    /// backend data receiving IPv4 sync address
     #[prost(string, tag = "3")]
-    pub sync_ip_address: ::prost::alloc::string::String,
+    pub sync_ipv4_address: ::prost::alloc::string::String,
+    /// backend data receiving IPv6 sync address
+    #[prost(string, tag = "8")]
+    pub sync_ipv6_address: ::prost::alloc::string::String,
     /// backend data receiving IP address
     #[prost(uint32, tag = "4")]
     pub sync_udp_port: u32,
@@ -47,6 +53,12 @@ pub struct ReserveLoadBalancerReply {
     /// backend data receiving IP address
     #[prost(string, tag = "6")]
     pub data_ipv6_address: ::prost::alloc::string::String,
+    /// min acceptable port to send UDP data to (for LAG entropy)
+    #[prost(uint32, tag = "9")]
+    pub data_min_port: u32,
+    /// max acceptable port to send UDP data to (for LAG entropy)
+    #[prost(uint32, tag = "10")]
+    pub data_max_port: u32,
     /// FPGA LB ID, for use in correlating logs/metrics
     #[prost(uint32, tag = "7")]
     pub fpga_lb_id: u32,
@@ -609,6 +621,36 @@ pub struct RevokeTokenRequest {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, ::prost::Message)]
 pub struct RevokeTokenReply {}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IpFamily {
+    DualStack = 0,
+    Ipv4 = 1,
+    Ipv6 = 2,
+}
+impl IpFamily {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::DualStack => "DUAL_STACK",
+            Self::Ipv4 => "IPV4",
+            Self::Ipv6 => "IPV6",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "DUAL_STACK" => Some(Self::DualStack),
+            "IPV4" => Some(Self::Ipv4),
+            "IPV6" => Some(Self::Ipv6),
+            _ => None,
+        }
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]

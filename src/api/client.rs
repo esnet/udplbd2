@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
+use crate::errors::Error;
 /// gRPC client for the udplbd gRPC API
 use crate::proto::loadbalancer::v1::{
     load_balancer_client::LoadBalancerClient, token_selector, AddSendersReply, AddSendersRequest,
@@ -11,13 +12,12 @@ use crate::proto::loadbalancer::v1::{
     VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
+use serde::Serialize;
 use std::fmt;
 use std::str::FromStr;
 use tonic::service::interceptor::InterceptedService;
 use tonic::transport::{Channel, ClientTlsConfig, Endpoint};
 use tonic::{metadata::MetadataValue, service::Interceptor, Request, Status};
-use url::ParseError;
-use url::Url;
 
 type ControlPlaneTonicClient = LoadBalancerClient<InterceptedService<Channel, BearerInterceptor>>;
 
@@ -92,11 +92,13 @@ impl ControlPlaneClient {
         name: String,
         until: Option<Timestamp>,
         sender_addresses: Vec<String>,
+        ip_family: crate::proto::loadbalancer::v1::IpFamily,
     ) -> std::result::Result<tonic::Response<ReserveLoadBalancerReply>, tonic::Status> {
         let request = ReserveLoadBalancerRequest {
             name,
             until,
             sender_addresses,
+            ip_family: ip_family as i32,
         };
         let reply = self.client.reserve_load_balancer(request).await?;
         self.lb_id = Some(reply.get_ref().lb_id.clone());
@@ -356,17 +358,20 @@ impl ControlPlaneClient {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize)]
 pub struct EjfatUrl {
     pub token: Option<String>,
     pub grpc_host: String,
     pub grpc_port: Option<u16>,
     /// When present, indicates a non-admin URL (load-balancer endpoint)
     pub lb_id: Option<String>,
-    pub sync_ip_address: Option<String>,
+    pub sync_addr_v4: Option<String>,
+    pub sync_addr_v6: Option<String>,
     pub sync_udp_port: Option<u16>,
     /// The host for the data endpoint.
-    pub data_host: Option<String>,
+    pub data_addr_v4: Option<String>,
+    pub data_addr_v6: Option<String>,
+    // TODO: Vec<PortRange>, support multiple port range entries
     /// The lower bound of the data port range.
     pub data_min_port: u16,
     /// The upper bound of the data port range.
@@ -379,18 +384,34 @@ impl EjfatUrl {
     pub fn update_from_reservation(&mut self, reply: &ReserveLoadBalancerReply) {
         self.token = Some(reply.token.clone());
         self.lb_id = Some(reply.lb_id.clone());
-        self.sync_ip_address = Some(reply.sync_ip_address.clone());
+        self.sync_addr_v4 = Some(reply.sync_ipv4_address.clone());
+        self.sync_addr_v6 = Some(reply.sync_ipv6_address.clone());
         self.sync_udp_port = Some(reply.sync_udp_port as u16);
         // For backward compatibility, update the data host.
-        self.data_host = Some(reply.data_ipv4_address.clone());
+        self.data_addr_v4 = Some(reply.data_ipv4_address.clone());
+        self.data_addr_v6 = Some(reply.data_ipv6_address.clone());
         // If not set elsewhere, assume the full port range.
-        self.data_min_port = 16384;
-        self.data_max_port = 32767;
+        self.data_min_port = reply.data_min_port as u16;
+        self.data_max_port = reply.data_max_port as u16;
     }
 
     /// Returns true if this URL is an admin URL (i.e. no load-balancer ID).
     pub fn is_admin_url(&self) -> bool {
         self.lb_id.is_none()
+    }
+
+    pub fn without_v6(&self) -> EjfatUrl {
+        let mut v4_only = self.clone();
+        v4_only.data_addr_v6 = None;
+        v4_only.sync_addr_v6 = None;
+        v4_only
+    }
+
+    pub fn without_v4(&self) -> EjfatUrl {
+        let mut v6_only = self.clone();
+        v6_only.data_addr_v4 = None;
+        v6_only.sync_addr_v4 = None;
+        v6_only
     }
 }
 
@@ -422,7 +443,7 @@ impl fmt::Display for EjfatUrl {
         }
         // Build query parameters.
         let mut query_params = Vec::new();
-        if let Some(sync_ip) = &self.sync_ip_address {
+        if let Some(sync_ip) = &self.sync_addr_v4 {
             let mut sync_param = format!("sync={}", sync_ip);
             if let Some(sync_port) = self.sync_udp_port {
                 sync_param.push(':');
@@ -430,12 +451,29 @@ impl fmt::Display for EjfatUrl {
             }
             query_params.push(sync_param);
         }
-        if let Some(data_host) = &self.data_host {
-            // Always include explicit min and max ports.
+        if let Some(sync_v6) = &self.sync_addr_v6 {
+            if !sync_v6.is_empty() {
+                let mut sync_param = format!("sync=[{}]", sync_v6);
+                if let Some(sync_port) = self.sync_udp_port {
+                    sync_param.push(':');
+                    sync_param.push_str(&sync_port.to_string());
+                }
+                query_params.push(sync_param);
+            }
+        }
+        if let Some(data_v4) = &self.data_addr_v4 {
             query_params.push(format!(
                 "data={}:{}-{}",
-                data_host, self.data_min_port, self.data_max_port
+                data_v4, self.data_min_port, self.data_max_port
             ));
+        }
+        if let Some(data_v6) = &self.data_addr_v6 {
+            if !data_v6.is_empty() {
+                query_params.push(format!(
+                    "data=[{}]:{}-{}",
+                    data_v6, self.data_min_port, self.data_max_port
+                ));
+            }
         }
         if !query_params.is_empty() {
             url.push('?');
@@ -446,74 +484,151 @@ impl fmt::Display for EjfatUrl {
 }
 
 impl std::str::FromStr for EjfatUrl {
-    type Err = ParseError; // Assume ParseError is defined elsewhere
+    type Err = Error; // Use a generic error for now
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        let url = Url::parse(s)?;
-        let tls_enabled = url.scheme().ends_with('s');
-        let token = url.username().to_string();
-        let grpc_host = url.host_str().expect("invalid host").to_string();
-        let grpc_port = url.port();
-        // Determine the path. For admin URLs, the path will be "/" (or empty)
-        let path_segments: Vec<_> = url.path_segments().map(|c| c.collect()).unwrap_or_default();
-        // If the first nonempty segment is "lb", then treat the second as lb_id.
-        let lb_id = if let Some(first) = path_segments.iter().find(|s| !s.is_empty()) {
-            if *first == "lb" {
-                path_segments.get(1).map(|s| s.to_string())
-            } else {
-                None
-            }
+        // Example: ejfat://token@host:port/lb/123?sync=1.2.3.4:5678&sync=fe80::1:5678&data=1.2.3.4:10000-20000&data=[fe80::1]:10000-20000
+        // Parse scheme
+        let (tls_enabled, rest) = if let Some(rest) = s.strip_prefix("ejfats://") {
+            (true, rest)
+        } else if let Some(rest) = s.strip_prefix("ejfat://") {
+            (false, rest)
         } else {
-            None
+            return Err(Error::Parse(
+                "EJFAT URI has invalid scheme, must be ejfat:// or ejfats://".to_string(),
+            ));
         };
 
-        let query_pairs = url.query_pairs().into_owned().collect::<Vec<_>>();
+        // Split off query
+        let (main, query) = match rest.find('?') {
+            Some(idx) => (&rest[..idx], Some(&rest[idx + 1..])),
+            None => (rest, None),
+        };
 
-        // Parse sync parameter.
-        let sync_pair = query_pairs.iter().find(|(k, _)| k == "sync");
-        let sync_ip_address = sync_pair.map(|(_, v)| v.split(':').next().unwrap_or("").to_string());
-        let sync_udp_port =
-            sync_pair.and_then(|(_, v)| v.split(':').nth(1).and_then(|p| p.parse::<u16>().ok()));
+        // Parse token and host/port
+        let (token, hostportpath) = if let Some(idx) = main.find('@') {
+            (Some(main[..idx].to_string()), &main[idx + 1..])
+        } else {
+            (None, main)
+        };
 
-        // Defaults for data port range.
+        // Split host/port from path
+        let (hostport, path) = if let Some(idx) = hostportpath.find('/') {
+            (&hostportpath[..idx], &hostportpath[idx..])
+        } else {
+            (hostportpath, "/")
+        };
+
+        // Parse host and port
+        let (grpc_host, grpc_port) = if let Some(idx) = hostport.rfind(':') {
+            let host = &hostport[..idx];
+            let port = hostport[idx + 1..].parse::<u16>().ok();
+            (host.to_string(), port)
+        } else {
+            (hostport.to_string(), None)
+        };
+
+        // Parse path for lb_id
+        let mut lb_id = None;
+        let mut path_iter = path.split('/').filter(|s| !s.is_empty());
+        if let Some(first) = path_iter.next() {
+            if first == "lb" {
+                lb_id = path_iter.next().map(|s| s.to_string());
+            }
+        }
+
+        // Defaults
+        let mut sync_ip_address = None;
+        let mut sync_addr_v6 = None;
+        let mut sync_udp_port = None;
+        let mut data_host = None;
+        let mut data_addr_v6 = None;
         let mut data_min_port = 16384;
         let mut data_max_port = 32767;
-        let mut data_host = None;
-        if let Some((_, data_value)) = query_pairs.iter().find(|(k, _)| k == "data") {
-            // Check if a colon is present.
-            if let Some(idx) = data_value.find(':') {
-                let (host_part, port_spec) = data_value.split_at(idx);
-                data_host = Some(host_part.to_string());
-                // Remove the colon.
-                let port_spec = &port_spec[1..];
-                if let Some(dash_idx) = port_spec.find('-') {
-                    let (min_str, max_str_with_dash) = port_spec.split_at(dash_idx);
-                    let max_str = &max_str_with_dash[1..]; // skip the hyphen
-                    if let (Ok(min), Ok(max)) = (min_str.parse::<u16>(), max_str.parse::<u16>()) {
-                        data_min_port = min;
-                        data_max_port = max;
+
+        // Parse query params
+        if let Some(query) = query {
+            for param in query.split('&') {
+                let mut kv = param.splitn(2, '=');
+                let key = kv.next().unwrap_or("");
+                let value = kv.next().unwrap_or("");
+                if key == "sync" {
+                    // Split address and port
+                    let (addr, port) = if let Some(idx) = value.rfind(':') {
+                        (&value[..idx], value[idx + 1..].parse::<u16>().ok())
+                    } else {
+                        (value, None)
+                    };
+                    if addr.contains(':') && !addr.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        // IPv6
+                        if sync_addr_v6.is_none() {
+                            sync_addr_v6 =
+                                Some(addr.trim_matches(|c| c == '[' || c == ']').to_string());
+                            if sync_udp_port.is_none() {
+                                sync_udp_port = port;
+                            }
+                        }
+                    } else {
+                        // IPv4
+                        if sync_ip_address.is_none() {
+                            sync_ip_address = Some(addr.to_string());
+                            if sync_udp_port.is_none() {
+                                sync_udp_port = port;
+                            }
+                        }
                     }
-                } else {
-                    // Single port: assign both min and max to that value.
-                    if let Ok(port) = port_spec.parse::<u16>() {
-                        data_min_port = port;
-                        data_max_port = port;
+                } else if key == "data" {
+                    // Format: host:min-max or host:port or just host
+                    let (addr, port_spec) = if let Some(idx) = value.find(':') {
+                        (&value[..idx], Some(&value[idx + 1..]))
+                    } else {
+                        (value, None)
+                    };
+                    let (min_port, max_port) = if let Some(port_spec) = port_spec {
+                        if let Some(dash_idx) = port_spec.find('-') {
+                            let (min_str, max_str) = port_spec.split_at(dash_idx);
+                            let max_str = &max_str[1..];
+                            (
+                                min_str.parse::<u16>().unwrap_or(16384),
+                                max_str.parse::<u16>().unwrap_or(32767),
+                            )
+                        } else {
+                            let port = port_spec.parse::<u16>().unwrap_or(19522);
+                            (port, port)
+                        }
+                    } else {
+                        (19522, 19522)
+                    };
+                    if addr.contains(':') && !addr.chars().all(|c| c.is_ascii_digit() || c == '.') {
+                        // IPv6
+                        if data_addr_v6.is_none() {
+                            data_addr_v6 =
+                                Some(addr.trim_matches(|c| c == '[' || c == ']').to_string());
+                            data_min_port = min_port;
+                            data_max_port = max_port;
+                        }
+                    } else {
+                        // IPv4
+                        if data_host.is_none() {
+                            data_host = Some(addr.to_string());
+                            data_min_port = min_port;
+                            data_max_port = max_port;
+                        }
                     }
                 }
-            } else {
-                // Only the host is provided; use defaults for ports.
-                data_host = Some(data_value.to_string());
             }
         }
 
         Ok(EjfatUrl {
-            token: if token.is_empty() { None } else { Some(token) },
+            token,
             grpc_host,
             grpc_port,
             lb_id,
-            sync_ip_address,
+            sync_addr_v4: sync_ip_address,
+            sync_addr_v6,
             sync_udp_port,
-            data_host,
+            data_addr_v4: data_host,
+            data_addr_v6,
             data_min_port,
             data_max_port,
             tls_enabled,

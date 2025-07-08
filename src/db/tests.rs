@@ -37,7 +37,14 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
     let port = 8000;
 
     let lb = db
-        .create_loadbalancer(&name, unicast_mac, broadcast_mac, ipv4, ipv6, port)
+        .create_loadbalancer(
+            &name,
+            unicast_mac,
+            broadcast_mac,
+            Some(ipv4),
+            Some(ipv6),
+            port,
+        )
         .await
         .unwrap();
 
@@ -225,7 +232,7 @@ async fn test_loadbalancer_crud_and_associations() {
     assert_eq!(lb.name, lb.name);
     assert_eq!(lb.unicast_mac_address.to_string(), "00:11:22:33:44:55");
     assert_eq!(lb.broadcast_mac_address.to_string(), "FF:FF:FF:FF:FF:FF");
-    assert_eq!(lb.unicast_ipv4_address.to_string(), "192.168.1.1");
+    assert_eq!(lb.unicast_ipv4_address.unwrap().to_string(), "192.168.1.1");
     assert_eq!(lb.event_number_udp_port, 8000);
     assert!(lb.deleted_at.is_none());
 

@@ -147,8 +147,8 @@ pub async fn start_server(config: Config) -> Result<()> {
     let mut server_futures = Vec::new();
 
     for addr in &config.server.listen {
-        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
-        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
+        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
+        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
         let svc = LoadBalancerServer::new(lb_service);
 
         // gRPC route: direct, no custom service
@@ -219,8 +219,8 @@ pub async fn start_mocked_server(
 
     let mut sim_config = config.clone();
     sim_config.lb.instances = vec![LoadBalancerInstanceConfig {
-        ipv4: "127.0.0.1".parse().unwrap(),
-        ipv6: "::1".parse().unwrap(),
+        ipv4: Some("127.0.0.1".parse().unwrap()),
+        ipv6: Some("::1".parse().unwrap()),
         event_number_port: config.lb.instances[0].event_number_port,
     }];
 
@@ -283,8 +283,8 @@ pub async fn start_mocked_server(
     let mut server_futures = Vec::new();
 
     for addr in &config.server.listen {
-        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
-        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone(), *addr);
+        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
+        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
         let svc = LoadBalancerServer::new(lb_service);
 
         let grpc_path = format!(

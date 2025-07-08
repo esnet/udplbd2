@@ -44,8 +44,8 @@ pub struct LoadBalancerConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadBalancerInstanceConfig {
-    pub ipv4: Ipv4Addr,
-    pub ipv6: Ipv6Addr,
+    pub ipv4: Option<Ipv4Addr>,
+    pub ipv6: Option<Ipv6Addr>,
     #[serde(rename = "event_number_port")]
     pub event_number_port: u16,
 }
@@ -176,8 +176,8 @@ impl Config {
         Self {
             lb: LoadBalancerConfig {
                 instances: vec![LoadBalancerInstanceConfig {
-                    ipv4: "0.0.0.0".parse().unwrap(),
-                    ipv6: "::1".parse().unwrap(),
+                    ipv4: Some("127.0.0.1".parse().unwrap()),
+                    ipv6: Some("::1".parse().unwrap()),
                     event_number_port: 19524,
                 }],
                 mac_unicast: "00:00:00:00:00:01".to_string(),
@@ -251,6 +251,16 @@ impl Config {
         }
         if let Err(e) = self.lb.mac_broadcast.parse::<MacAddr6>() {
             return Err(ConfigError::Invalid(format!("Invalid broadcast MAC: {e}")));
+        }
+
+        // Validate that at least one of ipv4 or ipv6 is present for each instance
+        for (i, inst) in self.lb.instances.iter().enumerate() {
+            if inst.ipv4.is_none() && inst.ipv6.is_none() {
+                return Err(ConfigError::Invalid(format!(
+                    "LoadBalancer instance at index {} must have at least one of ipv4 or ipv6 specified",
+                    i
+                )));
+            }
         }
 
         // Validate durations

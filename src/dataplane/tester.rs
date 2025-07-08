@@ -95,7 +95,7 @@ impl fmt::Display for TestOutput {
 pub async fn run_test(
     url: String,
     config: TestConfig,
-    ip_address: String,
+    ip_address: std::net::IpAddr,
     port: u16,
     meta_event_manager: &MetaEventManager,
 ) -> Result<TestOutput> {
@@ -109,7 +109,12 @@ pub async fn run_test(
     let mut parsed_url: EjfatUrl = url.parse().expect("Invalid EJFAT url");
     let mut control_plane_client = ControlPlaneClient::from_url(&url).await?;
     let reservation_reply = control_plane_client
-        .reserve_load_balancer("test-runner".to_string(), None, vec![ip_address.clone()])
+        .reserve_load_balancer(
+            "test-runner".to_string(),
+            None,
+            vec![ip_address.to_string()],
+            crate::proto::loadbalancer::v1::IpFamily::DualStack,
+        )
         .await?
         .into_inner();
 
@@ -127,7 +132,7 @@ pub async fn run_test(
         let recv_event_context = meta_event_manager.create_context(receiver_config.name.clone());
         let mut receiver = Receiver::new(
             &receiver_config.name,
-            ip_address.clone(),
+            ip_address.to_string(),
             current_port,
             1.0,
             1500,
@@ -196,7 +201,8 @@ pub async fn run_test(
     eprintln!("starting sender");
     // Start the sender task after receiver tasks have started
     let sender_event_context = meta_event_manager.create_context("S1");
-    let mut sender_instance = Sender::from_url(&parsed_url, sender_event_context).await?;
+    let mut sender_instance =
+        Sender::from_url(&parsed_url, sender_event_context, ip_address.is_ipv6()).await?;
     let cancel_token_cloned = cancel_token.clone();
 
     sender_instance
