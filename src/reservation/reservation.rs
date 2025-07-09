@@ -10,7 +10,6 @@ use crate::snp4::rules::{
 };
 use crate::util::{
     generate_solicited_node_multicast_ipv6, generate_solicited_node_multicast_mac, mac_to_u64,
-    IpFamily,
 };
 use chrono::{Duration as ChronoDuration, Utc};
 use macaddr::MacAddr6;
@@ -32,7 +31,8 @@ pub struct ReservationManager {
     tick_interval: Duration,
     tick_offset: Duration,
     mac: MacAddr6,
-    sync_addr: SocketAddr,
+    sync_addr_v4: Option<SocketAddr>,
+    sync_addr_v6: Option<SocketAddr>,
     pub dump_rules_dir: Option<PathBuf>,
     update_task: Option<JoinHandle<()>>,
     shutdown_tx: Option<broadcast::Sender<()>>,
@@ -47,7 +47,8 @@ impl ReservationManager {
         tick_interval: Duration,
         tick_offset: Duration,
         mac: MacAddr6,
-        sync_addr: SocketAddr,
+        sync_addr_v4: Option<SocketAddr>,
+        sync_addr_v6: Option<SocketAddr>,
     ) -> Self {
         Self {
             db,
@@ -56,7 +57,8 @@ impl ReservationManager {
             tick_interval,
             tick_offset,
             mac,
-            sync_addr,
+            sync_addr_v4,
+            sync_addr_v6,
             dump_rules_dir: None,
             update_task: None,
             shutdown_tx: None,
@@ -91,16 +93,7 @@ impl ReservationManager {
     pub async fn initialize(&mut self) -> Result<()> {
         for (res, lb) in self.db.list_reservations_with_load_balancer().await? {
             if res.reserved_until > Utc::now() {
-                let ip_family = match (lb.unicast_ipv4_address, lb.unicast_ipv6_address) {
-                    (Some(_), Some(_)) => IpFamily::DualStack,
-                    (Some(_), None) => IpFamily::Ipv4,
-                    (None, Some(_)) => IpFamily::Ipv6,
-                    (None, None) => {
-                        warn!("LoadBalancer {} has neither IPv4 nor IPv6 address, skipping reservation restore", lb.id);
-                        continue;
-                    }
-                };
-                self.start_reservation(res.id, lb.event_number_udp_port, ip_family)
+                self.start_reservation(res.id, lb.event_number_udp_port)
                     .await?;
             }
         }
@@ -437,12 +430,7 @@ impl ReservationManager {
     }
 
     /// Starts a new reservation sync and metric tracking.
-    pub async fn start_reservation(
-        &mut self,
-        reservation_id: i64,
-        port: u16,
-        ip_family: IpFamily,
-    ) -> Result<()> {
+    pub async fn start_reservation(&mut self, reservation_id: i64, port: u16) -> Result<()> {
         let mut reservations = self.active_reservations.lock().await;
         if reservations.contains_key(&reservation_id) {
             return Ok(());
@@ -450,37 +438,21 @@ impl ReservationManager {
         let fpga_id = self.db.get_reservation_fpga_lb_id(reservation_id).await?;
         let mut r = ActiveReservation::new(reservation_id, fpga_id as u8);
 
-        match ip_family {
-            IpFamily::DualStack => {
-                // Start both IPv4 and IPv6 sync servers
-                let mut addr_v4 = self.sync_addr;
-                addr_v4.set_port(port);
-                if let std::net::SocketAddr::V6(v6) = addr_v4 {
-                    if let Some(ipv4) = v6.ip().to_ipv4() {
-                        addr_v4 = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ipv4, port));
-                    }
-                }
-                r.start_event_sync(self.db.clone(), addr_v4).await;
+        let mut started = false;
 
-                let mut addr_v6 = self.sync_addr;
-                addr_v6.set_port(port);
-                r.start_event_sync(self.db.clone(), addr_v6).await;
-            }
-            IpFamily::Ipv4 => {
-                let mut addr_v4 = self.sync_addr;
-                addr_v4.set_port(port);
-                if let std::net::SocketAddr::V6(v6) = addr_v4 {
-                    if let Some(ipv4) = v6.ip().to_ipv4() {
-                        addr_v4 = std::net::SocketAddr::V4(std::net::SocketAddrV4::new(ipv4, port));
-                    }
-                }
-                r.start_event_sync(self.db.clone(), addr_v4).await;
-            }
-            IpFamily::Ipv6 => {
-                let mut addr_v6 = self.sync_addr;
-                addr_v6.set_port(port);
-                r.start_event_sync(self.db.clone(), addr_v6).await;
-            }
+        if let Some(mut addr_v4) = self.sync_addr_v4 {
+            addr_v4.set_port(port);
+            r.start_event_sync(self.db.clone(), addr_v4).await;
+            started = true;
+        }
+        if let Some(mut addr_v6) = self.sync_addr_v6 {
+            addr_v6.set_port(port);
+            r.start_event_sync(self.db.clone(), addr_v6).await;
+            started = true;
+        }
+
+        if !started {
+            warn!("No sync_addr_v4 or sync_addr_v6 provided; not starting sync server for reservation {}", reservation_id);
         }
 
         reservations.insert(reservation_id, r);

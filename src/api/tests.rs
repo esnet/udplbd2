@@ -27,7 +27,8 @@ pub async fn create_test_service() -> LoadBalancerService {
         Duration::from_secs(1),
         Duration::from_millis(1000),
         "00:1A:2B:3C:4D:5E".parse().unwrap(),
-        "127.0.0.1:0".parse().unwrap(),
+        "127.0.0.1:0".parse().ok(),
+        "[::1]:0".parse().ok(),
     )));
     LoadBalancerService::new(db, manager)
 }

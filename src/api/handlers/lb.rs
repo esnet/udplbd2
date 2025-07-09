@@ -15,7 +15,6 @@ use crate::proto::loadbalancer::v1::{
     GetLoadBalancerRequest, LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply,
     RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, WorkerStatus,
 };
-use crate::util::IpFamily;
 
 impl LoadBalancerService {
     pub(crate) async fn handle_reserve_load_balancer(
@@ -144,27 +143,10 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
 
-        // Determine IP family for sync server
-        let ip_family = match (lb.unicast_ipv4_address, lb.unicast_ipv6_address) {
-            (Some(_), Some(_)) => IpFamily::DualStack,
-            (Some(_), None) => IpFamily::Ipv4,
-            (None, Some(_)) => IpFamily::Ipv6,
-            (None, None) => {
-                let src = remote_addr
-                    .map(|a| a.to_string())
-                    .unwrap_or_else(|| "unknown".to_string());
-                warn!(
-                    "reserve_load_balancer: selected load balancer {} has neither IPv4 nor IPv6 address. source={}",
-                    lb.id, src
-                );
-                return Err(Status::internal("Selected load balancer has no IP address"));
-            }
-        };
-
         self.manager
             .lock()
             .await
-            .start_reservation(reservation.id, lb.event_number_udp_port, ip_family)
+            .start_reservation(reservation.id, lb.event_number_udp_port)
             .await
             .map_err(|_| {
                 Status::internal(format!(

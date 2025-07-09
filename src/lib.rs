@@ -133,13 +133,18 @@ pub async fn start_server(config: Config) -> Result<()> {
         }
     }
 
+    // Find first IPv4 and first IPv6 address in config.server.listen
+    let sync_addr_v4 = config.server.listen.iter().find(|a| a.is_ipv4()).cloned();
+    let sync_addr_v6 = config.server.listen.iter().find(|a| a.is_ipv6()).cloned();
+
     let mut manager = ReservationManager::new(
         db.clone(),
         smartnic_clients,
         config.get_controller_duration()?,
         config.get_controller_offset()?,
         config.lb.mac_unicast.parse()?,
-        config.server.listen[0],
+        sync_addr_v4,
+        sync_addr_v6,
     );
     manager.initialize().await?;
     let manager_arc = Arc::new(Mutex::new(manager));
@@ -264,13 +269,18 @@ pub async fn start_mocked_server(
 
     trace!("created client");
 
+    // Find first IPv4 and first IPv6 address in config.server.listen
+    let sync_addr_v4 = config.server.listen.iter().find(|a| a.is_ipv4()).cloned();
+    let sync_addr_v6 = config.server.listen.iter().find(|a| a.is_ipv6()).cloned();
+
     let mut manager = ReservationManager::new(
         db.clone(),
         MultiSNP4Client::new(vec![sim_client]),
         config.get_controller_duration()?,
         config.get_controller_offset()?,
         config.lb.mac_unicast.parse()?,
-        config.server.listen[0],
+        sync_addr_v4,
+        sync_addr_v6,
     );
 
     trace!("created rules manager");

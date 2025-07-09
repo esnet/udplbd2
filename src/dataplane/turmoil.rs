@@ -121,7 +121,7 @@ pub mod tester {
     use crate::reservation::turmoil::ReservationManager;
     use crate::snp4::client::{MultiSNP4Client, SNP4Client};
     use serde::{Deserialize, Serialize};
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -381,7 +381,8 @@ pub mod tester {
                                         conf.get_controller_duration().unwrap(),
                                         conf.get_controller_offset().unwrap(),
                                         "00:00:00:00:00:01".parse().unwrap(),
-                                        (IpAddr::from(Ipv4Addr::UNSPECIFIED), 0).into(),
+                                        Some(SocketAddr::new(IpAddr::from(Ipv4Addr::UNSPECIFIED), 0)),
+                                        Some(SocketAddr::new(IpAddr::from(Ipv6Addr::UNSPECIFIED), 0)),
                                     );
                                     manager.initialize().await?;
                                     let manager_arc = Arc::new(Mutex::new(manager));
