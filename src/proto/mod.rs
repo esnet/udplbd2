@@ -4,8 +4,9 @@ pub mod smartnic {
     pub mod p4_v2 {
         include!("smartnic/sn_p4.v2.rs");
     }
-    pub mod cfg_v1 {
-        include!("smartnic/sn_p4.v2.rs");
+    #[allow(clippy::all)]
+    pub mod cfg_v2 {
+        include!("smartnic/sn_cfg.v2.rs");
     }
 }
 

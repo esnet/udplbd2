@@ -169,6 +169,16 @@ pub struct SmartNICConfig {
     pub auth_token: String,
     pub port: u16,
     pub tls: TlsClientOptions,
+
+    /// Optional SmartNIC config gRPC host for automatic FPGA configuration
+    #[serde(default)]
+    pub cfg_host: Option<String>,
+    /// Optional SmartNIC config gRPC port for automatic FPGA configuration
+    #[serde(default)]
+    pub cfg_port: Option<u16>,
+    /// Optional SmartNIC config gRPC auth token for automatic FPGA configuration
+    #[serde(default)]
+    pub cfg_auth_token: Option<String>,
 }
 
 impl Config {
@@ -221,6 +231,9 @@ impl Config {
                     enable: false,
                     verify: false,
                 },
+                cfg_host: None,
+                cfg_port: None,
+                cfg_auth_token: None,
             }],
         }
     }
@@ -290,6 +303,16 @@ impl Config {
             return Err(ConfigError::Invalid(
                 "TLS enabled but cert_file or key_file missing".into(),
             ));
+        }
+
+        // Warn if SmartNIC auto-configuration is not enabled due to missing config fields
+        for (i, nic) in self.smartnic.iter().enumerate() {
+            if nic.cfg_host.is_none() || nic.cfg_port.is_none() || nic.cfg_auth_token.is_none() {
+                eprintln!(
+                    "Warning: SmartNIC at index {} will NOT be auto-configured (cfg_host, cfg_port, or cfg_auth_token missing). Dataplane statistics will be unavailable.",
+                    i
+                );
+            }
         }
 
         Ok(())

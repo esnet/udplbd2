@@ -112,7 +112,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "proto/smartnic/sn_p4_v2.proto",
-                "proto/smartnic/sn_cfg_v1.proto",
+                "proto/smartnic/sn_cfg_v2.proto",
             ],
             &["proto/smartnic/"],
         )?;

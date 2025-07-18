@@ -6,38 +6,38 @@
 //! In static mode, the rules are generarted once and applied immediately.
 pub mod event_id_sync {
     use tokio::net::UdpSocket;
-    include!("reservation/event_id_sync.rs");
+    include!("event_id_sync.rs");
 }
 
 pub mod active_reservation {
     use super::event_id_sync::EventIdSyncServer;
-    include!("reservation/active_reservation.rs");
+    include!("active_reservation.rs");
 }
 
 pub mod static_reservation {
     use super::active_reservation::ActiveReservation;
-    include!("reservation/static_reservation.rs");
+    include!("static_reservation.rs");
 }
 
 pub mod turmoil {
     pub mod event_id_sync {
         use turmoil::net::UdpSocket;
-        include!("reservation/event_id_sync.rs");
+        include!("event_id_sync.rs");
     }
 
     pub mod active_reservation {
         use super::event_id_sync::EventIdSyncServer;
-        include!("reservation/active_reservation.rs");
+        include!("active_reservation.rs");
     }
 
     pub mod static_reservation {
         use super::active_reservation::ActiveReservation;
-        include!("reservation/static_reservation.rs");
+        include!("static_reservation.rs");
     }
 
     use self::active_reservation::ActiveReservation;
-    include!("reservation/reservation.rs");
+    include!("reservation.rs");
 }
 
 use self::active_reservation::ActiveReservation;
-include!("reservation/reservation.rs");
+include!("reservation.rs");

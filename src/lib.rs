@@ -9,6 +9,7 @@ pub mod macaddr;
 pub mod metrics;
 pub mod proto;
 pub mod reservation;
+pub mod sncfg;
 pub mod snp4;
 pub mod util;
 
@@ -34,6 +35,8 @@ use crate::db::LoadBalancerDB;
 use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
+use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
+use crate::sncfg::setup::auto_configure_smartnics;
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 
 pub async fn apply_static_config(
@@ -103,6 +106,7 @@ pub async fn start_server(config: Config) -> Result<()> {
     });
 
     let mut snp4_clients = Vec::new();
+    let mut sncfg_clients = Vec::new();
     for smartnic in &config.smartnic {
         if !smartnic.mock {
             let addr = format!(
@@ -120,9 +124,28 @@ pub async fn start_server(config: Config) -> Result<()> {
             )
             .await?;
             snp4_clients.push(client);
+
+            if let (Some(cfg_host), Some(cfg_port), Some(cfg_auth_token)) = (
+                &smartnic.cfg_host,
+                smartnic.cfg_port,
+                &smartnic.cfg_auth_token,
+            ) {
+                let addr = format!(
+                    "{}://{}:{}",
+                    if smartnic.tls.enable { "https" } else { "http" },
+                    cfg_host,
+                    cfg_port
+                );
+                let client =
+                    SNCfgClient::new(&addr, 0, smartnic.tls.verify, cfg_auth_token.clone()).await?;
+                sncfg_clients.push(client);
+            }
         }
     }
     let mut smartnic_clients = MultiSNP4Client::new(snp4_clients);
+    let mut cfg_clients = MultiSNCfgClient::new(sncfg_clients);
+
+    auto_configure_smartnics(&mut cfg_clients).await?;
 
     let reservations = db.list_reservations().await?;
     if reservations.is_empty() {
