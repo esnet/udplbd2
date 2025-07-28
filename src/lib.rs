@@ -60,7 +60,7 @@ pub async fn apply_static_config(
                     smartnic.host,
                     smartnic.port
                 );
-                let client = SNP4Client::new(
+                let mut client = SNP4Client::new(
                     &addr,
                     0,
                     0,
@@ -68,6 +68,7 @@ pub async fn apply_static_config(
                     smartnic.auth_token.clone(),
                 )
                 .await?;
+                client.clear_table_repeats = smartnic.clear_table_repeats;
                 snp4_clients.push(client);
             }
         }
@@ -115,7 +116,7 @@ pub async fn start_server(config: Config) -> Result<()> {
                 smartnic.host,
                 smartnic.port
             );
-            let client = SNP4Client::new(
+            let mut client = SNP4Client::new(
                 &addr,
                 0,
                 -1,
@@ -123,6 +124,7 @@ pub async fn start_server(config: Config) -> Result<()> {
                 smartnic.auth_token.clone(),
             )
             .await?;
+            client.clear_table_repeats = smartnic.clear_table_repeats;
             snp4_clients.push(client);
 
             if let (Some(cfg_host), Some(cfg_port), Some(cfg_auth_token)) = (

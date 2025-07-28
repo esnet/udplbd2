@@ -170,6 +170,10 @@ pub struct SmartNICConfig {
     pub port: u16,
     pub tls: TlsClientOptions,
 
+    /// Number of times to repeat clear_table/clear_tables operations (default: 1)
+    #[serde(default = "default_clear_table_repeats")]
+    pub clear_table_repeats: usize,
+
     /// Optional SmartNIC config gRPC host for automatic FPGA configuration
     #[serde(default)]
     pub cfg_host: Option<String>,
@@ -179,6 +183,10 @@ pub struct SmartNICConfig {
     /// Optional SmartNIC config gRPC auth token for automatic FPGA configuration
     #[serde(default)]
     pub cfg_auth_token: Option<String>,
+}
+
+fn default_clear_table_repeats() -> usize {
+    1
 }
 
 impl Config {
@@ -231,6 +239,7 @@ impl Config {
                     enable: false,
                     verify: false,
                 },
+                clear_table_repeats: 1,
                 cfg_host: None,
                 cfg_port: None,
                 cfg_auth_token: None,

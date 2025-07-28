@@ -10,7 +10,7 @@ use tonic::{
     transport::{Channel, ClientTlsConfig, Endpoint},
     Request, Status,
 };
-use tracing::{trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::proto::smartnic::p4_v2::{
     batch_request, smartnic_p4_client::SmartnicP4Client, BatchOperation, BatchRequest,
@@ -27,6 +27,7 @@ pub struct SNP4Client {
     api: SmartnicP4Client<InterceptedService<Channel, BearerTokenInterceptor>>,
     pipeline_id: i32,
     device_id: i32,
+    pub clear_table_repeats: usize,
 }
 
 impl SNP4Client {
@@ -55,6 +56,7 @@ impl SNP4Client {
             api: SmartnicP4Client::with_interceptor(channel, interceptor),
             pipeline_id,
             device_id,
+            clear_table_repeats: 1,
         })
     }
 
@@ -67,6 +69,7 @@ impl SNP4Client {
             api: SmartnicP4Client::with_interceptor(channel, interceptor),
             pipeline_id: 0,
             device_id: 0,
+            clear_table_repeats: 1,
         })
     }
 
@@ -99,6 +102,22 @@ impl SNP4Client {
     }
 
     pub async fn clear_tables(&mut self) -> Result<Vec<TableResponse>, Status> {
+        debug!(
+            "clearing all tables {} times (dev_id={}, pipeline_id={})",
+            self.clear_table_repeats, self.device_id, self.pipeline_id
+        );
+
+        let mut all_responses = Vec::new();
+
+        for _ in 0..self.clear_table_repeats {
+            let responses = self.clear_tables_once().await?;
+            all_responses.extend(responses);
+        }
+
+        Ok(all_responses)
+    }
+
+    pub async fn clear_tables_once(&mut self) -> Result<Vec<TableResponse>, Status> {
         let request = Request::new(TableRequest {
             dev_id: self.device_id,
             pipeline_id: self.pipeline_id,
@@ -127,7 +146,24 @@ impl SNP4Client {
         Ok(responses)
     }
 
+    /// Clear the table multiple times as configured by clear_table_repeats.
     pub async fn clear_table(&mut self, table_name: &str) -> Result<Vec<TableResponse>, Status> {
+        debug!(
+            "clearing table '{}' {} times (dev_id={}, pipeline_id={})",
+            table_name, self.clear_table_repeats, self.device_id, self.pipeline_id
+        );
+
+        let mut all_responses = Vec::new();
+
+        for _ in 0..self.clear_table_repeats {
+            let responses = self.clear_table_once(table_name).await?;
+            all_responses.extend(responses);
+        }
+
+        Ok(all_responses)
+    }
+
+    async fn clear_table_once(&mut self, table_name: &str) -> Result<Vec<TableResponse>, Status> {
         let request = Request::new(TableRequest {
             dev_id: self.device_id,
             pipeline_id: self.pipeline_id,
