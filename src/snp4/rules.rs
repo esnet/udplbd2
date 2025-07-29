@@ -162,14 +162,19 @@ impl TryFrom<TableRule> for IpDstToLbInstanceRule {
 
         let ether_type = parse_hex_u32(get_key_only(rule.matches[1].r#type.as_ref())?)
             .ok_or_else(|| Error::Config("Invalid ether_type".into()))?;
+        let mut typed_ether_type: EtherType = EtherType::Ipv4;
 
         let dest_ip =
             if ether_type == EtherType::Ipv4 as u32 || ether_type == EtherType::Ipv4Arp as u32 {
+                if ether_type == EtherType::Ipv4Arp as u32 {
+                    typed_ether_type = EtherType::Ipv4Arp;
+                }
                 IpAddr::V4(
                     parse_ipv4(get_key_only(rule.matches[2].r#type.as_ref())?)
                         .ok_or_else(|| Error::Config("Invalid IPv4 address".into()))?,
                 )
             } else if ether_type == EtherType::Ipv6 as u32 {
+                typed_ether_type = EtherType::Ipv6;
                 IpAddr::V6(
                     parse_ipv6(get_key_only(rule.matches[2].r#type.as_ref())?)
                         .ok_or_else(|| Error::Config("Invalid IPv6 address".into()))?,
@@ -194,11 +199,7 @@ impl TryFrom<TableRule> for IpDstToLbInstanceRule {
             .ok_or_else(|| Error::Config("Invalid LB ID".into()))?;
 
         Ok(IpDstToLbInstanceRule {
-            match_ether_type: if ether_type == EtherType::Ipv4 as u32 {
-                EtherType::Ipv4
-            } else {
-                EtherType::Ipv6
-            },
+            match_ether_type: typed_ether_type,
             match_dest_ip_addr: dest_ip,
             set_src_ip_addr: src_ip,
             set_lb_instance_id: lb_id,

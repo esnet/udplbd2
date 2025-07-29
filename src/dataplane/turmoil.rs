@@ -384,7 +384,7 @@ pub mod tester {
                                         Some(SocketAddr::new(IpAddr::from(Ipv4Addr::UNSPECIFIED), 0)),
                                         Some(SocketAddr::new(IpAddr::from(Ipv6Addr::UNSPECIFIED), 0)),
                                     );
-                                    manager.initialize().await?;
+                                    manager.initialize(true).await?;
                                     let manager_arc = Arc::new(Mutex::new(manager));
 
                                     let addr = (IpAddr::from(Ipv4Addr::UNSPECIFIED), 19523);

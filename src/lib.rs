@@ -150,10 +150,12 @@ pub async fn start_server(config: Config) -> Result<()> {
     auto_configure_smartnics(&mut cfg_clients).await?;
 
     let reservations = db.list_reservations().await?;
+    let mut is_empty = false;
     if reservations.is_empty() {
         if smartnic_clients.clear_tables().await.is_err() {
             return Err(Error::NotInitialized("failed to clear tables".into()));
         } else {
+            is_empty = true;
             info!("no active reservations - clearing tables")
         }
     }
@@ -171,7 +173,7 @@ pub async fn start_server(config: Config) -> Result<()> {
         sync_addr_v4,
         sync_addr_v6,
     );
-    manager.initialize().await?;
+    manager.initialize(is_empty).await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
     let mut server_futures = Vec::new();
@@ -310,7 +312,7 @@ pub async fn start_mocked_server(
 
     trace!("created rules manager");
 
-    manager.initialize().await?;
+    manager.initialize(true).await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
     trace!("initialized rules manager");

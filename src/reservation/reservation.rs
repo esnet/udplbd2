@@ -90,7 +90,7 @@ impl ReservationManager {
         true
     }
 
-    pub async fn initialize(&mut self) -> Result<()> {
+    pub async fn initialize(&mut self, is_blank: bool) -> Result<()> {
         for (res, lb) in self.db.list_reservations_with_load_balancer().await? {
             if res.reserved_until > Utc::now() {
                 self.start_reservation(res.id, lb.event_number_udp_port)
@@ -102,12 +102,21 @@ impl ReservationManager {
         if let Ok(Some(bytes)) = self.db.get_latest_rule_cache().await {
             let cached = deserialize_table_rules(&bytes);
             if !cached.is_empty() {
-                info!("found cached rules, attempting to apply as updates");
-                let upd = TableUpdate {
-                    description: "restore cached rules".into(),
-                    insertions: Vec::new(),
-                    updates: cached.clone(),
-                    deletions: Vec::new(),
+                info!("found cached rules, attempting to apply");
+                let upd = if is_blank {
+                    TableUpdate {
+                        description: "restore cached rules (insert)".into(),
+                        insertions: cached.clone(),
+                        updates: Vec::new(),
+                        deletions: Vec::new(),
+                    }
+                } else {
+                    TableUpdate {
+                        description: "restore cached rules (update)".into(),
+                        insertions: Vec::new(),
+                        updates: cached.clone(),
+                        deletions: Vec::new(),
+                    }
                 };
                 if self.snp4.bulk_update(&[upd]).await.is_ok() {
                     info!("successfully restored cached rules");
