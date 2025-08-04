@@ -129,7 +129,7 @@ impl LoadBalancerService {
         Ok(Response::new(VersionReply {
             commit: env!("UDPLBD_BUILD", "unknown").to_string(),
             build: env!("CARGO_PKG_VERSION").to_string(),
-            compat_tag: "0.5.0".to_string(),
+            compat_tag: "0.3.1".to_string(),
         }))
     }
 }

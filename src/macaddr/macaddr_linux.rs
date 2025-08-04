@@ -7,7 +7,6 @@ use net_route::Handle;
 use netlink_packet_route::address::AddressAttribute;
 use netlink_packet_route::link::LinkAttribute;
 use netlink_packet_route::neighbour::{NeighbourAddress, NeighbourAttribute};
-use netlink_packet_route::AddressFamily;
 use rtnetlink::{new_connection, IpVersion};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;

@@ -143,9 +143,9 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create token: {e}")))?;
 
-        self.manager
-            .lock()
-            .await
+        let mut manager = self.manager.lock().await;
+
+        manager
             .start_reservation(reservation.id, lb.event_number_udp_port)
             .await
             .map_err(|_| {
@@ -174,13 +174,13 @@ impl LoadBalancerService {
         Ok(Response::new(ReserveLoadBalancerReply {
             token,
             lb_id: reservation.id.to_string(),
-            sync_ipv4_address: lb
-                .unicast_ipv4_address
-                .map(|ip| ip.to_string())
+            sync_ipv4_address: manager
+                .sync_addr_v4
+                .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
-            sync_ipv6_address: lb
-                .unicast_ipv6_address
-                .map(|ip| ip.to_string())
+            sync_ipv6_address: manager
+                .sync_addr_v6
+                .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb
@@ -255,16 +255,18 @@ impl LoadBalancerService {
             (16384, 32767)
         };
 
+        let manager = self.manager.lock().await;
+
         Ok(Response::new(ReserveLoadBalancerReply {
             token: String::new(), // No token for get operations
             lb_id: reservation.id.to_string(),
-            sync_ipv4_address: lb
-                .unicast_ipv4_address
-                .map(|ip| ip.to_string())
+            sync_ipv4_address: manager
+                .sync_addr_v4
+                .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
-            sync_ipv6_address: lb
-                .unicast_ipv6_address
-                .map(|ip| ip.to_string())
+            sync_ipv6_address: manager
+                .sync_addr_v6
+                .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
             data_ipv4_address: lb
