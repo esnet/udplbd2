@@ -31,26 +31,18 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
     // Create loadbalancer
     let name = format!("test-lb-{}", Uuid::new_v4());
     let unicast_mac: MacAddr6 = "00:11:22:33:44:55".parse().unwrap();
-    let broadcast_mac: MacAddr6 = "FF:FF:FF:FF:FF:FF".parse().unwrap();
     let ipv4 = Ipv4Addr::new(192, 168, 1, 1);
     let ipv6 = Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, 1);
     let port = 8000;
 
     let lb = db
-        .create_loadbalancer(
-            &name,
-            unicast_mac,
-            broadcast_mac,
-            Some(ipv4),
-            Some(ipv6),
-            port,
-        )
+        .create_loadbalancer(unicast_mac, Some(ipv4), Some(ipv6), port)
         .await
         .unwrap();
 
     // Create reservation
     let reservation = db
-        .create_reservation(lb.id, Duration::minutes(30))
+        .create_reservation(lb.id, &name, Duration::minutes(30))
         .await
         .unwrap();
 
@@ -229,9 +221,7 @@ async fn test_loadbalancer_crud_and_associations() {
     let (lb, reservation) = setup_test_loadbalancer(&db).await;
 
     // Verify loadbalancer fields
-    assert_eq!(lb.name, lb.name);
     assert_eq!(lb.unicast_mac_address.to_string(), "00:11:22:33:44:55");
-    assert_eq!(lb.broadcast_mac_address.to_string(), "FF:FF:FF:FF:FF:FF");
     assert_eq!(lb.unicast_ipv4_address.unwrap().to_string(), "192.168.1.1");
     assert_eq!(lb.event_number_udp_port, 8000);
     assert!(lb.deleted_at.is_none());
@@ -265,12 +255,10 @@ async fn test_loadbalancer_crud_and_associations() {
 
     // Test updating loadbalancer
     let mut updated_lb = lb.clone();
-    updated_lb.name = "updated-name".to_string();
     updated_lb.unicast_mac_address = "AA:BB:CC:DD:EE:FF".parse().unwrap();
     updated_lb.event_number_udp_port = 9000;
 
     let updated_lb = db.update_loadbalancer(&updated_lb).await.unwrap();
-    assert_eq!(updated_lb.name, "updated-name");
     assert_eq!(
         updated_lb.unicast_mac_address.to_string(),
         "AA:BB:CC:DD:EE:FF"

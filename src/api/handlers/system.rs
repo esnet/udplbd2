@@ -42,7 +42,7 @@ impl LoadBalancerService {
             // Attempt to find an active reservation for this LB
             let reservation = sqlx::query!(
                 r#"
-                SELECT id FROM reservation
+                SELECT id, name FROM reservation
                 WHERE loadbalancer_id = ?1
                 AND deleted_at IS NULL
                 AND reserved_until > unixepoch('subsec') * 1000
@@ -55,7 +55,7 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to query reservation: {e}")))?;
 
-            let (reservation_details, status) = if let Some(res) = reservation {
+            let (reservation_details, name, status) = if let Some(res) = reservation {
                 // Get full reservation details
                 let mut request = Request::new(GetLoadBalancerRequest {
                     lb_id: res.id.to_string(),
@@ -82,14 +82,14 @@ impl LoadBalancerService {
                     .await?
                     .into_inner();
 
-                (Some(reservation_reply), Some(status_reply))
+                (Some(reservation_reply), res.name, Some(status_reply))
             } else {
-                (None, None)
+                (None, "<unreserved>".to_string(), None)
             };
 
             if reservation_details.is_some() {
                 load_balancers.push(Overview {
-                    name: lb.name,
+                    name,
                     reservation: reservation_details,
                     status,
                 });

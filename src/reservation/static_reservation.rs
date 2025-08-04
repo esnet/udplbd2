@@ -13,12 +13,8 @@ use std::str::FromStr;
 
 #[derive(Deserialize)]
 pub struct StaticLoadBalancer {
-    #[serde(default = "default_lb_name")]
-    name: String,
     #[serde(default)]
     unicast_mac_address: Option<String>,
-    #[serde(default)]
-    broadcast_mac_address: Option<String>,
     #[serde(default)]
     unicast_ipv4_address: Option<Ipv4Addr>,
     #[serde(default)]
@@ -52,10 +48,6 @@ pub struct StaticReservation {
     slots: Option<Vec<u16>>,
     #[serde(default)]
     allowed_senders: Vec<String>,
-}
-
-fn default_lb_name() -> String {
-    "static-lb".to_string()
 }
 
 fn default_weight() -> f64 {
@@ -110,17 +102,11 @@ impl StaticReservation {
         // Use load balancer from config if not explicitly defined
         let lb = if let Some(lb_config) = &self.load_balancer {
             db.create_loadbalancer(
-                &lb_config.name,
                 lb_config
                     .unicast_mac_address
                     .as_ref()
                     .map(|s| s.parse().unwrap())
                     .unwrap_or_else(|| config.lb.mac_unicast.parse().unwrap()),
-                lb_config
-                    .broadcast_mac_address
-                    .as_ref()
-                    .map(|s| s.parse().unwrap())
-                    .unwrap_or_else(|| config.lb.mac_broadcast.parse().unwrap()),
                 lb_config
                     .unicast_ipv4_address
                     .or(config.lb.instances[0].ipv4),
@@ -133,9 +119,7 @@ impl StaticReservation {
         } else {
             // Use first LB instance from config
             db.create_loadbalancer(
-                &default_lb_name(),
                 config.lb.mac_unicast.parse().unwrap(),
-                config.lb.mac_broadcast.parse().unwrap(),
                 config.lb.instances[0].ipv4,
                 config.lb.instances[0].ipv6,
                 0, // event_number_udp_port not used in static mode
@@ -145,7 +129,7 @@ impl StaticReservation {
 
         // Create reservation with allowed senders
         let reservation = db
-            .create_reservation(lb.id, chrono::Duration::days(1))
+            .create_reservation(lb.id, "static", chrono::Duration::days(1))
             .await?;
 
         // Add allowed senders

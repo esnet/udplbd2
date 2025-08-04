@@ -9,9 +9,7 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadBalancer {
     pub id: i64,
-    pub name: String,
     pub unicast_mac_address: MacAddr6,
-    pub broadcast_mac_address: MacAddr6,
     pub unicast_ipv4_address: Option<Ipv4Addr>,
     pub unicast_ipv6_address: Option<Ipv6Addr>,
     pub event_number_udp_port: u16,
@@ -23,6 +21,7 @@ pub struct LoadBalancer {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Reservation {
     pub id: i64,
+    pub name: String,
     pub loadbalancer_id: i64,
     pub reserved_until: DateTime<Utc>,
     pub created_at: DateTime<Utc>,

@@ -166,15 +166,9 @@ impl LoadBalancerDB {
                     ipv4, ipv6, port
                 );
                 self.create_loadbalancer(
-                    "", // name is deprecated/ignored
                     config
                         .lb
                         .mac_unicast
-                        .parse::<macaddr::MacAddr6>()
-                        .map_err(|_| Error::Config("invalid mac address".into()))?,
-                    config
-                        .lb
-                        .mac_broadcast
                         .parse::<macaddr::MacAddr6>()
                         .map_err(|_| Error::Config("invalid mac address".into()))?,
                     ipv4,

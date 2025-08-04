@@ -35,9 +35,7 @@ impl LoadBalancerDB {
     /// Creates a new loadbalancer.
     pub async fn create_loadbalancer(
         &self,
-        name: &str,
         unicast_mac: MacAddr6,
-        broadcast_mac: MacAddr6,
         unicast_ipv4: Option<Ipv4Addr>,
         unicast_ipv6: Option<Ipv6Addr>,
         event_number_port: u16,
@@ -52,29 +50,24 @@ impl LoadBalancerDB {
         let fpga_lb_id = self.find_available_fpga_lb_id().await?;
 
         let unicast_mac_string = unicast_mac.to_string();
-        let broadcast_mac_string = broadcast_mac.to_string();
         let unicast_ipv4_string = unicast_ipv4.map(|ip| ip.to_string());
         let unicast_ipv6_string = unicast_ipv6.map(|ip| ip.to_string());
 
         let record = sqlx::query!(
             r#"
             INSERT INTO loadbalancer (
-                name,
                 unicast_mac_address,
-                broadcast_mac_address,
                 unicast_ipv4_address,
                 unicast_ipv6_address,
                 event_number_udp_port,
                 fpga_lb_id
             )
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
-            RETURNING id, name, unicast_mac_address, broadcast_mac_address,
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            RETURNING id, unicast_mac_address,
                       unicast_ipv4_address, unicast_ipv6_address,
                       event_number_udp_port, fpga_lb_id, created_at, deleted_at
             "#,
-            name,
             unicast_mac_string,
-            broadcast_mac_string,
             unicast_ipv4_string,
             unicast_ipv6_string,
             event_number_port,
@@ -85,15 +78,10 @@ impl LoadBalancerDB {
 
         Ok(LoadBalancer {
             id: record.id,
-            name: record.name,
             unicast_mac_address: record
                 .unicast_mac_address
                 .parse()
                 .map_err(|_| Error::Config("Invalid unicast MAC address".into()))?,
-            broadcast_mac_address: record
-                .broadcast_mac_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
                 .map(|s| s.parse().expect("invalid address in database")),
@@ -160,7 +148,7 @@ impl LoadBalancerDB {
     pub async fn get_loadbalancer(&self, id: i64) -> Result<LoadBalancer> {
         let record = sqlx::query!(
             r#"
-            SELECT id, name, unicast_mac_address, broadcast_mac_address,
+            SELECT id, unicast_mac_address,
                    unicast_ipv4_address, unicast_ipv6_address,
                    event_number_udp_port, fpga_lb_id, created_at, deleted_at
             FROM loadbalancer
@@ -176,15 +164,10 @@ impl LoadBalancerDB {
 
         Ok(LoadBalancer {
             id: record.id,
-            name: record.name,
             unicast_mac_address: record
                 .unicast_mac_address
                 .parse()
                 .map_err(|_| Error::Config("Invalid unicast MAC address".into()))?,
-            broadcast_mac_address: record
-                .broadcast_mac_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
                 .map(|s| s.parse().expect("invalid address in database")),
@@ -206,12 +189,12 @@ impl LoadBalancerDB {
     pub async fn list_loadbalancers(&self) -> Result<Vec<LoadBalancer>> {
         let records = sqlx::query!(
             r#"
-            SELECT id, name, unicast_mac_address, broadcast_mac_address,
+            SELECT id, unicast_mac_address,
                    unicast_ipv4_address, unicast_ipv6_address,
                    event_number_udp_port, fpga_lb_id, created_at, deleted_at
             FROM loadbalancer
             WHERE deleted_at IS NULL
-            ORDER BY name
+            ORDER BY id
             "#
         )
         .fetch_all(&self.read_pool)
@@ -221,15 +204,10 @@ impl LoadBalancerDB {
         for record in records {
             loadbalancers.push(LoadBalancer {
                 id: record.id,
-                name: record.name,
                 unicast_mac_address: record
                     .unicast_mac_address
                     .parse()
                     .map_err(|_| Error::Config("Invalid unicast MAC address".into()))?,
-                broadcast_mac_address: record
-                    .broadcast_mac_address
-                    .parse()
-                    .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
                 unicast_ipv4_address: record
                     .unicast_ipv4_address
                     .map(|s| s.parse().expect("invalid address in database")),
@@ -252,27 +230,22 @@ impl LoadBalancerDB {
     /// Updates a loadbalancer by ID.
     pub async fn update_loadbalancer(&self, lb: &LoadBalancer) -> Result<LoadBalancer> {
         let unicast_mac_string = lb.unicast_mac_address.to_string();
-        let broadcast_mac_string = lb.broadcast_mac_address.to_string();
         let unicast_ipv4_string = lb.unicast_ipv4_address.as_ref().map(|ip| ip.to_string());
         let unicast_ipv6_string = lb.unicast_ipv6_address.as_ref().map(|ip| ip.to_string());
         let record = sqlx::query!(
             r#"
             UPDATE loadbalancer
-            SET name = ?1,
-                unicast_mac_address = ?2,
-                broadcast_mac_address = ?3,
-                unicast_ipv4_address = ?4,
-                unicast_ipv6_address = ?5,
-                event_number_udp_port = ?6,
-                fpga_lb_id = ?7
-            WHERE id = ?8 AND deleted_at IS NULL
-            RETURNING id, name, unicast_mac_address, broadcast_mac_address,
+            SET unicast_mac_address = ?1,
+                unicast_ipv4_address = ?2,
+                unicast_ipv6_address = ?3,
+                event_number_udp_port = ?4,
+                fpga_lb_id = ?5
+            WHERE id = ?6 AND deleted_at IS NULL
+            RETURNING id, unicast_mac_address,
                       unicast_ipv4_address, unicast_ipv6_address,
                       event_number_udp_port, fpga_lb_id, created_at, deleted_at
             "#,
-            lb.name,
             unicast_mac_string,
-            broadcast_mac_string,
             unicast_ipv4_string,
             unicast_ipv6_string,
             lb.event_number_udp_port,
@@ -288,15 +261,10 @@ impl LoadBalancerDB {
 
         Ok(LoadBalancer {
             id: record.id,
-            name: record.name,
             unicast_mac_address: record
                 .unicast_mac_address
                 .parse()
                 .map_err(|_| Error::Config("Invalid unicast MAC address".into()))?,
-            broadcast_mac_address: record
-                .broadcast_mac_address
-                .parse()
-                .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
             unicast_ipv4_address: record
                 .unicast_ipv4_address
                 .map(|s| s.parse().expect("invalid address in database")),

@@ -38,8 +38,6 @@ pub struct LoadBalancerConfig {
     pub instances: Vec<LoadBalancerInstanceConfig>,
     #[serde(rename = "mac_unicast")]
     pub mac_unicast: String,
-    #[serde(rename = "mac_broadcast")]
-    pub mac_broadcast: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -199,7 +197,6 @@ impl Config {
                     event_number_port: 19524,
                 }],
                 mac_unicast: "00:00:00:00:00:01".to_string(),
-                mac_broadcast: "ff:ff:ff:ff:ff:ff".to_string(),
             },
             database: DatabaseConfig {
                 file: PathBuf::from("/tmp/udplbd-sim.db"),
@@ -270,9 +267,6 @@ impl Config {
         // Validate MAC addresses
         if let Err(e) = self.lb.mac_unicast.parse::<MacAddr6>() {
             return Err(ConfigError::Invalid(format!("Invalid unicast MAC: {e}")));
-        }
-        if let Err(e) = self.lb.mac_broadcast.parse::<MacAddr6>() {
-            return Err(ConfigError::Invalid(format!("Invalid broadcast MAC: {e}")));
         }
 
         // Validate that at least one of ipv4 or ipv6 is present for each instance

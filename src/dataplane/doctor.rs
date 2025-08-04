@@ -364,6 +364,9 @@ async fn test_overview(ctx: &mut DoctorTestContext) -> Result<OverviewResult> {
     let mut found = false;
     if let Some(lb) = our_lb {
         found = true;
+        if lb.name != "ejfat-doctor" {
+            errors.push("name mismatch".to_string());
+        }
         let reservation = lb.reservation.as_ref().unwrap();
         let status = lb.status.as_ref().unwrap();
         if reservation.lb_id != ctx.lb_id {

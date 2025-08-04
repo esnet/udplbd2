@@ -9,14 +9,20 @@ use std::net::IpAddr;
 
 impl LoadBalancerDB {
     /// Creates a new reservation.
-    pub async fn create_reservation(&self, lb_id: i64, duration: Duration) -> Result<Reservation> {
+    pub async fn create_reservation(
+        &self,
+        lb_id: i64,
+        name: &str,
+        duration: Duration,
+    ) -> Result<Reservation> {
         let reserved_until = (Utc::now() + duration).timestamp_millis();
 
         let record = sqlx::query!(
-            "INSERT INTO reservation (loadbalancer_id, reserved_until)
-             VALUES (?1, ?2)
-             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch",
+            "INSERT INTO reservation (loadbalancer_id, name, reserved_until)
+             VALUES (?1, ?2, ?3)
+             RETURNING id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch",
             lb_id,
+            name,
             reserved_until,
         )
         .fetch_one(&self.write_pool)
@@ -25,6 +31,7 @@ impl LoadBalancerDB {
         Ok(Reservation {
             id: record.id,
             loadbalancer_id: record.loadbalancer_id,
+            name: record.name,
             reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
                 .ok_or(Error::Parse("reserved_until out of range".to_string()))?,
             created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -40,7 +47,7 @@ impl LoadBalancerDB {
     /// Retrieves a reservation by ID.
     pub async fn get_reservation(&self, id: i64) -> Result<Reservation> {
         let reservation_record = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch
+            "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch
              FROM reservation
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -52,6 +59,7 @@ impl LoadBalancerDB {
         Ok(Reservation {
             id: reservation_record.id,
             loadbalancer_id: reservation_record.loadbalancer_id,
+            name: reservation_record.name,
             reserved_until: DateTime::<Utc>::from_timestamp_millis(
                 reservation_record.reserved_until,
             )
@@ -226,7 +234,7 @@ impl LoadBalancerDB {
 
     pub async fn list_reservations(&self) -> Result<Vec<Reservation>> {
         let records = sqlx::query!(
-            "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch
+            "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch
              FROM reservation
              WHERE deleted_at IS NULL"
         )
@@ -238,6 +246,7 @@ impl LoadBalancerDB {
             reservations.push(Reservation {
                 id: record.id,
                 loadbalancer_id: record.loadbalancer_id,
+                name: record.name,
                 reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
                     .ok_or(Error::Parse("reserved_until out of range".to_string()))?,
                 created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at)
@@ -258,8 +267,8 @@ impl LoadBalancerDB {
     ) -> Result<Vec<(Reservation, crate::db::models::LoadBalancer)>> {
         let records = sqlx::query!(
             r#"
-            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at,
-                   lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,
+            SELECT r.id res_id, r.loadbalancer_id, r.name as res_name, r.reserved_until, r.created_at res_created_at,
+                   lb.id lb_id, lb.unicast_mac_address,
                    lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,
                    lb.fpga_lb_id, lb.created_at lb_created_at, r.current_epoch
             FROM reservation r
@@ -276,6 +285,7 @@ impl LoadBalancerDB {
                 Reservation {
                     id: record.res_id,
                     loadbalancer_id: record.loadbalancer_id,
+                    name: record.res_name,
                     reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)
                         .ok_or(Error::Parse(
                         "reserved_until out of range".to_string(),
@@ -287,15 +297,10 @@ impl LoadBalancerDB {
                 },
                 crate::db::models::LoadBalancer {
                     id: record.lb_id,
-                    name: record.name,
                     unicast_mac_address: record
                         .unicast_mac_address
                         .parse()
                         .map_err(|_| Error::Config("Invalid unicast MAC address".into()))?,
-                    broadcast_mac_address: record
-                        .broadcast_mac_address
-                        .parse()
-                        .map_err(|_| Error::Config("Invalid broadcast MAC address".into()))?,
                     unicast_ipv4_address: record
                         .unicast_ipv4_address
                         .map(|s| s.parse().expect("invalid address in database")),

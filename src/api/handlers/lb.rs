@@ -108,7 +108,11 @@ impl LoadBalancerService {
 
         let reservation = self
             .db
-            .create_reservation(lb.id, chrono::Duration::from_std(duration).unwrap())
+            .create_reservation(
+                lb.id,
+                &request.name,
+                chrono::Duration::from_std(duration).unwrap(),
+            )
             .await
             .map_err(|e| Status::internal(format!("Failed to create reservation: {e}")))?;
 

@@ -55,9 +55,7 @@ CREATE INDEX idx_token_global_permission_created_at ON token_global_permission(c
 
 CREATE TABLE IF NOT EXISTS loadbalancer (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
-    name TEXT NOT NULL,
     unicast_mac_address TEXT NOT NULL,
-    broadcast_mac_address TEXT NOT NULL,
     unicast_ipv4_address TEXT,
     unicast_ipv6_address TEXT,
     event_number_udp_port INTEGER NOT NULL,
@@ -71,6 +69,7 @@ CREATE INDEX idx_loadbalancer_deleted_at ON loadbalancer(deleted_at);
 CREATE TABLE IF NOT EXISTS reservation (
     id INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
     loadbalancer_id INTEGER NOT NULL REFERENCES loadbalancer(id) ON DELETE CASCADE,
+    name TEXT NOT NULL,
     reserved_until INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT(unixepoch('subsec') * 1000),
     deleted_at INTEGER,
