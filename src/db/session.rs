@@ -350,6 +350,13 @@ impl LoadBalancerDB {
     pub async fn delete_session(&self, id: i64) -> Result<()> {
         let mut tx = self.write_pool.begin().await?;
 
+        // Get the reservation_id before deleting the session
+        let reservation_row = sqlx::query!("SELECT reservation_id FROM session WHERE id = ?1", id)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(Error::Database)?;
+        let reservation_id = reservation_row.reservation_id;
+
         // Hard delete token permissions for the session
         sqlx::query!(
             "DELETE FROM token_session_permission WHERE session_id = ?1",
@@ -367,6 +374,34 @@ impl LoadBalancerDB {
         .execute(&mut *tx)
         .await
         .map_err(Error::Database)?;
+
+        // Check if this was the last session for the reservation
+        let remaining_sessions = sqlx::query!(
+            "SELECT COUNT(*) as count FROM session WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .fetch_one(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+        if remaining_sessions.count == 0 {
+            // Soft-delete all epochs for this reservation
+            let now = chrono::Utc::now().timestamp_millis();
+            let updated = sqlx::query!(
+                "UPDATE epoch SET deleted_at = ?1 WHERE reservation_id = ?2 AND deleted_at IS NULL RETURNING id",
+                now,
+                reservation_id
+            )
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(Error::Database)?;
+
+            let epoch_ids: Vec<i64> = updated.iter().map(|r| r.id).collect();
+            info!(
+                "All epochs soft-deleted for reservation {} after last session removed: {:?}",
+                reservation_id, epoch_ids
+            );
+        }
 
         tx.commit().await.map_err(Error::Database)?;
 
