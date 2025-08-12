@@ -9,8 +9,8 @@ use crate::proto::smartnic::p4_v2::{
     StatsResponse, TableRequest, TableResponse, TableRule, TableRuleResponse,
 };
 use crate::snp4::rules::{
-    parse_rule, EtherType, EventIdToEpochRule, IpSrcFilterRule, MemberInfoRule, RuleType,
-    SlotToMemberRule,
+    parse_rule, EtherType, EventIdToEpochRule, IpSrcFilterRule, MemberInfoAction, MemberInfoRule,
+    RuleType, SlotToMemberRule,
 };
 use log::{debug, error, info, warn};
 use std::collections::HashMap;
@@ -186,10 +186,25 @@ impl MockLoadBalancer {
             }
         };
 
-        // Calculate destination UDP port using entropy.
-        let entropy_mask = (1u16 << member.set_entropy_bit_mask_width) - 1;
-        let dst_port = member.set_dest_udp_port + (lb_payload.header.entropy.get() & entropy_mask);
-        let dst_addr = SocketAddr::new(member.set_dest_ip_addr, dst_port);
+        // Handle MemberInfoAction
+        let dst_addr = match &member.action {
+            MemberInfoAction::Rewrite {
+                set_dest_mac_addr: _,
+                set_dest_ip_addr,
+                set_dest_udp_port,
+                set_entropy_bit_mask_width,
+                set_keep_lb_header: _,
+            } => {
+                let entropy_mask = (1u16 << *set_entropy_bit_mask_width) - 1;
+                let dst_port =
+                    *set_dest_udp_port + (lb_payload.header.entropy.get() & entropy_mask);
+                SocketAddr::new(*set_dest_ip_addr, dst_port)
+            }
+            MemberInfoAction::Drop => {
+                // Drop the packet (do not forward)
+                return None;
+            }
+        };
 
         // ==== split‐event detection based on ReassemblyHeader ====
         if let Some(reasm) = ReassemblyPayload::parse(&lb_payload.body) {

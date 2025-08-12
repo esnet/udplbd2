@@ -77,7 +77,7 @@ fn param(value: String) -> ActionParameter {
     ActionParameter { value }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum EtherType {
     Ipv4 = 0x0800,
     Ipv4Arp = 0x0806,
@@ -421,20 +421,55 @@ impl TryFrom<TableRule> for SlotToMemberRule {
 }
 
 #[derive(Debug)]
+pub enum MemberInfoAction {
+    Rewrite {
+        set_dest_mac_addr: u64,
+        set_dest_ip_addr: IpAddr,
+        set_dest_udp_port: u16,
+        set_entropy_bit_mask_width: u8,
+        set_keep_lb_header: bool,
+    },
+    Drop,
+}
+
+#[derive(Debug)]
 pub struct MemberInfoRule {
     pub match_lb_instance_id: u8,
     pub match_ether_type: EtherType,
     pub match_member_id: u16,
-    pub set_dest_mac_addr: u64,
-    pub set_dest_ip_addr: IpAddr,
-    pub set_dest_udp_port: u16,
-    pub set_entropy_bit_mask_width: u8,
-    pub set_keep_lb_header: bool,
+    pub action: MemberInfoAction,
     pub priority: u32,
 }
 
 impl From<MemberInfoRule> for TableRule {
     fn from(r: MemberInfoRule) -> Self {
+        let (action_name, parameters) = match r.action {
+            MemberInfoAction::Rewrite {
+                set_dest_mac_addr,
+                set_dest_ip_addr,
+                set_dest_udp_port,
+                set_entropy_bit_mask_width,
+                set_keep_lb_header,
+            } => (
+                match set_dest_ip_addr {
+                    IpAddr::V4(_) => "do_ipv4_member_rewrite",
+                    IpAddr::V6(_) => "do_ipv6_member_rewrite",
+                }
+                .into(),
+                vec![
+                    param(hex(set_dest_mac_addr)),
+                    param(hexip(set_dest_ip_addr)),
+                    param(hex(set_dest_udp_port)),
+                    param(hex(set_entropy_bit_mask_width as u16)),
+                    param(hex(set_keep_lb_header as u8)),
+                ],
+            ),
+            MemberInfoAction::Drop => (
+                "drop".into(),
+                vec![], // No parameters needed for drop
+            ),
+        };
+
         TableRule {
             table_name: "member_info_lookup_table".into(),
             matches: vec![
@@ -443,18 +478,8 @@ impl From<MemberInfoRule> for TableRule {
                 match_exact(hex(r.match_member_id)),
             ],
             action: Some(Action {
-                name: match r.set_dest_ip_addr {
-                    IpAddr::V4(_) => "do_ipv4_member_rewrite",
-                    IpAddr::V6(_) => "do_ipv6_member_rewrite",
-                }
-                .into(),
-                parameters: vec![
-                    param(hex(r.set_dest_mac_addr)),
-                    param(hexip(r.set_dest_ip_addr)),
-                    param(hex(r.set_dest_udp_port)),
-                    param(hex(r.set_entropy_bit_mask_width as u16)),
-                    param(hex(r.set_keep_lb_header as u8)),
-                ],
+                name: action_name,
+                parameters,
             }),
             priority: r.priority,
             replace: false,
@@ -476,11 +501,6 @@ impl TryFrom<TableRule> for MemberInfoRule {
         let action = rule
             .action
             .ok_or_else(|| Error::Config("Missing action".into()))?;
-        if (action.name != "do_ipv4_member_rewrite" && action.name != "do_ipv6_member_rewrite")
-            || action.parameters.len() < 4
-        {
-            return Err(Error::Config("Invalid action".into()));
-        }
 
         if rule.matches.len() < 3 {
             return Err(Error::Config("Missing match fields".into()));
@@ -493,27 +513,43 @@ impl TryFrom<TableRule> for MemberInfoRule {
         let member_id = parse_hex_u16(get_key_only(rule.matches[2].r#type.as_ref())?)
             .ok_or_else(|| Error::Config("Invalid member ID".into()))?;
 
-        let mac_addr = parse_hex_u64(&action.parameters[0].value)
-            .ok_or_else(|| Error::Config("Invalid MAC address".into()))?;
-        let ip_addr = if action.name == "do_ipv4_member_rewrite" {
-            IpAddr::V4(
-                parse_ipv4(&action.parameters[1].value)
-                    .ok_or_else(|| Error::Config("Invalid IPv4 address".into()))?,
-            )
-        } else {
-            IpAddr::V6(
-                parse_ipv6(&action.parameters[1].value)
-                    .ok_or_else(|| Error::Config("Invalid IPv6 address".into()))?,
-            )
-        };
-        let udp_port = parse_hex_u16(&action.parameters[2].value)
-            .ok_or_else(|| Error::Config("Invalid UDP port".into()))?;
-        let entropy_bits = parse_hex_u8(&action.parameters[3].value)
-            .ok_or_else(|| Error::Config("Invalid entropy bits".into()))?;
+        let action_enum = if action.name == "drop" {
+            MemberInfoAction::Drop
+        } else if (action.name == "do_ipv4_member_rewrite"
+            || action.name == "do_ipv6_member_rewrite")
+            && action.parameters.len() >= 5
+        {
+            let mac_addr = parse_hex_u64(&action.parameters[0].value)
+                .ok_or_else(|| Error::Config("Invalid MAC address".into()))?;
+            let ip_addr = if action.name == "do_ipv4_member_rewrite" {
+                IpAddr::V4(
+                    parse_ipv4(&action.parameters[1].value)
+                        .ok_or_else(|| Error::Config("Invalid IPv4 address".into()))?,
+                )
+            } else {
+                IpAddr::V6(
+                    parse_ipv6(&action.parameters[1].value)
+                        .ok_or_else(|| Error::Config("Invalid IPv6 address".into()))?,
+                )
+            };
+            let udp_port = parse_hex_u16(&action.parameters[2].value)
+                .ok_or_else(|| Error::Config("Invalid UDP port".into()))?;
+            let entropy_bits = parse_hex_u8(&action.parameters[3].value)
+                .ok_or_else(|| Error::Config("Invalid entropy bits".into()))?;
+            let keep_lb_header = parse_hex_u8(&action.parameters[4].value)
+                .ok_or_else(|| Error::Config("Invalid keep_lb_header bits".into()))?
+                == 1;
 
-        let keep_lb_header = parse_hex_u8(&action.parameters[4].value)
-            .ok_or_else(|| Error::Config("Invalid keep_lb_header bits".into()))?
-            == 1;
+            MemberInfoAction::Rewrite {
+                set_dest_mac_addr: mac_addr,
+                set_dest_ip_addr: ip_addr,
+                set_dest_udp_port: udp_port,
+                set_entropy_bit_mask_width: entropy_bits,
+                set_keep_lb_header: keep_lb_header,
+            }
+        } else {
+            return Err(Error::Config("Invalid action for MemberInfoRule".into()));
+        };
 
         Ok(MemberInfoRule {
             match_lb_instance_id: lb_id,
@@ -523,11 +559,7 @@ impl TryFrom<TableRule> for MemberInfoRule {
                 EtherType::Ipv6
             },
             match_member_id: member_id,
-            set_dest_mac_addr: mac_addr,
-            set_dest_ip_addr: ip_addr,
-            set_dest_udp_port: udp_port,
-            set_entropy_bit_mask_width: entropy_bits,
-            set_keep_lb_header: keep_lb_header,
+            action: action_enum,
             priority: rule.priority,
         })
     }

@@ -9,6 +9,7 @@ use crate::metrics::{
 use crate::proto::smartnic::p4_v2::TableRule;
 use crate::snp4::rules::*;
 use crate::util::{mac_to_u64, range_as_power_of_two_prefixes, Prefix};
+use std::collections::HashSet;
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use tokio::sync::broadcast;
@@ -104,7 +105,7 @@ impl ActiveReservation {
         rules.extend(self.generate_source_filter_rules(db).await?);
         let sessions = db.get_reservation_sessions(self.reservation_id).await?;
         if !sessions.is_empty() {
-            rules.extend(self.generate_member_info_rules(&lb, &sessions).await?);
+            rules.extend(self.generate_member_info_rules(db, &lb, &sessions).await?);
         }
         Ok(rules)
     }
@@ -127,12 +128,17 @@ impl ActiveReservation {
 
     /// Maps session IDs to network endpoints, handling both IPv4 and IPv6.
     /// Member IDs are truncated to u16 to fit FPGA constraints.
+    /// TODO: assign member ids via
     async fn generate_member_info_rules(
         &self,
+        db: &LoadBalancerDB,
         lb: &crate::db::models::LoadBalancer,
         sessions: &[crate::db::models::Session],
     ) -> Result<Vec<TableRule>> {
         let mut rules = Vec::new();
+        let mut active_member_ids = HashSet::new();
+
+        // 1. Normal rewrite rules for all active sessions
         for session in sessions {
             let ether_type = match session.ip_address {
                 IpAddr::V4(_) => EtherType::Ipv4,
@@ -140,6 +146,8 @@ impl ActiveReservation {
             };
 
             let member_id = (session.id % (u16::MAX as i64)) as u16;
+            active_member_ids.insert(member_id);
+
             // Use the cached MAC address if available, otherwise use the loadbalancer's MAC
             let dest_mac = session
                 .mac_address
@@ -152,16 +160,63 @@ impl ActiveReservation {
                     match_lb_instance_id: self.lb_fpga_id,
                     match_ether_type: ether_type,
                     match_member_id: member_id,
-                    set_dest_mac_addr: dest_mac,
-                    set_dest_ip_addr: session.ip_address,
-                    set_dest_udp_port: session.udp_port,
-                    set_entropy_bit_mask_width: session.port_range as u8,
-                    set_keep_lb_header: session.keep_lb_header,
+                    action: MemberInfoAction::Rewrite {
+                        set_dest_mac_addr: dest_mac,
+                        set_dest_ip_addr: session.ip_address,
+                        set_dest_udp_port: session.udp_port,
+                        set_entropy_bit_mask_width: session.port_range as u8,
+                        set_keep_lb_header: session.keep_lb_header,
+                    },
                     priority: 0,
                 }
                 .into(),
             );
         }
+
+        // 2. Find all member_ids referenced in any epoch's slots
+        let mut referenced_member_ids = HashSet::new();
+        let epochs = sqlx::query!(
+            r#"
+            SELECT slots
+            FROM epoch
+            WHERE reservation_id = ?1 AND deleted_at IS NULL
+            "#,
+            self.reservation_id
+        )
+        .fetch_all(&db.read_pool)
+        .await?;
+
+        for epoch in epochs {
+            let slots: Vec<u16> = epoch
+                .slots
+                .chunks_exact(2)
+                .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
+                .collect();
+            for &member_id in &slots {
+                if member_id != 65535 {
+                    referenced_member_ids.insert(member_id);
+                }
+            }
+        }
+
+        // 3. For any referenced member_id not in active_member_ids, add both IPv4 and IPv6 drop rules
+        for &member_id in &referenced_member_ids {
+            if !active_member_ids.contains(&member_id) {
+                for ether_type in [EtherType::Ipv4, EtherType::Ipv6] {
+                    rules.push(
+                        MemberInfoRule {
+                            match_lb_instance_id: self.lb_fpga_id,
+                            match_ether_type: ether_type,
+                            match_member_id: member_id,
+                            action: MemberInfoAction::Drop,
+                            priority: 0,
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
         Ok(rules)
     }
 
