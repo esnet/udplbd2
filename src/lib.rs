@@ -13,6 +13,8 @@ pub mod sncfg;
 pub mod snp4;
 pub mod util;
 
+use crate::sncfg::metrics_collector::start_metrics_collector;
+
 use api::fix_connect_info;
 use chrono::Utc;
 use config::LoadBalancerInstanceConfig;
@@ -146,6 +148,12 @@ pub async fn start_server(config: Config) -> Result<()> {
     }
     let mut smartnic_clients = MultiSNP4Client::new(snp4_clients);
     let mut cfg_clients = MultiSNCfgClient::new(sncfg_clients);
+
+    // Start SmartNIC metrics collector if enabled
+    let metrics_collector_config = config.get_metrics_collector_config();
+    if metrics_collector_config.enabled {
+        start_metrics_collector(db.clone(), cfg_clients.clone(), metrics_collector_config);
+    }
 
     auto_configure_smartnics(&mut cfg_clients).await?;
 

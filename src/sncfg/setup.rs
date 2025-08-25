@@ -15,18 +15,15 @@ use tracing::{error, info};
 pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<()> {
     // Show device info
     // Gather device info for summary
-    let device_infos: Vec<_>;
-    match clients.get_device_info().await {
-        Ok(devs) => {
-            device_infos = devs.clone();
-        }
+    let device_infos = match clients.get_device_info().await {
+        Ok(devs) => devs.clone(),
         Err(e) => {
             error!("Failed to get device info: {:#?}", e);
             return Err(crate::errors::Error::Runtime(
                 "failed to get device info, check token?".to_string(),
             ));
         }
-    }
+    };
 
     // 1. Configure switch: egress 0:physical, 1:physical; ingress 0:physical:app, 1:physical:app; bypass straight
     let switch_config = SwitchConfig {

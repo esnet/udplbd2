@@ -652,7 +652,7 @@ const renderSessions = (workers) => {
         }
     };
 
-    // Function to organize timeseries data by type
+    // Function to organize timeseries data by type (updated for new metric path format)
     const organizeTimeseriesData = (timeseriesData) => {
         if (!timeseriesData || !timeseriesData.timeseries || !timeseriesData.timeseries.length) {
             return null;
@@ -662,6 +662,8 @@ const renderSessions = (workers) => {
         chartMetrics = {
             sessions: new Map(), // Session metrics by session ID
             reservation: new Map(), // Reservation metrics
+            global: new Map(), // Global metrics
+            lb: new Map(), // LB metrics
             prediction: {
                 boundary_event: null,
                 event_number: null
@@ -676,33 +678,51 @@ const renderSessions = (workers) => {
             // Skip empty series
             if (!data.length) return;
 
-            // Extract session ID from the series name if it contains session info
-            const sessionMatch = name.match(/\/session\/(\d+)\//);
-            if (sessionMatch) {
-                const sessionId = sessionMatch[1];
+            // /smartnic/global/{metric}
+            const globalMatch = name.match(/^\/smartnic\/global\/([^\/]+)$/);
+            if (globalMatch) {
+                const metricName = globalMatch[1];
+                chartMetrics.global.set(metricName, data);
+                return;
+            }
 
-                // Group data by session ID
+            // /lb/{reservation_id}/{metric}
+            const lbMatch = name.match(/^\/lb\/(\d+)\/([^\/]+)$/);
+            if (lbMatch) {
+                const metricName = lbMatch[2];
+                chartMetrics.lb.set(metricName, data);
+                return;
+            }
+
+            // /lb/{reservation_id}/session/{session_id}/{metric}
+            const sessionMatch = name.match(/^\/lb\/(\d+)\/session\/(\d+)\/([^\/]+)$/);
+            if (sessionMatch) {
+                const sessionId = sessionMatch[2];
+                const metricName = sessionMatch[3];
                 if (!chartMetrics.sessions.has(sessionId)) {
                     chartMetrics.sessions.set(sessionId, new Map());
                 }
+                chartMetrics.sessions.get(sessionId).set(metricName, data);
+                return;
+            }
 
-                // Store the series data under the appropriate metric name
-                const metricName = name.split('/').pop(); // Get the last part of the path
-                if (metricName) {
-                    chartMetrics.sessions.get(sessionId).set(metricName, data);
-                }
-            } else if (name.includes('/epoch/boundary_event')) {
-                // Store epoch boundary event data for prediction accuracy
+            // /lb/{reservation_id}/reservation/{reservation_id}/{metric}
+            const reservationMatch = name.match(/\/reservation\/(\d+)\/([^\/]+)$/);
+            if (reservationMatch) {
+                const metricName = reservationMatch[2];
+                chartMetrics.reservation.set(metricName, data);
+                return;
+            }
+
+            // /lb/{reservation_id}/epoch/boundary_event
+            if (name.includes('/epoch/boundary_event')) {
                 chartMetrics.prediction.boundary_event = data;
-            } else if (name.includes('/event_number')) {
-                // Store event number data for prediction accuracy
+                return;
+            }
+            // /lb/{reservation_id}/event_number
+            if (name.includes('/event_number')) {
                 chartMetrics.prediction.event_number = data;
-            } else if (name.includes('/reservation/')) {
-                // Store reservation metrics
-                const metricName = name.split('/').pop();
-                if (metricName) {
-                    chartMetrics.reservation.set(metricName, data);
-                }
+                return;
             }
         });
 
@@ -755,7 +775,7 @@ const renderSessions = (workers) => {
             event_number: null
         };
 
-        // Process all timeseries
+        // Process all timeseries (updated for new metric path format)
         timeseriesData.timeseries.forEach(series => {
             const name = series.name;
             const data = series.timeseries?.FloatSamples?.data || [];
@@ -763,33 +783,43 @@ const renderSessions = (workers) => {
             // Skip empty series
             if (!data.length) return;
 
-            // Extract session ID from the series name if it contains session info
-            const sessionMatch = name.match(/\/session\/(\d+)\//);
-            if (sessionMatch) {
-                const sessionId = sessionMatch[1];
-                const metricName = name.split('/').pop(); // Get the last part of the path
+            // /smartnic/global/{metric}
+            const globalMatch = name.match(/^\/smartnic\/global\/([^\/]+)$/);
+            if (globalMatch) {
+                // Optionally render global metrics as charts
+                // Not currently rendered, but could be added here
+                return;
+            }
 
+            // /lb/{reservation_id}/{metric}
+            const lbMatch = name.match(/^\/lb\/(\d+)\/([^\/]+)$/);
+            if (lbMatch) {
+                const metricName = lbMatch[2];
+                reservationSeries.set(metricName, data);
+                return;
+            }
+
+            // /lb/{reservation_id}/session/{session_id}/{metric}
+            const sessionMatch = name.match(/^\/lb\/(\d+)\/session\/(\d+)\/([^\/]+)$/);
+            if (sessionMatch) {
+                const sessionId = sessionMatch[2];
+                const metricName = sessionMatch[3];
                 if (!sessionSeries.has(sessionId)) {
                     sessionSeries.set(sessionId, new Map());
                 }
+                sessionSeries.get(sessionId).set(metricName, data);
+                return;
+            }
 
-                if (metricName) {
-                    sessionSeries.get(sessionId).set(metricName, data);
-                }
-            }
-            // Check for prediction-related series
-            else if (name.includes('/epoch/boundary_event')) {
+            // /lb/{reservation_id}/epoch/boundary_event
+            if (name.includes('/epoch/boundary_event')) {
                 predictionData.boundary_event = data;
+                return;
             }
-            else if (name.includes('/event_number')) {
+            // /lb/{reservation_id}/event_number
+            if (name.includes('/event_number')) {
                 predictionData.event_number = data;
-            }
-            // Check for reservation metrics
-            else if (name.includes('/reservation/')) {
-                const metricName = name.split('/').pop();
-                if (metricName && !metricName.includes('session')) {
-                    reservationSeries.set(metricName, data);
-                }
+                return;
             }
         });
 
@@ -1016,6 +1046,55 @@ const renderSessions = (workers) => {
                 uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
             }
         });
+
+        // --- Global Metric Charts ---
+        if (typeof chartMetrics !== "undefined" && chartMetrics.global && chartMetrics.global.size > 0) {
+            chartMetrics.global.forEach((data, metricName) => {
+                const formattedMetricName = `Global ${metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
+                const chartId = `chart-global-${metricName}`;
+                neededChartIds.add(chartId);
+
+                const chartContainer = ensureChartContainer(formattedMetricName, chartId);
+                if (!chartContainer) return;
+
+                const timestamps = data.map(point => point.timestamp / 1000);
+                const values = data.map(point => point.value);
+                const seriesData = [timestamps, values];
+                const seriesLabels = ['Time', formattedMetricName];
+                const seriesColors = ['transparent', '#EA4335'];
+
+                const chartOptions = {
+                    width: chartContainer.clientWidth,
+                    height: 350,
+                    series: seriesLabels.map((label, i) => ({
+                        label,
+                        stroke: seriesColors[i],
+                        width: i > 0 ? 2.5 : 0,
+                        points: { show: false },
+                        spanGaps: true
+                    })),
+                    axes: [
+                        { stroke: "white", grid: { stroke: "#444444" } },
+                        {
+                            label: formattedMetricName,
+                            labelSize: 20,
+                            stroke: "white",
+                            grid: { stroke: "#444444" },
+                            font: "14px Arial",
+                            color: "white"
+                        }
+                    ],
+                    scales: { x: { time: true } },
+                    legend: { show: true }
+                };
+
+                if (uPlotCharts[chartId]) {
+                    uPlotCharts[chartId].setData(seriesData);
+                } else {
+                    uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
+                }
+            });
+        }
 
         // --- Remove unused charts and DOM nodes ---
         Object.keys(uPlotCharts).forEach(chartId => {
