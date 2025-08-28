@@ -1,13 +1,34 @@
-stages:
-  - build
+image: docker
 
 variables:
   # Set CARGO_HOME within the project directory to cache it persistently
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  DOCKER_TLS_CERT_DIR: ""
+  RELEASE_BRANCH: "main"
+  DEV_BRANCH: "develop"
+  MAIN_BRANCH: "main"
+  IMAGE_TAG: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG:$CI_COMMIT_SHA
+
+stages:
+  - build
+  - push
+
+include:
+  - project: "security/container-scanning"
+    file: ".ESnet-container-scan.yml"
+
+.wharf_logout: &wharf_logout |-
+  docker logout "$WHARF_SITE"
+
+.wharf_login: &wharf_login |-
+  echo "$WHARF_TOKEN" | docker login -u "$WHARF_USER" "$WHARF_SITE" --password-stdin
+
+.docker_login: &docker_login |-
+  docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
 
 x86-64:
   stage: build
-  image: rust
+  image: ghcr.io/rust-cross/cargo-zigbuild
   cache:
     key: "persistent-cache" # Use a constant key for persistent caching
     policy: pull-push # Ensure cache is pulled at job start and pushed at job end
@@ -20,14 +41,15 @@ x86-64:
       - .cargo/git/
   before_script:
     - echo "Installing dependencies"
-    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev sqlite3 libssl-dev musl-tools
+    - rustup target add x86_64-unknown-linux-musl
     - cargo install sqlx-cli
   script:
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - echo "Setting up database"
     - $CARGO_HOME/bin/sqlx database setup
     - cargo test --release
-    - cargo build --release
+    - cargo zigbuild --release --target x86_64-unknown-linux-musl
     - cargo doc --no-deps
     - mkdir -p public
     - mv target/doc public/doc
@@ -35,3 +57,45 @@ x86-64:
   artifacts:
     paths:
       - public
+
+build_container:
+  stage: build
+  script:
+    - *docker_login
+    - docker build --pull -t $IMAGE_TAG .
+    - docker push $IMAGE_TAG
+
+.push:
+  stage: push
+  before_script:
+    - *docker_login
+    - *wharf_login
+  after_script:
+    - *wharf_logout
+  script:
+    - |
+      docker pull $IMAGE_TAG
+      for tag in $TAGS; do
+        if echo $tag | grep -q "BRANCH_TAG"; then
+          tag=$(echo $tag | sed "s/BRANCH_TAG/$(echo $CI_COMMIT_BRANCH | sed 's/\//-/g')/g")
+        fi
+        docker tag $IMAGE_TAG $tag
+        docker push $tag
+      done;
+
+publish_container:
+  extends: .push
+  variables:
+    TAGS: |
+      $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:$CI_PIPELINE_ID
+      $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:BRANCH_TAG
+
+publish_release_container:
+  extends: .push
+  rules:
+    - if: "$CI_COMMIT_BRANCH == $MAIN_BRANCH"
+    - if: $CI_COMMIT_TAG
+  variables:
+    TAGS: |
+      $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:$CI_COMMIT_REF_NAME
+      $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:latest
