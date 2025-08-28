@@ -25,7 +25,7 @@ include:
   echo "$WHARF_TOKEN" | docker login -u "$WHARF_USER" "$WHARF_SITE" --password-stdin
 
 .docker_login: &docker_login |-
-  docker login -u gitlab-ci-token -p $CI_BUILD_TOKEN $CI_REGISTRY
+  docker login -u robot+udplb+udplbd2-cicd -p $CI_BUILD_TOKEN $CI_REGISTRY
 
 x86-64:
   stage: build
