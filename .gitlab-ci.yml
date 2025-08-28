@@ -54,7 +54,7 @@ x86-64:
     - cargo doc --no-deps
     - mkdir -p public
     - mv target/doc public/doc
-    - mv target/release/udplbd public/udplbd-linux-amd64
+    - mv target/x86_64-unknown-linux-musl/release/udplbd public/udplbd-linux-amd64
   artifacts:
     paths:
       - public
