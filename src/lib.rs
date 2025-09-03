@@ -36,76 +36,13 @@ use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
 use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
-use crate::sncfg::setup::auto_configure_smartnics;
+use crate::sncfg::setup::{auto_configure_smartnics, smallest_mac_address};
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 
-pub async fn apply_static_config(
-    config: &Config,
-    reservation_file: std::path::PathBuf,
-    apply: bool,
-) -> Result<()> {
-    let reservation = crate::reservation::static_reservation::StaticReservation::load_from_file(
-        &reservation_file,
-    )
-    .await?;
-    let rules = reservation.generate_rules(config).await?;
-
-    if apply {
-        let mut snp4_clients = Vec::new();
-        for smartnic in &config.smartnic {
-            if !smartnic.mock {
-                let addr = format!(
-                    "{}://{}:{}",
-                    if smartnic.tls.enable { "https" } else { "http" },
-                    smartnic.host,
-                    smartnic.port
-                );
-                let mut client = SNP4Client::new(
-                    &addr,
-                    0,
-                    0,
-                    smartnic.tls.verify,
-                    smartnic.auth_token.clone(),
-                )
-                .await?;
-                client.clear_table_repeats = smartnic.clear_table_repeats;
-                snp4_clients.push(client);
-            }
-        }
-        let mut smartnic_clients = MultiSNP4Client::new(snp4_clients);
-
-        reservation
-            .apply_rules(&mut smartnic_clients, config)
-            .await?;
-    } else {
-        for rule in rules {
-            println!("table_add {rule}");
-        }
-    }
-
-    Ok(())
-}
-
-pub async fn start_server(config: Config) -> Result<()> {
-    metrics::init_metrics();
-
-    let db = Arc::new(LoadBalancerDB::with_config(&config).await?);
-
-    let cleanup_interval = parse_duration(&config.database.cleanup_interval)
-        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
-    let cleanup_age = parse_duration(&config.database.cleanup_age)
-        .map_err(|e| Error::Config(format!("Invalid cleanup age: {}", e)))?;
-    let db_cleanup = db.clone();
-    tokio::spawn(async move {
-        loop {
-            let cutoff = Utc::now() - chrono::Duration::from_std(cleanup_age).unwrap();
-            if let Err(e) = db_cleanup.cleanup_soft_deleted(cutoff).await {
-                error!("failed to cleanup soft deleted records: {}", e);
-            }
-            tokio::time::sleep(cleanup_interval).await;
-        }
-    });
-
+async fn build_smartnic_clients(
+    config: &mut Config,
+    snp4_client_table_index: i32,
+) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
     let mut snp4_clients = Vec::new();
     let mut sncfg_clients = Vec::new();
     for smartnic in &config.smartnic {
@@ -119,7 +56,7 @@ pub async fn start_server(config: Config) -> Result<()> {
             let mut client = SNP4Client::new(
                 &addr,
                 0,
-                -1,
+                snp4_client_table_index,
                 smartnic.tls.verify,
                 smartnic.auth_token.clone(),
             )
@@ -144,41 +81,44 @@ pub async fn start_server(config: Config) -> Result<()> {
             }
         }
     }
-    let mut smartnic_clients = MultiSNP4Client::new(snp4_clients);
-    let mut cfg_clients = MultiSNCfgClient::new(sncfg_clients);
+    Ok((
+        MultiSNP4Client::new(snp4_clients),
+        MultiSNCfgClient::new(sncfg_clients),
+    ))
+}
 
-    auto_configure_smartnics(&mut cfg_clients).await?;
+pub async fn apply_static_config(
+    config: &mut Config,
+    reservation_file: std::path::PathBuf,
+    apply: bool,
+) -> Result<()> {
+    let reservation = crate::reservation::static_reservation::StaticReservation::load_from_file(
+        &reservation_file,
+    )
+    .await?;
+    let rules = reservation.generate_rules(config).await?;
 
-    let reservations = db.list_reservations().await?;
-    let mut is_empty = false;
-    if reservations.is_empty() {
-        if smartnic_clients.clear_tables().await.is_err() {
-            return Err(Error::NotInitialized("failed to clear tables".into()));
-        } else {
-            is_empty = true;
-            info!("no active reservations - clearing tables")
+    if apply {
+        let (mut smartnic_clients, _) = build_smartnic_clients(config, 0).await?;
+        reservation
+            .apply_rules(&mut smartnic_clients, config)
+            .await?;
+    } else {
+        for rule in rules {
+            println!("table_add {rule}");
         }
     }
 
-    // Find first IPv4 and first IPv6 address in config.server.listen
-    let sync_addr_v4 = config.server.listen.iter().find(|a| a.is_ipv4()).cloned();
-    let sync_addr_v6 = config.server.listen.iter().find(|a| a.is_ipv6()).cloned();
+    Ok(())
+}
 
-    let mut manager = ReservationManager::new(
-        db.clone(),
-        smartnic_clients,
-        config.get_controller_duration()?,
-        config.get_controller_offset()?,
-        config.lb.mac_unicast.parse()?,
-        sync_addr_v4,
-        sync_addr_v6,
-    );
-    manager.initialize(is_empty).await?;
-    let manager_arc = Arc::new(Mutex::new(manager));
-
+fn build_server_futures(
+    db: Arc<LoadBalancerDB>,
+    manager_arc: Arc<Mutex<ReservationManager>>,
+    config: &mut Config,
+) -> Vec<impl std::future::Future<Output = Result<()>>> {
     let mut server_futures = Vec::new();
-
-    for addr in &config.server.listen {
+    for addr in config.server.listen.iter() {
         let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
         let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
         let svc = LoadBalancerServer::new(lb_service);
@@ -202,11 +142,80 @@ pub async fn start_server(config: Config) -> Result<()> {
             .fallback_service(rest_router)
             .layer(axum::middleware::from_fn(fix_connect_info));
 
-        let addr = *addr;
         let tls_config = config.server.tls.clone();
-        let server_future = serve_with_optional_tls(addr, app, tls_config);
+        let server_future = serve_with_optional_tls(*addr, app, tls_config);
         server_futures.push(server_future);
     }
+    server_futures
+}
+
+pub async fn start_server(config: &mut Config) -> Result<()> {
+    metrics::init_metrics();
+
+    let db = Arc::new(LoadBalancerDB::with_config(config).await?);
+
+    let cleanup_interval = parse_duration(&config.database.cleanup_interval)
+        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
+    let cleanup_age = parse_duration(&config.database.cleanup_age)
+        .map_err(|e| Error::Config(format!("Invalid cleanup age: {}", e)))?;
+    let db_cleanup = db.clone();
+    tokio::spawn(async move {
+        loop {
+            let cutoff = Utc::now() - chrono::Duration::from_std(cleanup_age).unwrap();
+            if let Err(e) = db_cleanup.cleanup_soft_deleted(cutoff).await {
+                error!("failed to cleanup soft deleted records: {}", e);
+            }
+            tokio::time::sleep(cleanup_interval).await;
+        }
+    });
+
+    let (mut smartnic_clients, mut cfg_clients) = build_smartnic_clients(config, -1).await?;
+
+    if config.lb.mac_unicast.is_none() {
+        if let Some(mac_addr) = smallest_mac_address(&mut cfg_clients).await? {
+            let mac_addr_str = mac_addr.to_string();
+            info!("configured unicast mac addr via sn-cfg: {mac_addr_str}");
+            config.lb.mac_unicast = Some(mac_addr_str);
+        } else {
+            panic!("sn-cfg returned no mac addresses and lb.mac_unicast was not configured");
+        }
+    }
+
+    auto_configure_smartnics(&mut cfg_clients).await?;
+
+    let reservations = db.list_reservations().await?;
+    let mut is_empty = false;
+    if reservations.is_empty() {
+        if smartnic_clients.clear_tables().await.is_err() {
+            return Err(Error::NotInitialized("failed to clear tables".into()));
+        } else {
+            is_empty = true;
+            info!("no active reservations - clearing tables")
+        }
+    }
+
+    // Find first IPv4 and first IPv6 address in config.server.listen
+    let sync_addr_v4 = config.server.listen.iter().find(|a| a.is_ipv4()).cloned();
+    let sync_addr_v6 = config.server.listen.iter().find(|a| a.is_ipv6()).cloned();
+
+    let mut manager = ReservationManager::new(
+        db.clone(),
+        smartnic_clients,
+        config.get_controller_duration()?,
+        config.get_controller_offset()?,
+        config
+            .lb
+            .mac_unicast
+            .as_ref()
+            .expect("no unicast mac address configured")
+            .parse()?,
+        sync_addr_v4,
+        sync_addr_v6,
+    );
+    manager.initialize(is_empty).await?;
+    let manager_arc = Arc::new(Mutex::new(manager));
+
+    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config);
 
     try_join_all(server_futures).await?;
 
@@ -244,7 +253,7 @@ async fn serve_with_optional_tls(
 }
 
 pub async fn start_mocked_server(
-    config: Config,
+    config: &mut Config,
     db_path: Option<std::path::PathBuf>,
 ) -> Result<()> {
     metrics::init_metrics();
@@ -305,7 +314,12 @@ pub async fn start_mocked_server(
         MultiSNP4Client::new(vec![sim_client]),
         config.get_controller_duration()?,
         config.get_controller_offset()?,
-        config.lb.mac_unicast.parse()?,
+        config
+            .lb
+            .mac_unicast
+            .as_ref()
+            .expect("no unicast mac address configured")
+            .parse()?,
         sync_addr_v4,
         sync_addr_v6,
     );
@@ -317,34 +331,7 @@ pub async fn start_mocked_server(
 
     trace!("initialized rules manager");
 
-    let mut server_futures = Vec::new();
-
-    for addr in &config.server.listen {
-        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
-        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
-        let svc = LoadBalancerServer::new(lb_service);
-
-        let grpc_path = format!(
-            "/{}/{{*grpc_service}}",
-            <LoadBalancerServer<LoadBalancerService> as tonic::server::NamedService>::NAME
-        );
-        let grpc_router = Router::new().route(&grpc_path, any_service(svc));
-
-        let rest_router = if config.rest.enable {
-            rest_endpoint_router(Arc::new(http_lb_service))
-        } else {
-            Router::new()
-        };
-
-        let app = grpc_router
-            .fallback_service(rest_router)
-            .layer(axum::middleware::from_fn(fix_connect_info));
-
-        let addr = *addr;
-        let tls_config = config.server.tls.clone();
-        let server_future = serve_with_optional_tls(addr, app, tls_config);
-        server_futures.push(server_future);
-    }
+    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config);
 
     try_join_all(server_futures).await?;
 

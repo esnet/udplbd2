@@ -106,7 +106,15 @@ impl StaticReservation {
                     .unicast_mac_address
                     .as_ref()
                     .map(|s| s.parse().unwrap())
-                    .unwrap_or_else(|| config.lb.mac_unicast.parse().unwrap()),
+                    .unwrap_or_else(|| {
+                        config
+                            .lb
+                            .mac_unicast
+                            .as_ref()
+                            .expect("no unicast mac address configured")
+                            .parse()
+                            .unwrap()
+                    }),
                 lb_config
                     .unicast_ipv4_address
                     .or(config.lb.instances[0].ipv4),
@@ -119,7 +127,13 @@ impl StaticReservation {
         } else {
             // Use first LB instance from config
             db.create_loadbalancer(
-                config.lb.mac_unicast.parse().unwrap(),
+                config
+                    .lb
+                    .mac_unicast
+                    .as_ref()
+                    .expect("no unicast mac address configured")
+                    .parse()
+                    .unwrap(),
                 config.lb.instances[0].ipv4,
                 config.lb.instances[0].ipv6,
                 0, // event_number_udp_port not used in static mode

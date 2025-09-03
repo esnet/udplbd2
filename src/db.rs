@@ -169,6 +169,8 @@ impl LoadBalancerDB {
                     config
                         .lb
                         .mac_unicast
+                        .as_ref()
+                        .expect("no unicast mac address configured")
                         .parse::<macaddr::MacAddr6>()
                         .map_err(|_| Error::Config("invalid mac address".into()))?,
                     ipv4,

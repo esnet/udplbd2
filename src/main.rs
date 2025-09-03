@@ -78,7 +78,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let config = Config::from_file(&cli.config)?;
+    let mut config = Config::from_file(&cli.config)?;
     let log_level = if cli.log_level.is_empty() {
         config.log.level.clone()
     } else {
@@ -86,26 +86,26 @@ async fn main() -> Result<()> {
     };
     setup_logging(&log_level)?;
     let _ = rustls::crypto::ring::default_provider().install_default();
-    cli_main(cli, config).await
+    cli_main(cli, &mut config).await
 }
 
-pub async fn cli_main(cli: Cli, config: Config) -> Result<()> {
+pub async fn cli_main(cli: Cli, config: &mut Config) -> Result<()> {
     match cli.command {
         Commands::Start => start_server(config).await?,
         Commands::Static {
             apply,
             reservation_file,
         } => {
-            apply_static_config(&config, reservation_file, apply).await?;
+            apply_static_config(config, reservation_file, apply).await?;
         }
         Commands::Mock { db } => {
             start_mocked_server(config, db).await?;
         }
         Commands::Client(api_cli) => {
-            api_cli.run(&config).await?;
+            api_cli.run(config).await?;
         }
         Commands::Dataplane(dp_cli) => {
-            dp_cli.run(&config).await?;
+            dp_cli.run(config).await?;
         }
     }
     Ok(())
@@ -153,10 +153,10 @@ mod test {
     async fn end_to_end() {
         setup_logging("debug").unwrap();
         tokio::spawn(async move {
-            let config = Config::turmoil();
+            let mut config = Config::turmoil();
             let cli = Cli::parse_from(vec!["udplbd", "mock", "--db", "/tmp/udplbd-test.db"]);
             let _ = std::fs::remove_file("/tmp/udplbd-test.db");
-            let result = cli_main(cli, config).await;
+            let result = cli_main(cli, &mut config).await;
             if let Err(e) = &result {
                 eprintln!("cli_main error: {e:?}");
                 panic!("mock server crashed");
@@ -182,7 +182,7 @@ mod test {
             "Timed out waiting for mock DP to listen on 127.0.0.1:19523"
         );
 
-        let config = Config::turmoil();
+        let mut config = Config::turmoil();
         let cli = Cli::parse_from(vec![
             "udplbd",
             "dataplane",
@@ -194,6 +194,6 @@ mod test {
             "-p",
             "33851",
         ]);
-        assert!(cli_main(cli, config).await.is_ok())
+        assert!(cli_main(cli, &mut config).await.is_ok())
     }
 }
