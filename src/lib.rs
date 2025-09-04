@@ -152,6 +152,18 @@ fn build_server_futures(
 pub async fn start_server(config: &mut Config) -> Result<()> {
     metrics::init_metrics();
 
+    let (mut smartnic_clients, mut cfg_clients) = build_smartnic_clients(config, -1).await?;
+
+    if config.lb.mac_unicast.is_none() {
+        if let Some(mac_addr) = smallest_mac_address(&mut cfg_clients).await? {
+            let mac_addr_str = mac_addr.to_string();
+            info!("configured unicast mac addr via sn-cfg: {mac_addr_str}");
+            config.lb.mac_unicast = Some(mac_addr_str);
+        } else {
+            panic!("sn-cfg returned no mac addresses and lb.mac_unicast was not configured");
+        }
+    }
+
     let db = Arc::new(LoadBalancerDB::with_config(config).await?);
 
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
@@ -168,18 +180,6 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
             tokio::time::sleep(cleanup_interval).await;
         }
     });
-
-    let (mut smartnic_clients, mut cfg_clients) = build_smartnic_clients(config, -1).await?;
-
-    if config.lb.mac_unicast.is_none() {
-        if let Some(mac_addr) = smallest_mac_address(&mut cfg_clients).await? {
-            let mac_addr_str = mac_addr.to_string();
-            info!("configured unicast mac addr via sn-cfg: {mac_addr_str}");
-            config.lb.mac_unicast = Some(mac_addr_str);
-        } else {
-            panic!("sn-cfg returned no mac addresses and lb.mac_unicast was not configured");
-        }
-    }
 
     auto_configure_smartnics(&mut cfg_clients).await?;
 
