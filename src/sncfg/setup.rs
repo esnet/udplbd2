@@ -8,6 +8,8 @@ use crate::proto::smartnic::cfg_v2::{
     SwitchIngressSelector, SwitchInterface,
 };
 use crate::sncfg::client::MultiSNCfgClient;
+use macaddr::MacAddr6;
+use std::str::FromStr;
 use tracing::{error, info};
 
 /// Automatically configure all SmartNIC FPGAs using the provided MultiSNCfgClient.
@@ -16,7 +18,7 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
     // Show device info
     // Gather device info for summary
     let device_infos = match clients.get_device_info().await {
-        Ok(devs) => devs.clone(),
+        Ok(devs) => devs,
         Err(e) => {
             error!("Failed to get device info: {:#?}", e);
             return Err(crate::errors::Error::Runtime(
@@ -145,4 +147,37 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
     info!("{}", summary);
 
     Ok(())
+}
+
+/// Returns the smallest MAC address from all sn-cfg clients.
+/// Returns None if no MAC addresses are found or if parsing fails for all.
+pub async fn smallest_mac_address(clients: &mut MultiSNCfgClient) -> Result<Option<MacAddr6>> {
+    // Get device info from all clients
+    let device_infos = match clients.get_device_info().await {
+        Ok(devs) => devs,
+        Err(e) => {
+            error!("Failed to get device info: {:#?}", e);
+            return Err(crate::errors::Error::Runtime(
+                "failed to get device info, check token?".to_string(),
+            ));
+        }
+    };
+
+    // Collect all MAC address strings from DeviceCardInfo
+    let mac_strs = device_infos
+        .iter()
+        .flat_map(|devs| devs.iter())
+        .filter_map(|dev| dev.card.as_ref())
+        .flat_map(|card| card.mac_addrs.iter())
+        .collect::<Vec<_>>();
+
+    // Parse all MAC addresses, filter out invalid ones
+    let mut macs: Vec<MacAddr6> = mac_strs
+        .iter()
+        .filter_map(|mac_str| MacAddr6::from_str(mac_str).ok())
+        .collect();
+
+    // Find the smallest MAC address
+    macs.sort();
+    Ok(macs.first().cloned())
 }

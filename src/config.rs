@@ -54,7 +54,7 @@ fn default_metrics_collector_interval() -> String {
 pub struct LoadBalancerConfig {
     pub instances: Vec<LoadBalancerInstanceConfig>,
     #[serde(rename = "mac_unicast")]
-    pub mac_unicast: String,
+    pub mac_unicast: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -213,7 +213,7 @@ impl Config {
                     ipv6: Some("::1".parse().unwrap()),
                     event_number_port: 19524,
                 }],
-                mac_unicast: "00:00:00:00:00:01".to_string(),
+                mac_unicast: Some("00:00:00:00:00:01".to_string()),
             },
             database: DatabaseConfig {
                 file: PathBuf::from("/tmp/udplbd-sim.db"),
@@ -286,8 +286,10 @@ impl Config {
 
     fn validate(&self) -> Result<(), ConfigError> {
         // Validate MAC addresses
-        if let Err(e) = self.lb.mac_unicast.parse::<MacAddr6>() {
-            return Err(ConfigError::Invalid(format!("Invalid unicast MAC: {e}")));
+        if let Some(mac_unicast) = &self.lb.mac_unicast {
+            if let Err(e) = mac_unicast.parse::<MacAddr6>() {
+                return Err(ConfigError::Invalid(format!("Invalid unicast MAC: {e}")));
+            }
         }
 
         // Validate that at least one of ipv4 or ipv6 is present for each instance

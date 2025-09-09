@@ -16,6 +16,7 @@ use crate::proto::loadbalancer::v1::{
     ListTokenPermissionsReply, ListTokenPermissionsRequest, RevokeTokenReply, RevokeTokenRequest,
     TokenDetails, TokenPermission, TokenSelector,
 };
+use crate::util::is_valid_dns_name;
 
 impl LoadBalancerService {
     async fn resolve_token(
@@ -65,6 +66,12 @@ impl LoadBalancerService {
         let parent_token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
         let request = request.into_inner();
+
+        // Validate DNS name
+        if !is_valid_dns_name(&request.name) {
+            return Err(Status::invalid_argument("Name must contain only valid DNS characters (letters, digits, hyphens, periods), and each label must start/end with a letter or digit"));
+        }
+
         let mut permissions = Vec::new();
         let permissions_for_log = request.permissions.clone();
 

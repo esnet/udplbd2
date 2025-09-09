@@ -11,6 +11,7 @@ use crate::proto::loadbalancer::v1::{
     DeregisterReply, DeregisterRequest, RegisterReply, RegisterRequest, SendStateReply,
     SendStateRequest,
 };
+use crate::util::is_valid_dns_name;
 
 impl LoadBalancerService {
     pub(crate) async fn handle_register(
@@ -41,6 +42,11 @@ impl LoadBalancerService {
                 reservation_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
+        }
+
+        // Validate DNS name
+        if !is_valid_dns_name(&request.name) {
+            return Err(Status::invalid_argument("Name must contain only valid DNS characters (letters, digits, hyphens, periods), and each label must start/end with a letter or digit"));
         }
 
         let addr = IpAddr::from_str(&request.ip_address)

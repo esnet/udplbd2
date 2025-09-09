@@ -1064,7 +1064,7 @@ impl MultiSNCfgClient {
         let futures: Vec<_> = self
             .clients
             .iter_mut()
-            .map(|client| client.set_module_gpio(mod_id, gpio.clone()))
+            .map(|client| client.set_module_gpio(mod_id, gpio))
             .collect();
 
         let results: Vec<Result<Vec<ModuleGpioResponse>, Status>> = join_all(futures).await;
@@ -1163,7 +1163,7 @@ impl MultiSNCfgClient {
         let futures: Vec<_> = self
             .clients
             .iter_mut()
-            .map(|client| client.set_port_config(port_id, config.clone()))
+            .map(|client| client.set_port_config(port_id, config))
             .collect();
 
         let results: Vec<Result<Vec<PortConfigResponse>, Status>> = join_all(futures).await;

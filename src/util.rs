@@ -4,6 +4,32 @@ use std::net::Ipv6Addr;
 
 use tracing::warn;
 
+/// Returns true if the name is a valid DNS name (letters, digits, hyphens, periods).
+/// - Each label must start and end with a letter or digit.
+/// - Labels are separated by periods.
+/// - No empty labels, no consecutive periods.
+/// - Hyphens allowed but not at start/end of label.
+pub fn is_valid_dns_name(name: &str) -> bool {
+    if name.is_empty() || name.len() > 253 {
+        return false;
+    }
+    for label in name.split('.') {
+        if label.is_empty() || label.len() > 63 {
+            return false;
+        }
+        let bytes = label.as_bytes();
+        if !bytes[0].is_ascii_alphanumeric() || !bytes[label.len() - 1].is_ascii_alphanumeric() {
+            return false;
+        }
+        for &b in bytes {
+            if !(b.is_ascii_alphanumeric() || b == b'-') {
+                return false;
+            }
+        }
+    }
+    true
+}
+
 /// Converts a 48-bit MAC address to its u64 representation.
 /// The MAC address is left-aligned in the resulting u64, with the remaining
 /// 16 most significant bits set to zero.
