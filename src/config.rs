@@ -3,6 +3,8 @@
 //! Clients commands will use this if `EJFAT_URI` is not otherwise provided.
 //!
 //! Typically instantiated using `serde_yaml`.
+pub mod cli;
+
 use macaddr::MacAddr6;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};

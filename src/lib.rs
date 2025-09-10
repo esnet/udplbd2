@@ -66,16 +66,20 @@ async fn build_smartnic_clients(
             client.clear_table_repeats = smartnic.clear_table_repeats;
             snp4_clients.push(client);
 
-            if let (Some(cfg_host), Some(cfg_port), Some(cfg_auth_token)) = (
-                &smartnic.cfg_host,
-                smartnic.cfg_port,
-                &smartnic.cfg_auth_token,
-            ) {
+            if let Some(cfg_auth_token) = &smartnic.cfg_auth_token {
                 let addr = format!(
                     "{}://{}:{}",
                     if smartnic.tls.enable { "https" } else { "http" },
-                    cfg_host,
-                    cfg_port
+                    if let Some(cfg_host) = &smartnic.cfg_host {
+                        cfg_host
+                    } else {
+                        &smartnic.host
+                    },
+                    if let Some(cfg_port) = smartnic.cfg_port {
+                        cfg_port
+                    } else {
+                        smartnic.port
+                    }
                 );
                 let client =
                     SNCfgClient::new(&addr, 0, smartnic.tls.verify, cfg_auth_token.clone()).await?;
