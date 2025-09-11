@@ -188,9 +188,9 @@ impl Sender {
         let mut packet_buffer =
             vec![0u8; self.mtu_size as usize - IP_HEADER_SIZE - UDP_HEADER_SIZE].into_boxed_slice();
         let mut packets_sent = 0;
-        let remaining = buffer.len() - offset;
 
         while offset < buffer.len() {
+            let remaining = buffer.len() - offset;
             let max_body_size = self.mtu_size as usize - TOTAL_HEADER_SIZE;
             let body_size = std::cmp::min(remaining, max_body_size);
             let total_packet_size = body_size + header_size;
