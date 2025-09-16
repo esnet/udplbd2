@@ -26,15 +26,16 @@ use udplbd::{
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
 pub struct Cli {
-    /// Path to the configuration file.
+    /// Path(s) to the configuration file(s). Multiple can be specified, or UDPLBD_CONFIG can be colon-separated.
     #[arg(
         short,
         long,
         value_name = "FILE",
         env = "UDPLBD_CONFIG",
-        default_value = "/etc/udplbd/config.yml"
+        default_value = "/etc/udplbd/config.yml",
+        value_delimiter = ':'
     )]
-    config: PathBuf,
+    config: Vec<PathBuf>,
 
     /// Log level.
     #[arg(long, value_name = "LEVEL", default_value = "")]
@@ -78,7 +79,7 @@ enum Commands {
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-    let mut config = Config::from_file(&cli.config)?;
+    let mut config = Config::from_files(&cli.config)?;
     let log_level = if cli.log_level.is_empty() {
         config.log.level.clone()
     } else {
