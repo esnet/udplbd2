@@ -627,7 +627,7 @@ mod tests {
             remote_timestamp: now.timestamp_millis(),
         };
         let offset = Duration::milliseconds(1000); // Predict 1 second in the future
-        let result = predict_epoch_boundary_from_samples(&[sample.clone()], offset);
+        let result = predict_epoch_boundary_from_samples(std::slice::from_ref(&sample), offset);
         // Should predict about 1100 (1000 + 100*1)
         assert!((result - 1100).abs() <= 2, "result: {result}");
     }

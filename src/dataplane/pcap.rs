@@ -217,19 +217,6 @@ impl fmt::Display for PcapReassemblyReport {
     }
 }
 
-/// PCAP Global Header
-#[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned)]
-#[repr(C, packed)]
-struct PcapGlobalHeader {
-    magic_number: u32,  // Magic number
-    version_major: u16, // Major version number
-    version_minor: u16, // Minor version number
-    thiszone: i32,      // GMT to local correction
-    sigfigs: u32,       // Accuracy of timestamps
-    snaplen: u32,       // Max length of captured packets
-    network: u32,       // Data link type
-}
-
 /// PCAP Packet Header
 #[derive(Debug, FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Copy, Clone)]
 #[repr(C, packed)]

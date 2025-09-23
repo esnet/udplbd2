@@ -105,7 +105,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let descriptor_file = out.join("descriptors.bin");
 
     // Compile SmartNIC protos
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
         .out_dir("src/proto/smartnic")
@@ -118,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         )?;
 
     // For future loadbalancer service protos
-    tonic_build::configure()
+    tonic_prost_build::configure()
         .build_client(true)
         .build_server(true)
         .out_dir("src/proto/loadbalancer")
