@@ -85,8 +85,7 @@ impl fmt::Display for TestOutput {
         let total_loss_pct = 100.0 - ((events_recieved as f64 / self.events_sent as f64) * 100.0);
         writeln!(
             f,
-            "total recv: {} (lost {}, {:.3}%)",
-            events_recieved, total_lost, total_loss_pct
+            "total recv: {events_recieved} (lost {total_lost}, {total_loss_pct:.3}%)"
         )?;
         Ok(())
     }

@@ -167,9 +167,9 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
     let db = Arc::new(LoadBalancerDB::with_config(config).await?);
 
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
-        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
+        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {e}")))?;
     let cleanup_age = parse_duration(&config.database.cleanup_age)
-        .map_err(|e| Error::Config(format!("Invalid cleanup age: {}", e)))?;
+        .map_err(|e| Error::Config(format!("Invalid cleanup age: {e}")))?;
     let db_cleanup = db.clone();
     tokio::spawn(async move {
         loop {
@@ -272,9 +272,9 @@ pub async fn start_mocked_server(
     let db = Arc::new(LoadBalancerDB::with_config(&sim_config).await?);
 
     let cleanup_interval = parse_duration(&config.database.cleanup_interval)
-        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {}", e)))?;
+        .map_err(|e| Error::Config(format!("Invalid cleanup interval: {e}")))?;
     let cleanup_age = parse_duration(&config.database.cleanup_age)
-        .map_err(|e| Error::Config(format!("Invalid cleanup age: {}", e)))?;
+        .map_err(|e| Error::Config(format!("Invalid cleanup age: {e}")))?;
     let db_cleanup = db.clone();
     tokio::spawn(async move {
         loop {

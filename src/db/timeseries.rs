@@ -37,7 +37,7 @@ impl LoadBalancerDB {
             | "total_event_enqueue_err"
             | "total_bytes_recv"
             | "total_packets_recv" => metric,
-            _ => return Err(Error::Usage(format!("Invalid session metric: {}", metric))),
+            _ => return Err(Error::Usage(format!("Invalid session metric: {metric}"))),
         };
 
         let session = sqlx::query!(
@@ -49,7 +49,7 @@ impl LoadBalancerDB {
         )
         .fetch_optional(&self.read_pool)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("Session {} not found", session_id)))?;
+        .ok_or_else(|| Error::NotFound(format!("Session {session_id} not found")))?;
 
         let ts_name = format!(
             "/lb/{}/reservation/{}/session/{}/{}",
@@ -57,11 +57,10 @@ impl LoadBalancerDB {
         );
         let since_ms = since.timestamp_millis();
         let query = format!(
-            "SELECT timestamp, CAST({} AS FLOAT) as value
+            "SELECT timestamp, CAST({column} AS FLOAT) as value
              FROM session_state
              WHERE session_id = ? AND timestamp >= ?
-             ORDER BY timestamp ASC",
-            column
+             ORDER BY timestamp ASC"
         );
         let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
             .bind(session_id)
@@ -89,8 +88,7 @@ impl LoadBalancerDB {
             "event_number" | "avg_event_rate_hz" => metric,
             _ => {
                 return Err(Error::Usage(format!(
-                    "Invalid event number metric: {}",
-                    metric
+                    "Invalid event number metric: {metric}"
                 )))
             }
         };
@@ -101,18 +99,17 @@ impl LoadBalancerDB {
         )
         .fetch_optional(&self.read_pool)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("Reservation {} not found", reservation_id)))?;
+        .ok_or_else(|| Error::NotFound(format!("Reservation {reservation_id} not found")))?;
         let ts_name = format!(
             "/lb/{}/reservation/{}/{}",
             reservation.loadbalancer_id, reservation_id, metric
         );
         let since_ms = since.timestamp_millis();
         let query = format!(
-            "SELECT local_timestamp as timestamp, CAST({} AS FLOAT) as value
+            "SELECT local_timestamp as timestamp, CAST({column} AS FLOAT) as value
              FROM event_number
              WHERE reservation_id = ? AND local_timestamp >= ?
-             ORDER BY local_timestamp ASC",
-            column
+             ORDER BY local_timestamp ASC"
         );
         let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
             .bind(reservation_id)
@@ -142,7 +139,7 @@ impl LoadBalancerDB {
         )
         .fetch_optional(&self.read_pool)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("Reservation {} not found", reservation_id)))?;
+        .ok_or_else(|| Error::NotFound(format!("Reservation {reservation_id} not found")))?;
         let ts_name = format!(
             "/lb/{}/reservation/{}/epoch/boundary_event",
             reservation.loadbalancer_id, reservation_id
@@ -182,7 +179,7 @@ impl LoadBalancerDB {
         )
         .fetch_optional(&self.read_pool)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("Session {} not found", session_id)))?;
+        .ok_or_else(|| Error::NotFound(format!("Session {session_id} not found")))?;
 
         let since_ms = since.timestamp_millis();
         let rows = sqlx::query!(
@@ -292,7 +289,7 @@ impl LoadBalancerDB {
         )
         .fetch_optional(&self.read_pool)
         .await?
-        .ok_or_else(|| Error::NotFound(format!("Reservation {} not found", reservation_id)))?;
+        .ok_or_else(|| Error::NotFound(format!("Reservation {reservation_id} not found")))?;
 
         for metric in ["event_number", "avg_event_rate_hz"].iter() {
             let ts = self

@@ -16,12 +16,12 @@ use tracing::trace;
 pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
     trace!("next_hop: called with ip={:?}", ip);
     let handle = Handle::new().map_err(|e| {
-        Error::CommandExecution(format!("Failed to initialize net_route handle: {}", e))
+        Error::CommandExecution(format!("Failed to initialize net_route handle: {e}"))
     })?;
     let routes = handle
         .list()
         .await
-        .map_err(|e| Error::CommandExecution(format!("Failed to fetch routes: {}", e)))?;
+        .map_err(|e| Error::CommandExecution(format!("Failed to fetch routes: {e}")))?;
 
     for route in routes {
         let dest_net = IpNetwork::new(route.destination, route.prefix)?;
@@ -56,17 +56,17 @@ async fn ping(ip: IpAddr) -> Result<()> {
 
     let socket = UdpSocket::bind(bind_addr).await.map_err(|e| {
         trace!("ping: failed to bind socket: {}", e);
-        Error::Network(format!("Failed to bind socket: {}", e))
+        Error::Network(format!("Failed to bind socket: {e}"))
     })?;
 
     socket.connect((ip, 33434)).await.map_err(|e| {
         trace!("ping: failed to connect socket: {}", e);
-        Error::Network(format!("Failed to connect socket: {}", e))
+        Error::Network(format!("Failed to connect socket: {e}"))
     })?;
 
     socket.send(b"ping").await.map_err(|e| {
         trace!("ping: failed to send ping: {}", e);
-        Error::Network(format!("Failed to send ping: {}", e))
+        Error::Network(format!("Failed to send ping: {e}"))
     })?;
 
     trace!("ping: sent ping to {:?}", ip);
@@ -78,7 +78,7 @@ pub async fn local_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
     trace!("local_mac: called with ip={:?}", ip);
     let (connection, handle, _) = new_connection().map_err(|e| {
         trace!("local_mac: failed to initialize rtnetlink: {}", e);
-        Error::CommandExecution(format!("Failed to initialize rtnetlink: {}", e))
+        Error::CommandExecution(format!("Failed to initialize rtnetlink: {e}"))
     })?;
     tokio::spawn(connection);
 
@@ -86,7 +86,7 @@ pub async fn local_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 
     while let Some(link) = links.try_next().await.map_err(|e| {
         trace!("local_mac: failed to fetch links: {}", e);
-        Error::CommandExecution(format!("Failed to fetch links: {}", e))
+        Error::CommandExecution(format!("Failed to fetch links: {e}"))
     })? {
         let link_index = link.header.index;
         trace!("local_mac: checking link index={}", link_index);
@@ -114,7 +114,7 @@ pub async fn local_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 
             while let Some(addr) = addrs.try_next().await.map_err(|e| {
                 trace!("local_mac: failed to fetch addresses: {}", e);
-                Error::CommandExecution(format!("Failed to fetch addresses: {}", e))
+                Error::CommandExecution(format!("Failed to fetch addresses: {e}"))
             })? {
                 for attr in &addr.attributes {
                     if let AddressAttribute::Address(interface_ip) = attr {
@@ -142,7 +142,7 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
     trace!("neighbor_mac: called with ip={:?}", ip);
     let (connection, handle, _) = new_connection().map_err(|e| {
         trace!("neighbor_mac: failed to initialize rtnetlink: {}", e);
-        Error::CommandExecution(format!("Failed to initialize rtnetlink: {}", e))
+        Error::CommandExecution(format!("Failed to initialize rtnetlink: {e}"))
     })?;
     tokio::spawn(connection);
 
@@ -157,7 +157,7 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 
     while let Some(neighbor) = neighbours.try_next().await.map_err(|e| {
         trace!("neighbor_mac: failed to fetch neighbors: {}", e);
-        Error::CommandExecution(format!("Failed to fetch neighbors: {}", e))
+        Error::CommandExecution(format!("Failed to fetch neighbors: {e}"))
     })? {
         if neighbor
             .attributes
@@ -233,7 +233,6 @@ pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
 
     trace!("get_mac_addr: could not find MAC address for {:?}", ip);
     Err(Error::MacAddressNotFound(format!(
-        "Could not find MAC address for {}",
-        ip
+        "Could not find MAC address for {ip}"
     )))
 }

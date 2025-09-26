@@ -124,7 +124,7 @@ where
 
     for addr_str in strs {
         let addr = addr_str.parse().map_err(|e| {
-            serde::de::Error::custom(format!("Invalid socket address '{}': {}", addr_str, e))
+            serde::de::Error::custom(format!("Invalid socket address '{addr_str}': {e}"))
         })?;
         addrs.push(addr);
     }
@@ -330,8 +330,7 @@ impl Config {
         for (i, inst) in self.lb.instances.iter().enumerate() {
             if inst.ipv4.is_none() && inst.ipv6.is_none() {
                 return Err(ConfigError::Invalid(format!(
-                    "LoadBalancer instance at index {} must have at least one of ipv4 or ipv6 specified",
-                    i
+                    "LoadBalancer instance at index {i} must have at least one of ipv4 or ipv6 specified"
                 )));
             }
         }
@@ -369,8 +368,7 @@ impl Config {
         for (i, nic) in self.smartnic.iter().enumerate() {
             if nic.cfg_host.is_none() || nic.cfg_port.is_none() || nic.cfg_auth_token.is_none() {
                 eprintln!(
-                    "Warning: SmartNIC at index {} will NOT be auto-configured (cfg_host, cfg_port, or cfg_auth_token missing). Dataplane statistics will be unavailable.",
-                    i
+                    "Warning: SmartNIC at index {i} will NOT be auto-configured (cfg_host, cfg_port, or cfg_auth_token missing). Dataplane statistics will be unavailable."
                 );
             }
         }

@@ -280,7 +280,7 @@ impl DataplaneCli {
                         args.lb,
                     )
                     .await?;
-                    println!("{}", output);
+                    println!("{output}");
                 } else {
                     let results = doctor_multi(
                         url.to_string(),
@@ -292,8 +292,8 @@ impl DataplaneCli {
                     .await;
                     for res in results {
                         match res {
-                            Ok(output) => println!("{}", output),
-                            Err(e) => eprintln!("doctor error: {}", e),
+                            Ok(output) => println!("{output}"),
+                            Err(e) => eprintln!("doctor error: {e}"),
                         }
                     }
                 }
@@ -309,7 +309,7 @@ impl DataplaneCli {
                     &meta_event_manager,
                 )
                 .await?;
-                println!("{}", output);
+                println!("{output}");
             }
             DataplaneCommand::Print(args) => {
                 print_udp_payloads(&args.address, args.port).await?;
@@ -340,7 +340,7 @@ impl DataplaneCli {
                 tokio::task::spawn(async move {
                     tokio::task::block_in_place(move || {
                         if let Err(e) = run_pcap_analysis(&file, lb) {
-                            eprintln!("pcap analysis failed: {}", e);
+                            eprintln!("pcap analysis failed: {e}");
                         }
                     });
                 });
@@ -349,11 +349,11 @@ impl DataplaneCli {
                 for ip_str in &args.ips {
                     match ip_str.parse::<IpAddr>() {
                         Ok(ip) => match get_mac_addr(ip).await {
-                            Ok(mac) => println!("{} -> {}", ip, mac),
-                            Err(e) => eprintln!("{} -> error: {}", ip, e),
+                            Ok(mac) => println!("{ip} -> {mac}"),
+                            Err(e) => eprintln!("{ip} -> error: {e}"),
                         },
                         Err(e) => {
-                            eprintln!("{} -> invalid IP address: {}", ip_str, e);
+                            eprintln!("{ip_str} -> invalid IP address: {e}");
                         }
                     }
                 }
@@ -387,7 +387,7 @@ pub async fn send_file(
         }
     };
 
-    println!("{}", packets_sent);
+    println!("{packets_sent}");
     Ok(())
 }
 
@@ -519,7 +519,7 @@ async fn process_event(
 
             while let Some(line) = lines.next_line().await? {
                 let prefixed_line = format!("{} | {}", event.tick, line);
-                println!("{}", prefixed_line);
+                println!("{prefixed_line}");
             }
             Ok::<(), io::Error>(())
         };
@@ -547,7 +547,7 @@ pub async fn process_events(
         tokio::spawn(async move {
             let tick = event.tick;
             if let Err(err) = process_event(event, subcommand_clone, output_dir_clone).await {
-                eprintln!("{} ! failed to process event: {}", tick, err);
+                eprintln!("{tick} ! failed to process event: {err}");
             } else if let Some(ctx) = context {
                 ctx.emit(MetaEventType::Complete { tick });
             }
@@ -559,7 +559,7 @@ pub async fn process_events(
 fn print_user_payload(payload: &[u8]) {
     print!("  ");
     for (i, &byte) in payload.iter().enumerate() {
-        print!("{:02X} ", byte);
+        print!("{byte:02X} ");
         if (i + 1) % 16 == 0 {
             print!("\n  ");
         }
@@ -599,7 +599,7 @@ pub fn parse_and_print_udp_payload(payload: &[u8]) {
 
 pub async fn print_udp_payloads(address: &str, port: u16) -> Result<()> {
     let socket = UdpSocket::bind((address, port)).await?;
-    println!("listening on {}:{}", address, port);
+    println!("listening on {address}:{port}");
 
     let mut buffer = vec![0u8; 65536];
     loop {
@@ -666,7 +666,7 @@ pub fn run_pcap_analysis<P: AsRef<Path>>(pcap_path: P, lb: bool) -> Result<()> {
     // Process the PCAP file and collect a report.
     let report: PcapReassemblyReport = reassemble_from_pcap(pcap_path, lb)?;
     // Print final statistics.
-    println!("{}", report);
+    println!("{report}");
 
     Ok(())
 }

@@ -169,7 +169,7 @@ impl StaticReservation {
                 &session
                     .name
                     .clone()
-                    .unwrap_or_else(|| format!("session-{}", i)),
+                    .unwrap_or_else(|| format!("session-{i}")),
                 session.weight,
                 std::net::SocketAddr::new(session.ip_address, session.udp_port),
                 session.port_range,

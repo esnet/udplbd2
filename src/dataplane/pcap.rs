@@ -126,7 +126,7 @@ impl fmt::Display for PcapReassemblyReport {
                     format!("from {src_addr} to {dst_addr} pcap_ts {ts} good")
                 }
                 PacketParseState::Incomplete { stage, error } => {
-                    format!("incompletely parsed at {:?}: {}", stage, error)
+                    format!("incompletely parsed at {stage:?}: {error}")
                 }
             }
         };
@@ -429,7 +429,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
         // Read packet data.
         let mut packet_data = vec![0u8; caplen];
         if let Err(e) = file.read_exact(&mut packet_data) {
-            errors.push(format!("Failed to read packet data: {}", e));
+            errors.push(format!("Failed to read packet data: {e}"));
             break;
         }
 
@@ -499,13 +499,13 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
                 let (ipv4_hdr, new_rem) = IPv4Header::ref_from_prefix(rem).map_err(|_| {
                     (
                         ParsingStage::IpHeader,
-                        format!("Packet {} too small for IPv4 header", packet_count),
+                        format!("Packet {packet_count} too small for IPv4 header"),
                     )
                 })?;
                 if ipv4_hdr.protocol() != 17 {
                     return Err((
                         ParsingStage::IpHeader,
-                        format!("Packet {} is not UDP", packet_count),
+                        format!("Packet {packet_count} is not UDP"),
                     ));
                 }
                 let header_len = ipv4_hdr.header_length();
@@ -531,13 +531,13 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
                 let (ipv6_hdr, new_rem) = IPv6Header::ref_from_prefix(rem).map_err(|_| {
                     (
                         ParsingStage::IpHeader,
-                        format!("Packet {} too small for IPv6 header", packet_count),
+                        format!("Packet {packet_count} too small for IPv6 header"),
                     )
                 })?;
                 if ipv6_hdr.protocol() != 17 {
                     return Err((
                         ParsingStage::IpHeader,
-                        format!("Packet {} is not UDP", packet_count),
+                        format!("Packet {packet_count} is not UDP"),
                     ));
                 }
                 rem = new_rem;
@@ -571,7 +571,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
             } else {
                 return Err((
                     ParsingStage::IpHeader,
-                    format!("Packet {}: Unknown IP version", packet_count),
+                    format!("Packet {packet_count}: Unknown IP version"),
                 ));
             };
 
@@ -579,7 +579,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
             let (udp, new_rem) = UdpHeader::ref_from_prefix(rem).map_err(|_| {
                 (
                     ParsingStage::UdpHeader,
-                    format!("Packet {} too small for UDP header", packet_count),
+                    format!("Packet {packet_count} too small for UDP header"),
                 )
             })?;
             rem = new_rem;
@@ -593,19 +593,19 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
                 if rem.len() < LB_HEADER_SIZE {
                     return Err((
                         ParsingStage::LBHeader,
-                        format!("Packet {} too small for LB header", packet_count),
+                        format!("Packet {packet_count} too small for LB header"),
                     ));
                 }
                 let (lb_hdr, new_rem) = LBHeader::ref_from_prefix(rem).map_err(|_| {
                     (
                         ParsingStage::LBHeader,
-                        format!("Failed to parse LB header in packet {}", packet_count),
+                        format!("Failed to parse LB header in packet {packet_count}"),
                     )
                 })?;
                 if !lb_hdr.is_valid() {
                     return Err((
                         ParsingStage::LBHeader,
-                        format!("Invalid LB header in packet {}", packet_count),
+                        format!("Invalid LB header in packet {packet_count}"),
                     ));
                 }
                 rem = new_rem;
@@ -635,8 +635,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
                     (
                         ParsingStage::ReassemblyHeader,
                         format!(
-                            "Failed to parse ReassemblyPayload from packet {}: {:?}",
-                            packet_count, e
+                            "Failed to parse ReassemblyPayload from packet {packet_count}: {e:?}"
                         ),
                     )
                 })?;
@@ -745,8 +744,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
         let header_offset = parsed_packet.reassembly_header_offset;
         if header_offset > packet_data.len() {
             errors.push(format!(
-                "Invalid reassembly header offset {} in packet {}",
-                header_offset, packet_count
+                "Invalid reassembly header offset {header_offset} in packet {packet_count}"
             ));
             continue;
         }
@@ -775,7 +773,7 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
                 );
             }
             Err(e) => {
-                let error_msg = format!("Reassembly error in packet {}: {}", packet_count, e);
+                let error_msg = format!("Reassembly error in packet {packet_count}: {e}");
                 trace!("{}", error_msg);
                 errors.push(error_msg);
                 let mut stats_guard = rt.block_on(stats.write());

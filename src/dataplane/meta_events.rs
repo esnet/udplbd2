@@ -104,7 +104,7 @@ fn format_event(event: &MetaEvent) -> String {
             format!("{control_signal},{},control", event.from)
         }
     };
-    format!("{timestamp},{}\n", event_type)
+    format!("{timestamp},{event_type}\n")
 }
 
 pub fn write_events_to_csv(

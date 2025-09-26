@@ -56,14 +56,14 @@ impl ControlPlaneClient {
 
         let channel = if parsed_url.tls_enabled {
             let tls_config = ClientTlsConfig::new().with_enabled_roots();
-            Channel::from_shared(format!("https://{}:{}", grpc_host, grpc_port))
+            Channel::from_shared(format!("https://{grpc_host}:{grpc_port}"))
                 .unwrap()
                 .tls_config(tls_config)
                 .unwrap()
                 .connect()
                 .await?
         } else {
-            Channel::from_shared(format!("http://{}:{}", grpc_host, grpc_port))
+            Channel::from_shared(format!("http://{grpc_host}:{grpc_port}"))
                 .unwrap()
                 .connect()
                 .await?
@@ -444,7 +444,7 @@ impl fmt::Display for EjfatUrl {
         // Build query parameters.
         let mut query_params = Vec::new();
         if let Some(sync_ip) = &self.sync_addr_v4 {
-            let mut sync_param = format!("sync={}", sync_ip);
+            let mut sync_param = format!("sync={sync_ip}");
             if let Some(sync_port) = self.sync_udp_port {
                 sync_param.push(':');
                 sync_param.push_str(&sync_port.to_string());
@@ -453,7 +453,7 @@ impl fmt::Display for EjfatUrl {
         }
         if let Some(sync_v6) = &self.sync_addr_v6 {
             if !sync_v6.is_empty() {
-                let mut sync_param = format!("sync=[{}]", sync_v6);
+                let mut sync_param = format!("sync=[{sync_v6}]");
                 if let Some(sync_port) = self.sync_udp_port {
                     sync_param.push(':');
                     sync_param.push_str(&sync_port.to_string());
@@ -479,7 +479,7 @@ impl fmt::Display for EjfatUrl {
             url.push('?');
             url.push_str(&query_params.join("&"));
         }
-        write!(f, "{}", url)
+        write!(f, "{url}")
     }
 }
 

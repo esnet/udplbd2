@@ -336,7 +336,7 @@ async fn list_token_permissions(url: String, token: Option<String>) -> Result<()
             };
 
             if perm.resource_id.is_empty() {
-                println!("  - {} {} (all resources)", permission, resource_type);
+                println!("  - {permission} {resource_type} (all resources)");
             } else {
                 println!(
                     "  - {} {} (id: {})",
@@ -379,7 +379,7 @@ async fn list_child_tokens(url: String) -> Result<()> {
             };
 
             if perm.resource_id.is_empty() {
-                println!("  - {} {} (all resources)", permission, resource_type);
+                println!("  - {permission} {resource_type} (all resources)");
             } else {
                 println!(
                     "  - {} {} (id: {})",
@@ -431,10 +431,10 @@ async fn overview_to_string(url: String) -> Result<String> {
             };
 
         output.push_str(&format!("LB {lb_id} - \"{name}\"\n"));
-        output.push_str(&format!("  sync: {}:{}\n", sync_ip, sync_port));
-        output.push_str(&format!("  ipv4: {}\n", data_ipv4));
-        output.push_str(&format!("  ipv6: {}\n", data_ipv6));
-        output.push_str(&format!("  fpga_lb_id: {}\n", fpga_lb_id));
+        output.push_str(&format!("  sync: {sync_ip}:{sync_port}\n"));
+        output.push_str(&format!("  ipv4: {data_ipv4}\n"));
+        output.push_str(&format!("  ipv6: {data_ipv6}\n"));
+        output.push_str(&format!("  fpga_lb_id: {fpga_lb_id}\n"));
 
         if let Some(status) = &lb.status {
             let expires = status
@@ -453,8 +453,8 @@ async fn overview_to_string(url: String) -> Result<String> {
                         .to_rfc3339()
                 })
                 .unwrap_or_else(|| "never".to_string());
-            output.push_str(&format!("  expires_at: {}\n", expires));
-            output.push_str(&format!("  status_time: {}\n", timestamp));
+            output.push_str(&format!("  expires_at: {expires}\n"));
+            output.push_str(&format!("  status_time: {timestamp}\n"));
             output.push_str(&format!("  current_epoch: {}\n", status.current_epoch));
             output.push_str(&format!(
                 "  predicted_event: {}\n",
@@ -488,7 +488,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                     "    fill_percent: {:.2}  control_signal: {:.2}\n",
                     worker.fill_percent, worker.control_signal
                 ));
-                output.push_str(&format!("    last_updated: {}\n", last_updated));
+                output.push_str(&format!("    last_updated: {last_updated}\n"));
                 output.push_str(&format!(
                     "    min_factor: {:.2}  max_factor: {:.2}  keep_lb_header: {}\n",
                     worker.min_factor, worker.max_factor, worker.keep_lb_header

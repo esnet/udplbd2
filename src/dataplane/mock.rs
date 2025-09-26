@@ -63,7 +63,7 @@ impl MockLoadBalancer {
             let socket = match UdpSocket::bind(addr).await {
                 Ok(s) => s,
                 Err(e) => {
-                    error!("failed to bind LB socket at {}: {}", addr, e);
+                    error!("failed to bind LB socket at {addr}: {e}");
                     return;
                 }
             };
@@ -99,8 +99,7 @@ impl MockLoadBalancer {
                         if let Some((payload, dst_addr)) = self.process_packet(data, &mut state) {
                             if let Err(e) = socket.send_to(&payload, dst_addr).await {
                                 error!(
-                                    "failed to forward packet: could not send to {}: {}",
-                                    dst_addr, e
+                                    "failed to forward packet: could not send to {dst_addr}: {e}"
                                 );
                             }
                         }
@@ -135,7 +134,7 @@ impl MockLoadBalancer {
         let lb_payload = match LBPayload::parse(data) {
             Some(payload) => payload,
             None => {
-                debug!("failed to parse LB payload from data: {:?}", data);
+                debug!("failed to parse LB payload from data: {data:?}");
                 return None;
             }
         };
@@ -244,8 +243,7 @@ impl MockLoadBalancer {
                 let epoch_rule = state.find_epoch_rule(self.lb_id, tick);
                 let slot_rule = state.find_slot_rule(self.lb_id, epoch, slot);
                 warn!(
-                    "mock dp: split event detected tick={} data_id={} first→{} now→{}; epoch_rule={:?}, slot_rule={:?}",
-                    tick, data_id, first_dest, dst_addr, epoch_rule, slot_rule
+                    "mock dp: split event detected tick={tick} data_id={data_id} first→{first_dest} now→{dst_addr}; epoch_rule={epoch_rule:?}, slot_rule={slot_rule:?}"
                 );
             }
             if remove {
@@ -377,7 +375,7 @@ impl MockDataplaneState {
                 // Create a new LB instance.
                 let lb =
                     MockLoadBalancer::new(r.set_lb_instance_id, r.set_src_ip_addr, shared.clone())
-                        .map_err(|e| Error::Config(format!("Failed to create LB: {}", e)))?;
+                        .map_err(|e| Error::Config(format!("Failed to create LB: {e}")))?;
                 let join_handle = lb.clone().start();
                 self.lb_instances.insert(r.set_src_ip_addr, lb);
                 self.lb_tasks.insert(r.set_src_ip_addr, join_handle);
@@ -465,12 +463,12 @@ impl MockDataplane {
         match op {
             BatchOperation::BopInsert => {
                 if let Err(e) = state.parse_rule_params(rule, self.state.clone()) {
-                    warn!("Failed to parse rule parameters: {}. Rule: {:?}", e, rule);
+                    warn!("Failed to parse rule parameters: {e}. Rule: {rule:?}");
                 }
             }
             BatchOperation::BopDelete => {
                 if let Err(e) = state.delete_rule(rule) {
-                    warn!("Failed to delete rule: {}", e);
+                    warn!("Failed to delete rule: {e}");
                 }
             }
             _ => {

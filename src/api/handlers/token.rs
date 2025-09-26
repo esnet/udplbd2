@@ -205,8 +205,7 @@ impl LoadBalancerService {
                     permission, resource, src
                 );
                 return Err(Status::permission_denied(format!(
-                    "Parent token does not have sufficient permission to grant {:?} on {:?}",
-                    permission, resource
+                    "Parent token does not have sufficient permission to grant {permission:?} on {resource:?}"
                 )));
             }
 

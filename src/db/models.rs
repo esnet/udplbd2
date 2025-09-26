@@ -109,7 +109,7 @@ impl std::str::FromStr for Resource {
                 .ok_or_else(|| "Missing load balancer id".to_string())
                 .and_then(|id| {
                     id.parse()
-                        .map_err(|_| format!("Invalid load balancer id: {}", id))
+                        .map_err(|_| format!("Invalid load balancer id: {id}"))
                         .map(Resource::LoadBalancer)
                 }),
             Some("res") => parts
@@ -117,7 +117,7 @@ impl std::str::FromStr for Resource {
                 .ok_or_else(|| "Missing reservation id".to_string())
                 .and_then(|id| {
                     id.parse()
-                        .map_err(|_| format!("Invalid reservation id: {}", id))
+                        .map_err(|_| format!("Invalid reservation id: {id}"))
                         .map(Resource::Reservation)
                 }),
             Some("ses") => parts
@@ -125,10 +125,10 @@ impl std::str::FromStr for Resource {
                 .ok_or_else(|| "Missing session id".to_string())
                 .and_then(|id| {
                     id.parse()
-                        .map_err(|_| format!("Invalid session id: {}", id))
+                        .map_err(|_| format!("Invalid session id: {id}"))
                         .map(Resource::Session)
                 }),
-            Some(unknown) => Err(format!("Unknown resource type: {}", unknown)),
+            Some(unknown) => Err(format!("Unknown resource type: {unknown}")),
             None => Err("Empty resource string".to_string()),
         }
     }
@@ -138,9 +138,9 @@ impl std::fmt::Display for Resource {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Resource::All => write!(f, "*"),
-            Resource::LoadBalancer(id) => write!(f, "lb:{}", id),
-            Resource::Reservation(id) => write!(f, "res:{}", id),
-            Resource::Session(id) => write!(f, "ses:{}", id),
+            Resource::LoadBalancer(id) => write!(f, "lb:{id}"),
+            Resource::Reservation(id) => write!(f, "res:{id}"),
+            Resource::Session(id) => write!(f, "ses:{id}"),
         }
     }
 }

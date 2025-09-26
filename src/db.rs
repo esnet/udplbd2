@@ -332,7 +332,7 @@ impl LoadBalancerDB {
             let mut tx = self.write_pool.begin().await.map_err(Error::Database)?;
 
             // 3d) ATTACH the archive DB under alias “archive”
-            let attach_sql = format!("ATTACH DATABASE '{}' AS archive", archive_path);
+            let attach_sql = format!("ATTACH DATABASE '{archive_path}' AS archive");
             sqlx::query(&attach_sql)
                 .execute(&mut *tx)
                 .await
@@ -350,11 +350,8 @@ impl LoadBalancerDB {
 
                 // 3e‐i) INSERT … SELECT into archive.<table>
                 let insert_sql = format!(
-                    "INSERT INTO archive.`{}` ({cols})
-                     SELECT {cols} FROM main.`{}` WHERE deleted_at < ?",
-                    table,
-                    table,
-                    cols = col_list
+                    "INSERT INTO archive.`{table}` ({col_list})
+                     SELECT {col_list} FROM main.`{table}` WHERE deleted_at < ?"
                 );
                 sqlx::query(&insert_sql)
                     .bind(older_than_ms)
@@ -363,7 +360,7 @@ impl LoadBalancerDB {
                     .map_err(Error::Database)?;
 
                 // 3e‐ii) DELETE from main.<table>
-                let delete_sql = format!("DELETE FROM `{}` WHERE deleted_at < ?", table);
+                let delete_sql = format!("DELETE FROM `{table}` WHERE deleted_at < ?");
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
                     .execute(&mut *tx)
@@ -379,11 +376,11 @@ impl LoadBalancerDB {
                 let col_list = &session_col_list;
                 let select_sql = format!(
                     r#"
-                    SELECT {cols} FROM `{}`
+                    SELECT {col_list} FROM `{session_table}`
                     WHERE created_at < ?
                       AND id NOT IN (
                         SELECT id FROM (
-                          SELECT id FROM `{}`
+                          SELECT id FROM `{session_table}`
                           WHERE session_id IN (
                             SELECT id FROM `session` WHERE deleted_at IS NULL
                           )
@@ -391,16 +388,10 @@ impl LoadBalancerDB {
                           LIMIT 5
                         )
                       )
-                    "#,
-                    session_table,
-                    session_table,
-                    cols = col_list
+                    "#
                 );
                 let insert_sql = format!(
-                    "INSERT INTO archive.`{}` ({cols}) {select}",
-                    session_table,
-                    cols = col_list,
-                    select = select_sql
+                    "INSERT INTO archive.`{session_table}` ({col_list}) {select_sql}"
                 );
                 sqlx::query(&insert_sql)
                     .bind(older_than_ms)
@@ -409,17 +400,16 @@ impl LoadBalancerDB {
                     .map_err(Error::Database)?;
 
                 let delete_sql = format!(
-                    "DELETE FROM `{}` WHERE created_at < ? AND id NOT IN (
+                    "DELETE FROM `{session_table}` WHERE created_at < ? AND id NOT IN (
                         SELECT id FROM (
-                            SELECT id FROM `{}`
+                            SELECT id FROM `{session_table}`
                             WHERE session_id IN (
                                 SELECT id FROM `session` WHERE deleted_at IS NULL
                             )
                             ORDER BY created_at DESC
                             LIMIT 5
                         )
-                      )",
-                    session_table, session_table
+                      )"
                 );
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
@@ -436,11 +426,11 @@ impl LoadBalancerDB {
                 let col_list = &event_col_list;
                 let select_sql = format!(
                     r#"
-                    SELECT {cols} FROM `{}`
+                    SELECT {col_list} FROM `{event_table}`
                     WHERE created_at < ?
                       AND id NOT IN (
                         SELECT id FROM (
-                          SELECT id FROM `{}`
+                          SELECT id FROM `{event_table}`
                           WHERE reservation_id IN (
                             SELECT id FROM `reservation` WHERE deleted_at IS NULL
                           )
@@ -448,16 +438,10 @@ impl LoadBalancerDB {
                           LIMIT 5
                         )
                       )
-                    "#,
-                    event_table,
-                    event_table,
-                    cols = col_list
+                    "#
                 );
                 let insert_sql = format!(
-                    "INSERT INTO archive.`{}` ({cols}) {select}",
-                    event_table,
-                    cols = col_list,
-                    select = select_sql
+                    "INSERT INTO archive.`{event_table}` ({col_list}) {select_sql}"
                 );
                 sqlx::query(&insert_sql)
                     .bind(older_than_ms)
@@ -466,17 +450,16 @@ impl LoadBalancerDB {
                     .map_err(Error::Database)?;
 
                 let delete_sql = format!(
-                    "DELETE FROM `{}` WHERE created_at < ? AND id NOT IN (
+                    "DELETE FROM `{event_table}` WHERE created_at < ? AND id NOT IN (
                         SELECT id FROM (
-                          SELECT id FROM `{}`
+                          SELECT id FROM `{event_table}`
                           WHERE reservation_id IN (
                             SELECT id FROM `reservation` WHERE deleted_at IS NULL
                           )
                           ORDER BY created_at DESC
                           LIMIT 5
                         )
-                      )",
-                    event_table, event_table
+                      )"
                 );
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
@@ -514,16 +497,16 @@ impl LoadBalancerDB {
                     .map_err(Error::Database)?;
                 let vacuum_duration_ms = vacuum_start.elapsed().as_millis();
                 // Compose summary log
-                let mut summary = format!("archived {} total rows", total_deleted);
+                let mut summary = format!("archived {total_deleted} total rows");
                 if !per_table.is_empty() {
                     let details: Vec<String> = per_table
                         .iter()
-                        .map(|(k, v)| format!("{} {}", v, k))
+                        .map(|(k, v)| format!("{v} {k}"))
                         .collect();
                     summary.push_str(&format!(" ({})", details.join(", ")));
                 }
                 summary.push_str(&format!(" in {}ms", op_start.elapsed().as_millis()));
-                summary.push_str(&format!(", VACUUM took {}ms", vacuum_duration_ms));
+                summary.push_str(&format!(", VACUUM took {vacuum_duration_ms}ms"));
                 info!("{}", summary);
             }
 
@@ -534,7 +517,7 @@ impl LoadBalancerDB {
         {
             // 4a) “deleted_at” tables
             for &table in &tables_with_deleted_at {
-                let delete_sql = format!("DELETE FROM `{}` WHERE deleted_at < ?", table);
+                let delete_sql = format!("DELETE FROM `{table}` WHERE deleted_at < ?");
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
                     .execute(&self.write_pool)
@@ -548,17 +531,16 @@ impl LoadBalancerDB {
             // 4b) Prune session_state
             {
                 let delete_sql = format!(
-                    "DELETE FROM `{}` WHERE created_at < ? AND id NOT IN (
+                    "DELETE FROM `{session_table}` WHERE created_at < ? AND id NOT IN (
                         SELECT id FROM (
-                            SELECT id FROM `{}`
+                            SELECT id FROM `{session_table}`
                             WHERE session_id IN (
                                 SELECT id FROM `session` WHERE deleted_at IS NULL
                             )
                             ORDER BY created_at DESC
                             LIMIT 5
                         )
-                      )",
-                    session_table, session_table
+                      )"
                 );
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
@@ -573,17 +555,16 @@ impl LoadBalancerDB {
             // 4c) Prune event_number
             {
                 let delete_sql = format!(
-                    "DELETE FROM `{}` WHERE created_at < ? AND id NOT IN (
+                    "DELETE FROM `{event_table}` WHERE created_at < ? AND id NOT IN (
                         SELECT id FROM (
-                          SELECT id FROM `{}`
+                          SELECT id FROM `{event_table}`
                           WHERE reservation_id IN (
                               SELECT id FROM `reservation` WHERE deleted_at IS NULL
                           )
                           ORDER BY created_at DESC
                           LIMIT 5
                         )
-                      )",
-                    event_table, event_table
+                      )"
                 );
                 let del_result = sqlx::query(&delete_sql)
                     .bind(older_than_ms)
@@ -604,16 +585,16 @@ impl LoadBalancerDB {
                     .map_err(Error::Database)?;
                 let vacuum_duration_ms = vacuum_start.elapsed().as_millis();
                 // Compose summary log
-                let mut summary = format!("deleted {} total rows (no archive)", total_deleted);
+                let mut summary = format!("deleted {total_deleted} total rows (no archive)");
                 if !per_table.is_empty() {
                     let details: Vec<String> = per_table
                         .iter()
-                        .map(|(k, v)| format!("{} {}", v, k))
+                        .map(|(k, v)| format!("{v} {k}"))
                         .collect();
                     summary.push_str(&format!(" ({})", details.join(", ")));
                 }
                 summary.push_str(&format!(" in {} ms", op_start.elapsed().as_millis()));
-                summary.push_str(&format!(", VACUUM took {} ms", vacuum_duration_ms));
+                summary.push_str(&format!(", VACUUM took {vacuum_duration_ms} ms"));
                 info!("{}", summary);
             }
 
@@ -641,7 +622,7 @@ impl TableMetadataCache {
             return Ok(cached.clone());
         }
 
-        let pragma_sql = format!("PRAGMA table_info(`{}`)", table);
+        let pragma_sql = format!("PRAGMA table_info(`{table}`)");
         let rows = sqlx::query(&pragma_sql)
             .fetch_all(pool)
             .await
