@@ -141,7 +141,7 @@ impl ApiCli {
                 let listen_addr = config.server.listen.first().ok_or(Error::Config(
                     "no listen address in server config".to_string(),
                 ))?;
-                format!("ejfat://{}@{}", config.server.auth_token, listen_addr)
+                format!("ejfat://{}@{listen_addr}", config.server.auth_token)
             }
         };
 
@@ -382,8 +382,8 @@ async fn list_child_tokens(url: String) -> Result<()> {
                 println!("  - {permission} {resource_type} (all resources)");
             } else {
                 println!(
-                    "  - {} {} (id: {})",
-                    permission, resource_type, perm.resource_id
+                    "  - {permission} {resource_type} (id: {})",
+                    perm.resource_id
                 );
             }
         }
@@ -467,7 +467,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                 ));
             }
             if !status.workers.is_empty() {
-                output.push_str("  workers:");
+                output.push_str("  workers:\n");
             }
             for worker in &status.workers {
                 let last_updated = worker
@@ -478,17 +478,16 @@ async fn overview_to_string(url: String) -> Result<String> {
                             .to_rfc3339()
                     })
                     .unwrap_or_else(|| "never".to_string());
-                output.push_str(&format!("  - worker: {}\n", worker.name));
+                output.push_str(&format!("  [ {} ]\n", worker.name));
+                output.push_str(&format!("    last_updated: {last_updated}\n"));
                 output.push_str(&format!(
                     "    ip: {}  port: {}  port_range: {:?}\n",
                     worker.ip_address, worker.udp_port, worker.port_range
                 ));
-                output.push_str(&format!("    slots_assigned: {}\n", worker.slots_assigned));
                 output.push_str(&format!(
-                    "    fill_percent: {:.2}  control_signal: {:.2}\n",
-                    worker.fill_percent, worker.control_signal
+                    "    slots_assigned: {}  fill_percent: {:.2}  control_signal: {:.2}\n",
+                    worker.slots_assigned, worker.fill_percent, worker.control_signal
                 ));
-                output.push_str(&format!("    last_updated: {last_updated}\n"));
                 output.push_str(&format!(
                     "    min_factor: {:.2}  max_factor: {:.2}  keep_lb_header: {}\n",
                     worker.min_factor, worker.max_factor, worker.keep_lb_header

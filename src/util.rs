@@ -9,7 +9,7 @@ use tracing::warn;
 /// - Labels are separated by periods.
 /// - No empty labels, no consecutive periods.
 /// - Hyphens allowed but not at start/end of label.
-pub fn is_valid_dns_name(name: &str) -> bool {
+pub fn is_valid_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 253 {
         return false;
     }

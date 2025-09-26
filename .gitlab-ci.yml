@@ -32,14 +32,6 @@ include:
 
 .build_environment:
   image: ghcr.io/rust-cross/cargo-zigbuild
-  cache:
-    key: "persistent-cache"
-    policy: pull-push
-    paths:
-      - /var/cache/apt/archives/
-      - target/
-      - .cargo/registry/
-      - .cargo/git/
   before_script:
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev sqlite3 libssl-dev musl-tools
     - cargo install sqlx-cli cargo-audit
@@ -54,7 +46,7 @@ build_udplbd:
     - cargo zigbuild --release --target x86_64-unknown-linux-musl
   artifacts:
     paths:
-      - target/$TARGET/release/udplbd
+      - target/x86_64-unknown-linux-musl/release/udplbd
     expire_in: 3 month
 
 build_docs:

@@ -109,7 +109,7 @@ pub struct RecvArgs {
     #[arg(long, default_value = "1500")]
     pub mtu: usize,
     /// Name of the backend.
-    #[arg(long, default_value = "default_hostname")]
+    #[arg(long, default_value = "unnamed")]
     pub name: String,
     /// Expect packets to still contain LB headers.
     #[arg(long)]
@@ -444,35 +444,34 @@ async fn receive_files(
         println!("export 'EJFAT_URI={parsed_url}'");
     }
 
-    let mut client = register(
-        url.clone(),
-        hostname,
-        1.0,
-        ip_address.clone(),
-        port,
-        PortRange::PortRange1,
-        min_factor,
-        max_factor,
-        with_lb_headers,
-    )
-    .await?;
+    let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
 
-    recieve_and_execute(
-        &mut client,
-        command,
-        output_dir,
-        set_point,
+    let mut offset = 0;
+    if with_lb_headers {
+        offset = size_of::<LBHeader>();
+    }
+
+    let receiver = Receiver::new(
+        &hostname,
+        ip_address,
+        port,
+        1.0,
+        mtu,
+        1_073_741_824,
         kp,
         ki,
         kd,
-        mtu,
-        ip_address,
-        port,
-        with_lb_headers,
-        max_concurrent_tasks,
+        set_point,
+        min_factor,
+        max_factor,
+        offset,
+        &mut client,
         None,
     )
-    .await;
+    .await
+    .unwrap();
+
+    process_events(receiver.rx, command, output_dir, max_concurrent_tasks, None).await;
 
     Ok(())
 }
@@ -606,58 +605,6 @@ pub async fn print_udp_payloads(address: &str, port: u16) -> Result<()> {
         let (size, _) = socket.recv_from(&mut buffer).await?;
         parse_and_print_udp_payload(&buffer[..size]);
     }
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn recieve_and_execute(
-    client: &mut ControlPlaneClient,
-    subcommand: Vec<String>,
-    output_dir: Option<String>,
-    set_point: usize,
-    kp: f64,
-    ki: f64,
-    kd: f64,
-    mtu: usize,
-    listener_ip: String,
-    listener_port: u16,
-    with_lb_headers: bool,
-    max_concurrent_tasks: usize,
-    meta_event_context: Option<MetaEventContext>,
-) {
-    let mut offset = 0;
-    if with_lb_headers {
-        offset = size_of::<LBHeader>();
-    }
-    let meta_event_context_clone = meta_event_context.clone();
-
-    let receiver = Receiver::new(
-        "udplbd-executor",
-        listener_ip,
-        listener_port,
-        1.0,
-        mtu,
-        1_073_741_824,
-        kp,
-        ki,
-        kd,
-        set_point,
-        0.0,
-        0.0,
-        offset,
-        client,
-        meta_event_context_clone,
-    )
-    .await
-    .unwrap();
-
-    process_events(
-        receiver.rx,
-        subcommand,
-        output_dir,
-        max_concurrent_tasks,
-        meta_event_context,
-    )
-    .await;
 }
 
 /// Run a PCAP analysis by processing the given file, then print any errors and incomplete events.
