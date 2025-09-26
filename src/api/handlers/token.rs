@@ -67,9 +67,8 @@ impl LoadBalancerService {
         let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
-        // Validate DNS name
         if !is_valid_name(&request.name) {
-            return Err(Status::invalid_argument("Name must contain only valid DNS characters (letters, digits, hyphens, periods), and each label must start/end with a letter or digit"));
+            return Err(Status::invalid_argument("Name must contain only alphanumeric characters plus '.' ':' '/' '_' '-', and two periods may not follow each other"));
         }
 
         let mut permissions = Vec::new();

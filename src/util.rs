@@ -4,11 +4,13 @@ use std::net::Ipv6Addr;
 
 use tracing::warn;
 
-/// Returns true if the name is a valid DNS name (letters, digits, hyphens, periods).
+/// Returns true if the name is a valid DNS name (letters, digits, hyphens, periods) plus slashes, underscores, colons
 /// - Each label must start and end with a letter or digit.
 /// - Labels are separated by periods.
 /// - No empty labels, no consecutive periods.
 /// - Hyphens allowed but not at start/end of label.
+/// - Slashes and colons to enable different names for mutiple processes on the same host (e.g. /1 or :port)
+/// - Underscores allowed for backwards compatibility
 pub fn is_valid_name(name: &str) -> bool {
     if name.is_empty() || name.len() > 253 {
         return false;
@@ -22,7 +24,7 @@ pub fn is_valid_name(name: &str) -> bool {
             return false;
         }
         for &b in bytes {
-            if !(b.is_ascii_alphanumeric() || b == b'-') {
+            if !(b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b':' || b == b'/') {
                 return false;
             }
         }
