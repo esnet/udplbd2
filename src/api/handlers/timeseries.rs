@@ -175,7 +175,7 @@ impl LoadBalancerService {
             .db
             .get_token_details(token)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get token details: {e}")))?;
+            .map_err(|e| Status::permission_denied(format!("permission denied: {e}")))?;
         let mut allowed_patterns = Vec::new();
         if token_details
             .as_ref()
@@ -241,7 +241,7 @@ impl LoadBalancerService {
             .db
             .get_token_details(token)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get token details: {e}")))?;
+            .map_err(|e| Status::permission_denied(format!("permission denied: {e}")))?;
         if token_details
             .as_ref()
             .map(|td| {
