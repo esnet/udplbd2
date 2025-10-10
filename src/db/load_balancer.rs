@@ -20,7 +20,6 @@ impl LoadBalancerDB {
         for lb in active_loadbalancers {
             used_ids.insert(lb.fpga_lb_id as u16);
         }
-
         for fpga_lb_id in 0..8u16 {
             if !used_ids.contains(&fpga_lb_id) {
                 return Ok(fpga_lb_id);
@@ -280,6 +279,40 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
         })
+    }
+
+    /// Sets slot demands for a reservation, replacing all previous demands.
+    /// slot_demands: Vec of (session_id, slot_index, slot_length)
+    pub async fn set_slot_demands(
+        &self,
+        reservation_id: i64,
+        slot_demands: Vec<(Option<i64>, i32, u32)>,
+    ) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Mark all previous slot demands as deleted
+        sqlx::query!(
+            "UPDATE slot_demand SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Insert new slot demands
+        for (session_id, slot_index, slot_length) in slot_demands {
+            sqlx::query!(
+        "INSERT INTO slot_demand (reservation_id, session_id, slot_index, slot_length, created_at) VALUES (?1, ?2, ?3, ?4, unixepoch('subsec') * 1000)",
+        reservation_id,
+        session_id,
+        slot_index,
+        slot_length
+    )
+    .execute(&mut *tx)
+    .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Soft deletes a loadbalancer by ID.

@@ -337,6 +337,7 @@ impl PortRange {
 pub enum FrameType {
     Ethernet,
     Loopback,
+    IpOnly,
     Unknown,
 }
 
@@ -380,6 +381,12 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
     if magic != PCAP_MAGIC && magic != PCAP_MAGIC_SWAPPED {
         return Err(Error::Parse("Invalid PCAP magic number".to_string()));
     }
+    // Parse linktype from global header (offset 20, 4 bytes)
+    let linktype = if swap_endian {
+        u32::from_be_bytes(global_header_buf[20..24].try_into().unwrap())
+    } else {
+        u32::from_le_bytes(global_header_buf[20..24].try_into().unwrap())
+    };
 
     // Create a Tokio runtime for reassembler operations.
     let rt = Runtime::new()?;
@@ -444,55 +451,82 @@ pub fn reassemble_from_pcap_with_reassemblers<P: AsRef<Path>>(
             // Start with the full packet_data slice.
             let mut rem = &packet_data[..];
 
-            // --- Ethernet or Loopback Frame Header ---
-            let (mut frame_type, mut ip_version) =
-                if let Ok((eth_hdr, new_rem)) = EthernetHeader::ref_from_prefix(rem) {
-                    let ether_type = u16::from_be(eth_hdr.ether_type);
-                    rem = new_rem;
-                    if ether_type == 0x0800 || ether_type == 0x86DD {
-                        (
-                            FrameType::Ethernet,
-                            if ether_type == 0x0800 {
-                                IpVersion::IPv4
-                            } else {
-                                IpVersion::IPv6
-                            },
-                        )
-                    } else {
-                        (FrameType::Unknown, IpVersion::Unknown)
-                    }
-                } else {
-                    (FrameType::Unknown, IpVersion::Unknown)
-                };
-
-            if let FrameType::Unknown = frame_type {
-                if let Ok((lb_hdr, new_rem)) = LoopbackHeader::ref_from_prefix(rem) {
-                    let family = if swap_endian {
-                        u32::from_be(lb_hdr.family)
-                    } else {
-                        u32::from_le(lb_hdr.family)
-                    };
-                    rem = new_rem;
-                    if family == 2 || family == 30 {
-                        frame_type = FrameType::Loopback;
-                        ip_version = if family == 2 {
-                            IpVersion::IPv4
+            // --- Select frame type based on linktype ---
+            let (frame_type, ip_version) = match linktype {
+                1 => {
+                    // DLT_EN10MB (Ethernet)
+                    if let Ok((eth_hdr, new_rem)) = EthernetHeader::ref_from_prefix(rem) {
+                        let ether_type = u16::from_be(eth_hdr.ether_type);
+                        rem = new_rem;
+                        if ether_type == 0x0800 {
+                            (FrameType::Ethernet, IpVersion::IPv4)
+                        } else if ether_type == 0x86DD {
+                            (FrameType::Ethernet, IpVersion::IPv6)
                         } else {
-                            IpVersion::IPv6
-                        };
+                            (FrameType::Ethernet, IpVersion::Unknown)
+                        }
                     } else {
                         return Err((
                             ParsingStage::FrameHeader,
-                            "Unknown address family in Loopback header".to_string(),
+                            "Packet too small for Ethernet header".to_string(),
                         ));
                     }
-                } else {
+                }
+                0 | 108 => {
+                    // DLT_NULL or DLT_LOOP (Loopback)
+                    if let Ok((lb_hdr, new_rem)) = LoopbackHeader::ref_from_prefix(rem) {
+                        let family = if swap_endian {
+                            u32::from_be(lb_hdr.family)
+                        } else {
+                            u32::from_le(lb_hdr.family)
+                        };
+                        rem = new_rem;
+                        if family == 2 {
+                            (FrameType::Loopback, IpVersion::IPv4)
+                        } else if family == 30 {
+                            (FrameType::Loopback, IpVersion::IPv6)
+                        } else {
+                            return Err((
+                                ParsingStage::FrameHeader,
+                                format!("Unknown address family in Loopback header: {}", family),
+                            ));
+                        }
+                    } else {
+                        return Err((
+                            ParsingStage::FrameHeader,
+                            "Packet too small for Loopback header".to_string(),
+                        ));
+                    }
+                }
+                101 => {
+                    // DLT_RAW (IP-only)
+                    // Try to parse as IPv4 or IPv6 based on first byte
+                    if rem.len() >= std::mem::size_of::<IPv4Header>() {
+                        let version = rem[0] >> 4;
+                        if version == 4 {
+                            (FrameType::IpOnly, IpVersion::IPv4)
+                        } else if version == 6 && rem.len() >= std::mem::size_of::<IPv6Header>() {
+                            (FrameType::IpOnly, IpVersion::IPv6)
+                        } else {
+                            return Err((
+                                ParsingStage::FrameHeader,
+                                "DLT_RAW: Packet does not start with a valid IP header".to_string(),
+                            ));
+                        }
+                    } else {
+                        return Err((
+                            ParsingStage::FrameHeader,
+                            "DLT_RAW: Packet too small for IP header".to_string(),
+                        ));
+                    }
+                }
+                _ => {
                     return Err((
                         ParsingStage::FrameHeader,
-                        "Packet too small for any frame header".to_string(),
+                        format!("Unsupported linktype: {}", linktype),
                     ));
                 }
-            }
+            };
 
             // --- IP Header ---
             let (src_ip, dst_ip) = if ip_version == IpVersion::IPv4 {

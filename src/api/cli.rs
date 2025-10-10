@@ -87,6 +87,12 @@ pub struct ReserveArgs {
     /// Duration offset for reservation expiration (e.g., "1hour 30min 2s").
     #[arg(long)]
     pub after: Option<String>,
+    /// Slot assignment strategy: 'dynamic', 'static', or 'explicit'
+    #[arg(long, value_name = "STRATEGY", default_value = "dynamic")]
+    pub strategy: String,
+    /// IP family to use: 'dualstack', 'ipv4', or 'ipv6'.
+    #[arg(long, value_name = "IP_FAMILY", default_value = "dualstack")]
+    pub ip_family: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -200,7 +206,29 @@ impl ApiCli {
                         ))
                     }
                 };
-                reserve_lb(url, args.name.clone(), expiration, args.sender.clone()).await?;
+
+                // Parse ip_family string to enum
+                let ip_family = match args.ip_family.to_lowercase().as_str() {
+                    "dualstack" => crate::proto::loadbalancer::v1::IpFamily::DualStack,
+                    "ipv4" => crate::proto::loadbalancer::v1::IpFamily::Ipv4,
+                    "ipv6" => crate::proto::loadbalancer::v1::IpFamily::Ipv6,
+                    other => {
+                        return Err(Error::Usage(format!(
+                            "Invalid ip_family: {}. Options are: dualstack, ipv4, ipv6",
+                            other
+                        )))
+                    }
+                };
+
+                reserve_lb(
+                    url,
+                    args.name.clone(),
+                    expiration,
+                    args.sender.clone(),
+                    ip_family,
+                    args.strategy.clone(),
+                )
+                .await?;
             }
             ApiCommand::Tokens { action } => match action {
                 TokensCommand::Create(args) => {
@@ -233,16 +261,13 @@ async fn reserve_lb(
     name: String,
     until: Option<Timestamp>,
     sender_addresses: Vec<String>,
+    ip_family: crate::proto::loadbalancer::v1::IpFamily,
+    strategy: String,
 ) -> Result<()> {
     let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
     let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
     let reply = client
-        .reserve_load_balancer(
-            name,
-            until,
-            sender_addresses,
-            crate::proto::loadbalancer::v1::IpFamily::DualStack,
-        )
+        .reserve_load_balancer(name, until, sender_addresses, ip_family, strategy)
         .await?
         .into_inner();
     parsed_url.update_from_reservation(&reply);
@@ -407,7 +432,7 @@ async fn overview_to_string(url: String) -> Result<String> {
         return Ok("No load balancers currently active".to_string());
     }
     for lb in reply.load_balancers {
-        let (lb_id, name, sync_ip, sync_port, data_ipv4, data_ipv6, fpga_lb_id) =
+        let (lb_id, name, sync_ip, sync_port, data_ipv4, data_ipv6, fpga_lb_id, strategy) =
             if let Some(res) = &lb.reservation {
                 (
                     res.lb_id.clone(),
@@ -417,6 +442,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                     res.data_ipv4_address.clone(),
                     res.data_ipv6_address.clone(),
                     res.fpga_lb_id,
+                    res.strategy.clone(),
                 )
             } else {
                 (
@@ -427,6 +453,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                     "".to_string(),
                     "".to_string(),
                     0,
+                    "unreserved".to_string(),
                 )
             };
 
@@ -435,6 +462,7 @@ async fn overview_to_string(url: String) -> Result<String> {
         output.push_str(&format!("  ipv4: {data_ipv4}\n"));
         output.push_str(&format!("  ipv6: {data_ipv6}\n"));
         output.push_str(&format!("  fpga_lb_id: {fpga_lb_id}\n"));
+        output.push_str(&format!("  strategy: {strategy}\n"));
 
         if let Some(status) = &lb.status {
             let expires = status

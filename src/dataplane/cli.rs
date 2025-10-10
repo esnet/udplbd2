@@ -22,7 +22,6 @@ use crate::dataplane::protocol::{
 use crate::dataplane::sender::Sender;
 use crate::dataplane::tester;
 use crate::errors::{Error, Result};
-use crate::proto::loadbalancer::v1::PortRange;
 
 use crate::dataplane::meta_events::MetaEventType;
 use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
@@ -123,6 +122,9 @@ pub struct RecvArgs {
     /// Number of worker threads.
     #[arg(short, long, default_value = "4")]
     pub threads: usize,
+    /// Slot demands for receiver, e.g. --slots 0-128 --slots auto:128
+    #[arg(long = "slots", value_name = "SLOT_DEMAND", num_args = 0.., value_delimiter = ' ', required = false)]
+    pub slots: Vec<String>,
     /// Command and its arguments to run on each received file.
     #[arg(last = true)]
     pub command: Vec<String>,
@@ -244,6 +246,8 @@ impl DataplaneCli {
 
         match &self.command {
             DataplaneCommand::Recv(args) => {
+                // Parse slot demands
+                let slot_demands = parse_slot_demands(&args.slots)?;
                 receive_files(
                     url.to_string(),
                     args.name.clone(),
@@ -260,6 +264,7 @@ impl DataplaneCli {
                     args.minf,
                     args.maxf,
                     args.threads,
+                    slot_demands,
                 )
                 .await?;
             }
@@ -307,6 +312,7 @@ impl DataplaneCli {
                     ip_addr,
                     args.port,
                     &meta_event_manager,
+                    "dynamic".to_string(), // TODO: support additional strategies
                 )
                 .await?;
                 println!("{output}");
@@ -392,35 +398,6 @@ pub async fn send_file(
 }
 
 #[allow(clippy::too_many_arguments)]
-pub async fn register(
-    url: String,
-    hostname: String,
-    weight: f32,
-    ip_address: String,
-    port: u16,
-    port_range: PortRange,
-    min_factor: f32,
-    max_factor: f32,
-    keep_lb_header: bool,
-) -> Result<ControlPlaneClient> {
-    let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
-    client
-        .register(
-            hostname.to_string(),
-            weight,
-            ip_address.to_string(),
-            port,
-            port_range,
-            min_factor,
-            max_factor,
-            keep_lb_header,
-        )
-        .await?
-        .into_inner();
-    Ok(client)
-}
-
-#[allow(clippy::too_many_arguments)]
 async fn receive_files(
     url: String,
     hostname: String,
@@ -437,6 +414,7 @@ async fn receive_files(
     min_factor: f32,
     max_factor: f32,
     max_concurrent_tasks: usize,
+    slot_demands: Vec<crate::proto::loadbalancer::v1::SlotRange>,
 ) -> Result<()> {
     if with_lb_headers {
         let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
@@ -467,6 +445,7 @@ async fn receive_files(
         offset,
         &mut client,
         None,
+        slot_demands,
     )
     .await
     .unwrap();
@@ -527,6 +506,40 @@ async fn process_event(
         read_res?;
     }
     Ok(())
+}
+
+// Parse slot demand strings like "0-128" or "auto:128" into SlotRange
+fn parse_slot_demands(args: &[String]) -> Result<Vec<crate::proto::loadbalancer::v1::SlotRange>> {
+    let mut slot_ranges = Vec::new();
+    for arg in args {
+        let arg = arg.trim();
+        if let Some(len_str) = arg.strip_prefix("auto:") {
+            // auto:128
+            let length: u32 = len_str
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid auto slot length: {arg}")))?;
+            slot_ranges.push(crate::proto::loadbalancer::v1::SlotRange { index: -1, length });
+        } else if let Some((start, end)) = arg.split_once('-') {
+            // 0-128
+            let index: i32 = start
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid slot index: {arg}")))?;
+            let end: u32 = end
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid slot end: {arg}")))?;
+            let length = if end > index as u32 {
+                end - index as u32
+            } else {
+                return Err(Error::Usage(format!(
+                    "End must be greater than start in slot range: {arg}"
+                )));
+            };
+            slot_ranges.push(crate::proto::loadbalancer::v1::SlotRange { index, length });
+        } else {
+            return Err(Error::Usage(format!("Invalid slot demand format: {arg}")));
+        }
+    }
+    Ok(slot_ranges)
 }
 
 pub async fn process_events(

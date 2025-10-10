@@ -111,12 +111,20 @@ impl LoadBalancerService {
             None => Duration::days(365).to_std().unwrap(), // Default to 1 year
         };
 
+        // Determine strategy
+        let strategy = if request.strategy.is_empty() {
+            "dynamic".to_string()
+        } else {
+            request.strategy.clone()
+        };
+
         let reservation = self
             .db
-            .create_reservation(
+            .create_reservation_with_strategy(
                 lb.id,
                 &request.name,
                 chrono::Duration::from_std(duration).unwrap(),
+                &strategy,
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to create reservation: {e}")))?;
@@ -203,6 +211,7 @@ impl LoadBalancerService {
             fpga_lb_id: lb.fpga_lb_id as u32,
             data_min_port,
             data_max_port,
+            strategy: reservation.strategy,
         }))
     }
 
@@ -289,6 +298,11 @@ impl LoadBalancerService {
             fpga_lb_id: lb.fpga_lb_id as u32,
             data_min_port,
             data_max_port,
+            strategy: if reservation.strategy.is_empty() {
+                "dynamic".to_string()
+            } else {
+                reservation.strategy.clone()
+            },
         }))
     }
 
@@ -394,6 +408,8 @@ impl LoadBalancerService {
                     as i64,
                 total_bytes_recv: state.as_ref().map_or(0, |s| s.total_bytes_recv) as i64,
                 total_packets_recv: state.as_ref().map_or(0, |s| s.total_packets_recv) as i64,
+                slot_demands: Vec::new(), // TODO: fetch from database
+                slots: Vec::new(),        // TODO: use latest epoch data
             });
         }
 
@@ -406,7 +422,62 @@ impl LoadBalancerService {
             expires_at: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
                 reservation.reserved_until,
             ))),
+            slot_resolution: 512,
         }))
+    }
+
+    pub async fn handle_set_slot_demands(
+        &self,
+        request: tonic::Request<crate::proto::loadbalancer::v1::SetSlotDemandsRequest>,
+    ) -> std::result::Result<
+        tonic::Response<crate::proto::loadbalancer::v1::SetSlotDemandsReply>,
+        tonic::Status,
+    > {
+        let req = request.into_inner();
+        let lb_id = req
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| tonic::Status::invalid_argument("Invalid lbId"))?;
+
+        // Gather all slot demands
+        let mut slot_demands = Vec::new();
+        for session_slot_ranges in &req.slot_constraints {
+            let session_id = if session_slot_ranges.session_id.is_empty() {
+                None
+            } else {
+                Some(
+                    session_slot_ranges
+                        .session_id
+                        .parse::<i64>()
+                        .map_err(|_| tonic::Status::invalid_argument("Invalid sessionId"))?,
+                )
+            };
+            for slot in &session_slot_ranges.slots {
+                slot_demands.push((session_id, slot.index, slot.length));
+            }
+        }
+
+        // Update slot demands in DB
+        self.db
+            .set_slot_demands(lb_id, slot_demands)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to set slot demands: {e}")))?;
+
+        // If any slot demands are set, update reservation strategy to "static"
+        if !req.slot_constraints.is_empty() {
+            sqlx::query!(
+                "UPDATE reservation SET strategy = ?1 WHERE id = ?2",
+                "static",
+                lb_id
+            )
+            .execute(&self.db.write_pool)
+            .await
+            .map_err(|e| tonic::Status::internal(format!("Failed to update strategy: {e}")))?;
+        }
+
+        Ok(tonic::Response::new(
+            crate::proto::loadbalancer::v1::SetSlotDemandsReply {},
+        ))
     }
 
     pub(crate) async fn handle_free_load_balancer(

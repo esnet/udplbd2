@@ -27,6 +27,7 @@ pub struct Reservation {
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
     pub current_epoch: i64,
+    pub strategy: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

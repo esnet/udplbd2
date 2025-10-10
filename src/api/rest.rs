@@ -312,6 +312,7 @@ struct ReserveLoadBalancerBody {
     until: Option<String>,
     sender_addresses: Vec<String>,
     ip_family: Option<String>,
+    strategy: Option<String>,
 }
 
 async fn reserve_load_balancer_handler(
@@ -362,6 +363,7 @@ async fn reserve_load_balancer_handler(
         until: until_timestamp,
         sender_addresses: body.sender_addresses,
         ip_family: ip_family.into(),
+        strategy: body.strategy.unwrap_or_else(|| "dynamic".to_string()),
     };
     grpc_to_rest(
         headers,
@@ -476,6 +478,7 @@ struct RegisterBody {
     min_factor: f32,
     max_factor: f32,
     keep_lb_header: bool,
+    slot_demands: Option<Vec<crate::proto::loadbalancer::v1::SlotRange>>,
 }
 
 async fn register_handler(
@@ -498,6 +501,7 @@ async fn register_handler(
             min_factor: body.min_factor,
             max_factor: body.max_factor,
             keep_lb_header: body.keep_lb_header,
+            slot_demands: body.slot_demands.unwrap_or_default(),
         },
         Some(addr),
         |svc, req| async move { svc.handle_register(req).await },

@@ -93,12 +93,14 @@ impl ControlPlaneClient {
         until: Option<Timestamp>,
         sender_addresses: Vec<String>,
         ip_family: crate::proto::loadbalancer::v1::IpFamily,
+        strategy: String,
     ) -> std::result::Result<tonic::Response<ReserveLoadBalancerReply>, tonic::Status> {
         let request = ReserveLoadBalancerRequest {
             name,
             until,
             sender_addresses,
             ip_family: ip_family as i32,
+            strategy,
         };
         let reply = self.client.reserve_load_balancer(request).await?;
         self.lb_id = Some(reply.get_ref().lb_id.clone());
@@ -171,6 +173,7 @@ impl ControlPlaneClient {
         min_factor: f32,
         max_factor: f32,
         keep_lb_header: bool,
+        slot_demands: Vec<crate::proto::loadbalancer::v1::SlotRange>,
     ) -> std::result::Result<tonic::Response<RegisterReply>, tonic::Status> {
         let request = RegisterRequest {
             lb_id: self
@@ -185,6 +188,7 @@ impl ControlPlaneClient {
             min_factor,
             max_factor,
             keep_lb_header,
+            slot_demands,
         };
         let reply = self.client.register(request).await?;
         self.session_id = Some(reply.get_ref().session_id.clone());

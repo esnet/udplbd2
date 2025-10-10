@@ -6,7 +6,7 @@ use crate::dataplane::meta_events::{MetaEventContext, MetaEventType};
 use crate::dataplane::protocol::EjfatEvent;
 use crate::dataplane::protocol::*;
 use crate::errors::Error;
-use crate::proto::loadbalancer::v1::PortRange;
+use crate::proto::loadbalancer::v1::{PortRange, SlotRange};
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -427,6 +427,7 @@ pub struct Receiver {
     pid_task: Option<tokio::task::JoinHandle<()>>,
 }
 
+// TODO: refactor into builder pattern
 impl Receiver {
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
@@ -445,6 +446,7 @@ impl Receiver {
         offset: usize,
         client: &mut ControlPlaneClient,
         meta_event_context: Option<MetaEventContext>,
+        slot_demands: Vec<SlotRange>,
     ) -> Result<Self, Error> {
         let (tx, rx) = mpsc::channel(1024);
         let pid_loop_tx = tx.clone();
@@ -461,6 +463,7 @@ impl Receiver {
                 min_factor,
                 max_factor,
                 keep_lb_header,
+                slot_demands,
             )
             .await?
             .into_inner();
@@ -540,6 +543,7 @@ impl Receiver {
             offset,
             client,
             meta_event_context,
+            Vec::new(),
         )
         .await
     }
@@ -593,6 +597,7 @@ pub struct ReceiverBuilder {
     max_factor: f32,
     offset: usize,
     meta_event_context: Option<MetaEventContext>,
+    slot_demands: Vec<SlotRange>,
 }
 
 impl ReceiverBuilder {
@@ -612,6 +617,7 @@ impl ReceiverBuilder {
             max_factor: 1.0,
             offset: 0,
             meta_event_context: None,
+            slot_demands: Vec::new(),
         }
     }
 
@@ -654,6 +660,11 @@ impl ReceiverBuilder {
         self
     }
 
+    pub fn slot_demands(mut self, slot_demands: Vec<SlotRange>) -> Self {
+        self.slot_demands.extend(slot_demands);
+        self
+    }
+
     pub async fn build(self, client: &mut ControlPlaneClient) -> Result<Receiver, Error> {
         Receiver::new(
             &self.name,
@@ -671,6 +682,7 @@ impl ReceiverBuilder {
             self.offset,
             client,
             self.meta_event_context,
+            self.slot_demands,
         )
         .await
     }

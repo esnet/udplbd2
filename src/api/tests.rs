@@ -63,6 +63,7 @@ async fn test_register_invalid_token() {
         min_factor: 0.0,
         max_factor: 1.0,
         keep_lb_header: false,
+        slot_demands: Vec::new(),
     });
     request
         .metadata_mut()

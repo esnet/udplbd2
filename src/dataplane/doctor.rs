@@ -126,6 +126,7 @@ async fn reserve_load_balancer(
     port: u16,
     mtu: usize,
     with_lb_headers: bool,
+    strategy: String,
 ) -> Result<(DoctorTestContext, ReservationResult)> {
     let mut client = ControlPlaneClient::from_url(url).await?;
     let expiration = SystemTime::now() + Duration::from_secs(180);
@@ -142,6 +143,7 @@ async fn reserve_load_balancer(
             Some(expiration_timestamp),
             vec![ip_address.to_string()],
             ip_family,
+            strategy,
         )
         .await?
         .into_inner();
@@ -450,13 +452,19 @@ pub async fn doctor(
     let mut errors = Vec::new();
 
     tracing::info!("Starting reservation step");
-    let (mut ctx, reservation) =
-        reserve_load_balancer(&url, ip_address, port, mtu, with_lb_headers)
-            .await
-            .map_err(|e| {
-                errors.push(format!("reservation: {e}"));
-                e
-            })?;
+    let (mut ctx, reservation) = reserve_load_balancer(
+        &url,
+        ip_address,
+        port,
+        mtu,
+        with_lb_headers,
+        "dynamic".to_string(),
+    )
+    .await
+    .map_err(|e| {
+        errors.push(format!("reservation: {e}"));
+        e
+    })?;
 
     tracing::info!("Starting first packet test; EJFAT_URI: {}", reservation.url);
     let (mut receiver1, first_packet) = test_first_packet(&mut ctx).await.map_err(|e| {
