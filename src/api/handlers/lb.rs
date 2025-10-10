@@ -433,11 +433,29 @@ impl LoadBalancerService {
         tonic::Response<crate::proto::loadbalancer::v1::SetSlotDemandsReply>,
         tonic::Status,
     > {
+        // Extract token from request metadata
+        let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
         let req = request.into_inner();
         let lb_id = req
             .lb_id
             .parse::<i64>()
             .map_err(|_| tonic::Status::invalid_argument("Invalid lbId"))?;
+
+        // Permission check: must have UPDATE permission to the session (reservation)
+        if !self
+            .validate_token(&token, Resource::Reservation(lb_id), PermissionType::Update)
+            .await?
+        {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "set_slot_demands: permission denied. reservation_id={}, source={}",
+                lb_id, src
+            );
+            return Err(tonic::Status::permission_denied("Permission denied"));
+        }
 
         // Gather all slot demands
         let mut slot_demands = Vec::new();
