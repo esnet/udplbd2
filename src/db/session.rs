@@ -177,7 +177,7 @@ impl LoadBalancerDB {
         Ok(())
     }
 
-    /// Adds a session to a reservation.
+    /// Adds a session to a reservation, with optional slot demands.
     #[allow(clippy::too_many_arguments)]
     pub async fn add_session(
         &self,
@@ -190,6 +190,7 @@ impl LoadBalancerDB {
         max_factor: f64,
         mac_address: MacAddr6,
         keep_lb_header: bool,
+        slot_demands: Vec<(i32, u32)>, // (slot_index, slot_length)
     ) -> Result<Session> {
         let ip_str = addr.ip().to_string();
         let mac_str = mac_address.to_string();
@@ -246,6 +247,31 @@ impl LoadBalancerDB {
         )
         .execute(&mut *tx)
         .await?;
+
+        // Insert slot demands if any are provided
+        if !slot_demands.is_empty() {
+            // Convert to (Some(session_id), slot_index, slot_length)
+            let slot_demands_with_id: Vec<(Option<i64>, i32, u32)> = slot_demands
+                .into_iter()
+                .map(|(slot_index, slot_length)| (Some(record.id), slot_index, slot_length))
+                .collect();
+            // Use resolve_slot_demands to check for conflicts and assign index -1
+            let resolved = self
+                .resolve_slot_demands(reservation_id, slot_demands_with_id.clone())
+                .await?;
+            // Insert resolved slot demands
+            for (session_id, slot_index, slot_length) in resolved {
+                sqlx::query!(
+                    "INSERT INTO slot_demand (reservation_id, session_id, slot_index, slot_length, created_at) VALUES (?1, ?2, ?3, ?4, unixepoch('subsec') * 1000)",
+                    reservation_id,
+                    session_id,
+                    slot_index,
+                    slot_length
+                )
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
 
         let session_row = sqlx::query!(
             r#"

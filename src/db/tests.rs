@@ -63,6 +63,7 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
             2.0,
             "00:11:22:33:44:56".parse().unwrap(),
             false,
+            Vec::new(),
         )
         .await
         .unwrap();
@@ -320,6 +321,7 @@ async fn test_slot_generation() {
             *max_factor,
             mac_address,
             false,
+            Vec::new(),
         )
         .await
         .unwrap();
@@ -489,6 +491,75 @@ async fn test_token_crud() {
         .await
         .unwrap();
     assert!(!is_valid, "Token should not be valid after revocation");
+}
+
+#[sqlx::test]
+async fn test_resolve_slot_demands() {
+    let db = setup_db().await;
+    let (_lb, reservation) = setup_test_loadbalancer(&db).await;
+    let reservation_id = reservation.id;
+
+    // Case 1: Explicit indices, no conflict
+    let demands = vec![
+        (Some(1), 0, 2), // session_id, slot_index, slot_length
+        (Some(2), 2, 2),
+    ];
+    let result = db
+        .resolve_slot_demands(reservation_id, demands.clone())
+        .await;
+    assert!(result.is_ok());
+    let resolved = result.unwrap();
+    assert_eq!(resolved, demands);
+
+    // Case 2: Auto-placement (index -1), should fill first available
+    let demands = vec![
+        (Some(1), 0, 2),
+        (Some(2), -1, 2), // should be placed at 2
+    ];
+    let result = db
+        .resolve_slot_demands(reservation_id, demands.clone())
+        .await;
+    assert!(result.is_ok());
+    let resolved = result.unwrap();
+    assert_eq!(resolved, vec![(Some(1), 0, 2), (Some(2), 2, 2)]);
+
+    // Case 3: Conflict detection
+    let demands = vec![
+        (Some(1), 0, 3),
+        (Some(2), 2, 2), // overlaps with [0,3)
+    ];
+    let result = db.resolve_slot_demands(reservation_id, demands).await;
+    assert!(result.is_err());
+    if let Err(crate::errors::Error::Usage(msg)) = result {
+        assert!(msg.contains("Slot demand conflict"));
+    } else {
+        panic!("Expected slot demand conflict error");
+    }
+
+    // Case 4: Fill after occupied
+    let demands = vec![
+        (Some(1), 0, 2),
+        (Some(2), 2, 2),
+        (Some(3), -1, 2), // should be placed at 4
+    ];
+    let result = db
+        .resolve_slot_demands(reservation_id, demands.clone())
+        .await;
+    assert!(result.is_ok());
+    let resolved = result.unwrap();
+    assert_eq!(
+        resolved,
+        vec![(Some(1), 0, 2), (Some(2), 2, 2), (Some(3), 4, 2)]
+    );
+
+    // Case 5: Empty demands
+    let demands = vec![];
+    let result = db
+        .resolve_slot_demands(reservation_id, demands.clone())
+        .await;
+    assert!(result.is_ok());
+    let resolved = result.unwrap();
+    assert_eq!(resolved, vec![]);
 }
 
 #[sqlx::test]

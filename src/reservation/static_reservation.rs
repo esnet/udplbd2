@@ -177,6 +177,7 @@ impl StaticReservation {
                 session.max_factor,
                 mac_address,
                 session.keep_lb_header,
+                Vec::new(), // TODO: support slot demands in static reservation files
             )
             .await?;
         }

@@ -58,6 +58,12 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to get MAC address: {e}")))?;
 
+        let slot_demands_vec: Vec<(i32, u32)> = request
+            .slot_demands
+            .iter()
+            .map(|sr| (sr.index, sr.length))
+            .collect();
+
         let session = self
             .db
             .add_session(
@@ -70,6 +76,7 @@ impl LoadBalancerService {
                 f64::from(request.max_factor),
                 mac_address,
                 request.keep_lb_header,
+                slot_demands_vec,
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to add session: {e}")))?;
