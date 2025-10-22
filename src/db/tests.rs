@@ -476,7 +476,7 @@ async fn test_token_crud() {
     assert!(!token.is_empty());
 
     // Test token validation with wildcard permission
-    let is_valid = db
+    let (is_valid, _) = db
         .validate_token(&token, Resource::LoadBalancer(2), PermissionType::ReadOnly)
         .await
         .unwrap();
@@ -486,7 +486,7 @@ async fn test_token_crud() {
     db.revoke_token(&token).await.unwrap();
 
     // Verify token is no longer valid after revocation
-    let is_valid = db
+    let (is_valid, _) = db
         .validate_token(&token, Resource::LoadBalancer(1), PermissionType::Update)
         .await
         .unwrap();
@@ -539,7 +539,7 @@ async fn test_resolve_slot_demands() {
     // Case 4: Fill after occupied
     let demands = vec![
         (Some(1), 0, 2),
-        (Some(2), 2, 2),
+        (Some(2), -1, 2),
         (Some(3), -1, 2), // should be placed at 4
     ];
     let result = db
@@ -583,7 +583,7 @@ async fn test_hierarchical_permissions() {
         .unwrap();
 
     // Verify token works for the loadbalancer
-    let is_valid = db
+    let (is_valid, _) = db
         .validate_token(
             &token,
             Resource::LoadBalancer(lb.id),
@@ -594,7 +594,7 @@ async fn test_hierarchical_permissions() {
     assert!(is_valid, "Token should be valid for loadbalancer");
 
     // Verify token works for session under the loadbalancer
-    let is_valid = db
+    let (is_valid, _) = db
         .validate_token(
             &token,
             Resource::Session(session_id),
@@ -608,7 +608,7 @@ async fn test_hierarchical_permissions() {
     );
 
     // Verify token doesn't work for a different loadbalancer
-    let is_valid = db
+    let (is_valid, _) = db
         .validate_token(
             &token,
             Resource::LoadBalancer(lb.id + 1),

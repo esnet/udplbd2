@@ -26,20 +26,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::Register,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "register: permission denied. reservation_id={}, source={}",
-                reservation_id, src
+                "register: permission denied. reservation_id={}, token_id={:?}, source={}",
+                reservation_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -99,8 +99,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "register: session_id={}, name={}, socket_addr={}, reservation_id={}, source={}",
-            session.id, &request.name, socket_addr, reservation_id, src
+            "register: session_id={}, name={}, socket_addr={}, reservation_id={}, token_id={:?}, source={}",
+            session.id, &request.name, socket_addr, reservation_id, token_id, src
         );
         Ok(Response::new(RegisterReply {
             token,
@@ -120,20 +120,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid session ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Session(session_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "deregister: permission denied. session_id={}, source={}",
-                session_id, src
+                "deregister: permission denied. session_id={}, token_id={:?}, source={}",
+                session_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -149,7 +149,10 @@ impl LoadBalancerService {
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        info!("deregister: session_id={}, source={}", session_id, src);
+        info!(
+            "deregister: session_id={}, token_id={:?}, source={}",
+            session_id, token_id, src
+        );
         Ok(Response::new(DeregisterReply {}))
     }
 
@@ -165,20 +168,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid session ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Session(session_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "send_state: permission denied. session_id={}, source={}",
-                session_id, src
+                "send_state: permission denied. session_id={}, token_id={:?}, source={}",
+                session_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -211,7 +214,12 @@ impl LoadBalancerService {
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        trace!("send_state: session_id={}, source={}", session_id, src);
+        trace!(
+            "send_state: session_id={}, token_id={:?}, source={}",
+            session_id,
+            token_id,
+            src
+        );
         Ok(Response::new(SendStateReply {}))
     }
 }

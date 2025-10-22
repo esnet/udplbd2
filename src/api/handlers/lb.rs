@@ -34,17 +34,20 @@ impl LoadBalancerService {
 
         let mut has_permission_to_any = false;
         let mut available_lb = None;
+        let mut token_id: Option<i64> = None;
 
         for lb in all_lbs {
-            if !self
+            let (ok, found_token_id) = self
                 .validate_token(
                     &token,
                     Resource::LoadBalancer(lb.id),
                     PermissionType::Reserve,
                 )
-                .await?
-            {
+                .await?;
+            if !ok {
                 continue;
+            } else {
+                token_id = found_token_id;
             }
 
             has_permission_to_any = true;
@@ -142,8 +145,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "reserve_load_balancer: reservation_id={}, initial_senders={:?}, source={}",
-            reservation.id, initial_senders, src
+            "reserve_load_balancer: reservation_id={}, initial_senders={:?}, token_id={:?}, source={}",
+            reservation.id, initial_senders, token_id, src
         );
 
         let new_token_name = format!("reservation-{}", reservation.id);
@@ -227,20 +230,22 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::ReadOnly,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "get_load_balancer: permission denied. reservation_id={}, source={}",
-                reservation_id, src
+                "get_load_balancer: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -318,20 +323,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::ReadOnly,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "load_balancer_status: permission denied. reservation_id={}, source={}",
-                reservation_id, src
+                "load_balancer_status: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id, token_id.unwrap_or(-1), src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -443,16 +448,18 @@ impl LoadBalancerService {
             .map_err(|_| tonic::Status::invalid_argument("Invalid lbId"))?;
 
         // Permission check: must have UPDATE permission to the session (reservation)
-        if !self
+        let (ok, token_id) = self
             .validate_token(&token, Resource::Reservation(lb_id), PermissionType::Update)
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "set_slot_demands: permission denied. reservation_id={}, source={}",
-                lb_id, src
+                "set_slot_demands: permission denied. reservation_id={}, token_id={}, source={}",
+                lb_id,
+                token_id.unwrap_or(-1),
+                src
             );
             return Err(tonic::Status::permission_denied("Permission denied"));
         }
@@ -510,20 +517,22 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "free_load_balancer: permission denied. reservation_id={}, source={}",
-                reservation_id, src
+                "free_load_balancer: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -545,8 +554,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "free_load_balancer: reservation_id={}, source={}",
-            reservation_id, src
+            "free_load_balancer: reservation_id={}, token_id={:?}, source={}",
+            reservation_id, token_id, src
         );
 
         Ok(Response::new(FreeLoadBalancerReply {}))
@@ -564,20 +573,21 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "add_senders: permission denied. reservation_id={}, source={}, attempted_senders={:?}",
+                "add_senders: permission denied. reservation_id={}, token_id={}, source={}, attempted_senders={:?}",
                 reservation_id,
+                token_id.unwrap_or(-1),
                 src,
                 request.sender_addresses
             );
@@ -597,8 +607,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "add_senders: reservation_id={}, senders={:?}, source={}",
-            reservation_id, request.sender_addresses, src
+            "add_senders: reservation_id={}, senders={:?}, token_id={:?}, source={}",
+            reservation_id, request.sender_addresses, token_id, src
         );
 
         Ok(Response::new(AddSendersReply {}))
@@ -616,20 +626,21 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "remove_senders: permission denied. reservation_id={}, source={}, attempted_senders={:?}",
+                "remove_senders: permission denied. reservation_id={}, token_id={}, source={}, attempted_senders={:?}",
                 reservation_id,
+                token_id.unwrap_or(-1),
                 src,
                 request.sender_addresses
             );
@@ -649,8 +660,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "remove_senders: reservation_id={}, senders={:?}, source={}",
-            reservation_id, request.sender_addresses, src
+            "remove_senders: reservation_id={}, senders={:?}, token_id={:?}, source={}",
+            reservation_id, request.sender_addresses, token_id, src
         );
 
         Ok(Response::new(RemoveSendersReply {}))

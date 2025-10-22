@@ -16,16 +16,19 @@ impl LoadBalancerService {
     ) -> Result<Response<OverviewReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
-        if !self
+        let token_id = self
             .db
             .token_exists(&token)
             .await
-            .map_err(|e| Status::internal(format!("Token validation failed: {e}")))?
-        {
+            .map_err(|e| Status::internal(format!("token validation failed: {e}")))?;
+        if token_id.is_none() {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            warn!("overview: permission denied. source={}", src);
+            warn!(
+                "overview: permission denied. token_id={:?}, source={}",
+                token_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
@@ -99,7 +102,7 @@ impl LoadBalancerService {
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        debug!("overview: source={}", src);
+        debug!("overview: token_id={:?}, source={}", token_id, src);
         Ok(Response::new(OverviewReply { load_balancers }))
     }
 
@@ -109,23 +112,26 @@ impl LoadBalancerService {
     ) -> Result<Response<VersionReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
-        if !self
+        let token_id = self
             .db
             .token_exists(&token)
             .await
-            .map_err(|e| Status::internal(format!("Token validation failed: {e}")))?
-        {
+            .map_err(|e| Status::internal(format!("token validation failed: {e}")))?;
+        if token_id.is_none() {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
-            warn!("version: permission denied. source={}", src);
+            warn!(
+                "version: permission denied. token_id={:?}, source={}",
+                token_id, src
+            );
             return Err(Status::permission_denied("Permission denied"));
         }
 
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        debug!("version: source={}", src);
+        debug!("version: token_id={:?}, source={}", token_id, src);
         Ok(Response::new(VersionReply {
             commit: env!("UDPLBD_BUILD", "unknown").to_string(),
             build: env!("CARGO_PKG_VERSION").to_string(),

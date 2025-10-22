@@ -259,15 +259,14 @@ impl LoadBalancerService {
         // List loadbalancers
         if let Ok(lbs) = self.db.list_loadbalancers().await {
             for lb in lbs {
-                if self
+                let (ok, _) = self
                     .validate_token(
                         token,
                         Resource::LoadBalancer(lb.id),
                         PermissionType::ReadOnly,
                     )
-                    .await
-                    .unwrap_or(false)
-                {
+                    .await?;
+                if ok {
                     allowed.push(format!("/lb/{}", lb.id));
                 } else {
                     // Check reservations for this loadbalancer.
@@ -277,29 +276,27 @@ impl LoadBalancerService {
                             .filter(|r| r.loadbalancer_id == lb.id)
                             .collect();
                         for res in lb_res {
-                            if self
+                            let (ok, _) = self
                                 .validate_token(
                                     token,
                                     Resource::Reservation(res.id),
                                     PermissionType::ReadOnly,
                                 )
-                                .await
-                                .unwrap_or(false)
-                            {
+                                .await?;
+                            if ok {
                                 allowed.push(format!("/lb/{}/reservation/{}", lb.id, res.id));
                             } else if let Ok(sessions) =
                                 self.db.get_reservation_sessions(res.id).await
                             {
                                 for sess in sessions {
-                                    if self
+                                    let (ok, _) = self
                                         .validate_token(
                                             token,
                                             Resource::Session(sess.id),
                                             PermissionType::ReadOnly,
                                         )
-                                        .await
-                                        .unwrap_or(false)
-                                    {
+                                        .await?;
+                                    if ok {
                                         allowed.push(format!(
                                             "/lb/{}/reservation/{}/session/{}",
                                             lb.id, res.id, sess.id

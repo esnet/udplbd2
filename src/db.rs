@@ -217,7 +217,7 @@ impl LoadBalancerDB {
 
     pub async fn create_admin_token(&self, token: &str) -> Result<bool> {
         let token_exists = self.token_exists(token).await?;
-        if !token_exists {
+        if token_exists.is_none() {
             info!("adding admin token to db");
             use sha2::{Digest, Sha256};
             // Hash the provided token
@@ -390,9 +390,8 @@ impl LoadBalancerDB {
                       )
                     "#
                 );
-                let insert_sql = format!(
-                    "INSERT INTO archive.`{session_table}` ({col_list}) {select_sql}"
-                );
+                let insert_sql =
+                    format!("INSERT INTO archive.`{session_table}` ({col_list}) {select_sql}");
                 sqlx::query(&insert_sql)
                     .bind(older_than_ms)
                     .execute(&mut *tx)
@@ -440,9 +439,8 @@ impl LoadBalancerDB {
                       )
                     "#
                 );
-                let insert_sql = format!(
-                    "INSERT INTO archive.`{event_table}` ({col_list}) {select_sql}"
-                );
+                let insert_sql =
+                    format!("INSERT INTO archive.`{event_table}` ({col_list}) {select_sql}");
                 sqlx::query(&insert_sql)
                     .bind(older_than_ms)
                     .execute(&mut *tx)
@@ -499,10 +497,8 @@ impl LoadBalancerDB {
                 // Compose summary log
                 let mut summary = format!("archived {total_deleted} total rows");
                 if !per_table.is_empty() {
-                    let details: Vec<String> = per_table
-                        .iter()
-                        .map(|(k, v)| format!("{v} {k}"))
-                        .collect();
+                    let details: Vec<String> =
+                        per_table.iter().map(|(k, v)| format!("{v} {k}")).collect();
                     summary.push_str(&format!(" ({})", details.join(", ")));
                 }
                 summary.push_str(&format!(" in {}ms", op_start.elapsed().as_millis()));
@@ -587,10 +583,8 @@ impl LoadBalancerDB {
                 // Compose summary log
                 let mut summary = format!("deleted {total_deleted} total rows (no archive)");
                 if !per_table.is_empty() {
-                    let details: Vec<String> = per_table
-                        .iter()
-                        .map(|(k, v)| format!("{v} {k}"))
-                        .collect();
+                    let details: Vec<String> =
+                        per_table.iter().map(|(k, v)| format!("{v} {k}")).collect();
                     summary.push_str(&format!(" ({})", details.join(", ")));
                 }
                 summary.push_str(&format!(" in {} ms", op_start.elapsed().as_millis()));

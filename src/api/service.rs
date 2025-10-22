@@ -24,7 +24,7 @@ impl LoadBalancerService {
         token: &str,
         resource: Resource,
         permission: PermissionType,
-    ) -> Result<bool, Status> {
+    ) -> Result<(bool, Option<i64>), Status> {
         self.db
             .validate_token(token, resource, permission)
             .await
