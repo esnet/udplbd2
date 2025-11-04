@@ -61,6 +61,8 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
         .map_err(|_| crate::errors::Error::Runtime("failed to set switch config".to_string()))?;
 
     // Host configs
+    let mut base_queue = 0;
+    let num_queues_per_func = 1;
     for host_id in 0..=1 {
         let dma_config = HostDmaConfig {
             functions: vec![HostFunctionDmaConfig {
@@ -68,11 +70,12 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
                     ftype: HostFunctionType::HostFuncPhysical as i32,
                     index: 0,
                 }),
-                base_queue: 0,
-                num_queues: 1,
+                base_queue: base_queue,
+                num_queues: num_queues_per_func,
             }],
             reset: true,
         };
+        base_queue += num_queues_per_func;
         let host_config = HostConfig {
             dma: Some(dma_config),
             flow_control: None,
