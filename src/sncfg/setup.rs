@@ -66,7 +66,7 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
             functions: vec![HostFunctionDmaConfig {
                 func_id: Some(HostFunctionId {
                     ftype: HostFunctionType::HostFuncPhysical as i32,
-                    index: host_id,
+                    index: 0,
                 }),
                 base_queue: 0,
                 num_queues: 1,
