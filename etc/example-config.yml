@@ -88,6 +88,9 @@ log:
 #     tls:
 #       # [bool] Enable TLS for SmartNIC client
 #       enable: false
+#       # [Path, optional] PEM encoded TLS CA certificate file
+#       # This should only be used when the smartnic host does not have a globally trusted cert
+#       ca_file: ""
 #       # [bool] Verify server certificate
 #       verify: false
 

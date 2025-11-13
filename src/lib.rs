@@ -58,6 +58,7 @@ async fn build_smartnic_clients(
                 0,
                 snp4_client_table_index,
                 smartnic.tls.verify,
+                smartnic.tls.ca_file.clone(),
                 smartnic.auth_token.clone(),
             )
             .await?;
@@ -76,7 +77,14 @@ async fn build_smartnic_clients(
                     cfg_port
                 );
                 let client =
-                    SNCfgClient::new(&addr, 0, smartnic.tls.verify, cfg_auth_token.clone()).await?;
+                    SNCfgClient::new(
+                        &addr,
+                        0,
+                        smartnic.tls.verify,
+                        smartnic.tls.ca_file.clone(),
+                        cfg_auth_token.clone()
+                    )
+                    .await?;
                 sncfg_clients.push(client);
             }
         }
@@ -301,7 +309,7 @@ pub async fn start_mocked_server(
     });
     sleep(Duration::from_millis(10)).await;
 
-    let sim_client = SNP4Client::new(&sim_addr, 0, -1, false, "").await?;
+    let sim_client = SNP4Client::new(&sim_addr, 0, -1, false, None, "").await?;
 
     trace!("created client");
 

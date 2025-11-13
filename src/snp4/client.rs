@@ -7,10 +7,10 @@ use crate::{
 use futures::{future::join_all, StreamExt};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
-    transport::{Channel, ClientTlsConfig, Endpoint},
+    transport::{Channel, ClientTlsConfig, Endpoint, Certificate},
     Request, Status,
 };
-use tracing::{debug, trace, warn};
+use tracing::{debug, info, trace, warn};
 
 use crate::proto::smartnic::p4_v2::{
     batch_request, smartnic_p4_client::SmartnicP4Client, BatchOperation, BatchRequest,
@@ -19,8 +19,7 @@ use crate::proto::smartnic::p4_v2::{
     ServerStatus, ServerStatusRequest, StatsMetric, TableRequest, TableResponse, TableRule,
     TableRuleRequest,
 };
-
-// use tracing::{debug, info};
+use std::path::PathBuf;
 
 #[derive(Debug, Clone)]
 pub struct SNP4Client {
@@ -36,12 +35,24 @@ impl SNP4Client {
         pipeline_id: i32,
         device_id: i32,
         verify: bool,
+	ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
         let mut channel = Channel::from_shared(addr.to_string()).unwrap();
 
         if addr.starts_with("https://") {
-            let tls_config = ClientTlsConfig::new().with_enabled_roots();
+            let tls_config: ClientTlsConfig;
+            if let Some(ca_file) = ca_file {
+                let ca_file_str = ca_file.to_string_lossy();
+                info!("sn-p4 client for {addr} only trusting configured CA in {ca_file_str}");
+
+                let pem = std::fs::read_to_string(ca_file).expect("Failed to read CA certificate");
+                let cert = Certificate::from_pem(pem);
+                tls_config = ClientTlsConfig::new().ca_certificate(cert);
+            } else {
+                debug!("sn-p4 client for {addr} has no ca cert provided, trusting system root CAs");
+                tls_config = ClientTlsConfig::new().with_enabled_roots();
+            }
             if !verify {
                 // TODO
                 unimplemented!()

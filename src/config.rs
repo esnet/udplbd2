@@ -158,6 +158,8 @@ fn default_rest_enabled() -> bool {
 pub struct TlsClientOptions {
     pub enable: bool,
     pub verify: bool,
+    #[serde(default)]
+    pub ca_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -235,6 +237,7 @@ impl Config {
                 tls: TlsClientOptions {
                     enable: false,
                     verify: false,
+		    ca_file: None,
                 },
                 clear_table_repeats: 1,
                 cfg_host: None,
