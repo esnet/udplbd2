@@ -50,6 +50,9 @@ this historical state of the control plane. udplbd also integrates `turmoil` for
 2. **Build the Project**
 
    ```bash
+   cargo install sqlx-cli
+   export DATABASE_URL="sqlite:///tmp/udplbd.db"
+   sqlx database setup
    cargo install --path .
    ```
 
