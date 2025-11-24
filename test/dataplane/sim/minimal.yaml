@@ -23,7 +23,7 @@ timelines:
 
   - id: 4
     events:
-      - time: 100
+      - time: 1000
         event:
           !RegisterReceiver {
             config:

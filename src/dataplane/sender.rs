@@ -158,6 +158,10 @@ impl Sender {
         let mut sync_packet = SyncPayload::new();
         sync_packet.set_defaults();
         sync_packet.tick.set(tick);
+        let now = Utc::now();
+        let unix_time_nano =
+            (now.timestamp() as u64 * 1_000_000_000) + (now.timestamp_subsec_nanos() as u64);
+        sync_packet.unix_time_nano.set(unix_time_nano);
         if let Err(e) = self
             .sync_socket
             .send_to(sync_packet.as_bytes(), self.sync_target)
@@ -166,7 +170,7 @@ impl Sender {
             warn!("failed to send sync: {e}");
             return;
         }
-        self.last_sync = tick;
+        self.last_sync = unix_time_nano;
     }
 
     pub async fn send_sync_ts(&mut self) {
@@ -238,7 +242,10 @@ impl Sender {
             while Instant::now().duration_since(start) < duration {}
         }
 
-        if self.autosync && tick - self.last_sync > 1_000_000 {
+        let now = Utc::now();
+        let unix_time_nano =
+            (now.timestamp() as u64 * 1_000_000_000) + (now.timestamp_subsec_nanos() as u64);
+        if self.autosync && unix_time_nano - self.last_sync > 1_000_000_000 {
             self.send_sync(tick).await;
         }
         self.total_packets_sent += packets_sent as u64;

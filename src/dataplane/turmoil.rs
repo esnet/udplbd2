@@ -666,7 +666,7 @@ pub mod test {
 
     #[test]
     fn test_minimal_scenario() {
-        let test_config = include_str!("../../test/sim/minimal.yaml");
+        let test_config = include_str!("../../test/dataplane/sim/minimal.yaml");
         let (meta_event_manager, _) = MetaEventManager::new(false);
         let config: TurmoilConfig = serde_yaml::from_str(test_config).unwrap();
         let result = run_turmoil_test(&meta_event_manager, None, config);

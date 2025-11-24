@@ -6,8 +6,8 @@ ALTER TABLE reservation ADD COLUMN strategy TEXT DEFAULT 'dynamic';
 -- Create slot_demand table
 CREATE TABLE slot_demand (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    reservation_id INTEGER NOT NULL,
-    session_id INTEGER,
+    reservation_id INTEGER NOT NULL REFERENCES reservation(id) ON DELETE CASCADE,
+    session_id INTEGER REFERENCES session(id) ON DELETE CASCADE,
     slot_index INTEGER NOT NULL,
     slot_length INTEGER NOT NULL,
     created_at INTEGER NOT NULL DEFAULT (strftime('%s','now') * 1000),

@@ -8,8 +8,8 @@ use crate::proto::loadbalancer::v1::{
     ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest, OverviewReply,
     OverviewRequest, PortRange, RegisterReply, RegisterRequest, RemoveSendersReply,
     RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply,
-    RevokeTokenRequest, SendStateReply, SendStateRequest, TokenPermission, TokenSelector,
-    VersionReply, VersionRequest,
+    RevokeTokenRequest, SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
+    SetSlotDemandsRequest, TokenPermission, TokenSelector, VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
 use serde::Serialize;
@@ -211,6 +211,20 @@ impl ControlPlaneClient {
         let reply = self.client.deregister(request).await?;
         self.session_id = None;
         Ok(reply)
+    }
+
+    pub async fn set_slot_demands(
+        &mut self,
+        slot_constraints: Vec<SessionSlotRanges>,
+    ) -> std::result::Result<tonic::Response<SetSlotDemandsReply>, tonic::Status> {
+        let request = SetSlotDemandsRequest {
+            lb_id: self
+                .lb_id
+                .clone()
+                .expect("cannot set_slot_demands when lb_id is None"),
+            slot_constraints,
+        };
+        self.client.set_slot_demands(request).await
     }
 
     #[allow(clippy::too_many_arguments)]

@@ -3,12 +3,13 @@
 
 use crate::api::client::{ControlPlaneClient, EjfatUrl};
 use crate::dataplane::protocol::LBHeader;
-use crate::dataplane::receiver::Receiver;
+use crate::dataplane::receiver::{Receiver, ReceiverBuilder};
 use crate::dataplane::sender::Sender;
 use crate::errors::Result;
-use crate::proto::loadbalancer::v1::IpFamily;
+use crate::proto::loadbalancer::v1::{IpFamily, SessionSlotRanges, SlotRange};
 
 use prost_wkt_types::Timestamp;
+use std::collections::HashSet;
 use std::fmt;
 use std::net::IpAddr;
 use std::time::{Duration, Instant, SystemTime};
@@ -19,119 +20,89 @@ use serde::Serialize;
 use serde_json;
 use tracing;
 
-/// Aggregated output of all doctor tests for a single address.
+/// Output for dynamic strategy tests (includes all common tests)
+#[derive(Debug, Serialize)]
+pub struct DynamicStrategyOutput {
+    pub lb_id: String,
+    pub url: EjfatUrl,
+    pub first_packet_ms: u128,
+    pub data_id_correct: bool,
+    pub packets_sent: usize,
+    pub packets_received: usize,
+    pub packets_lost: usize,
+    pub loss_pct: f64,
+    pub dynamic_receiver_ms: u128,
+    pub distribution_sent: usize,
+    pub distribution_recv1: usize,
+    pub distribution_recv2: usize,
+    pub split_event_count: usize,
+    pub split_event_keys: Vec<(u64, u16)>,
+    pub overview_found: bool,
+    pub overview_errors: Vec<String>,
+    pub remove_add_after_remove: usize,
+    pub remove_add_duration_ms: u128,
+    pub remove_add_sender_ok: bool,
+    pub deregister_ok: bool,
+    pub errors: Vec<String>,
+}
+
+/// Output for static strategy tests (focused on slot demand updates)
+#[derive(Debug, Serialize)]
+pub struct StaticStrategyOutput {
+    pub lb_id: String,
+    pub url: EjfatUrl,
+    pub first_packet_ms: u128,
+    pub initial_recv1: usize,
+    pub initial_recv2: usize,
+    pub updated_recv1: usize,
+    pub updated_recv2: usize,
+    pub set_demands_ok: bool,
+    pub errors: Vec<String>,
+}
+
+/// Output for explicit strategy tests (focused on slot coverage and loss)
+#[derive(Debug, Serialize)]
+pub struct ExplicitStrategyOutput {
+    pub lb_id: String,
+    pub url: EjfatUrl,
+    pub first_packet_ms: u128,
+    pub initial_recv: usize,
+    pub initial_loss_pct: f64,
+    pub updated_recv: usize,
+    pub updated_loss_pct: f64,
+    pub errors: Vec<String>,
+}
+
+/// Aggregated output of all doctor tests for a single address across all strategies.
 #[derive(Debug, Serialize)]
 pub struct DoctorOutput {
     pub address: String,
-    pub reservation: ReservationResult,
-    pub first_packet: FirstPacketResult,
-    pub data_id: DataIdResult,
-    pub packet_loss: PacketLossResult,
-    pub dynamic_receiver: DynamicReceiverResult,
-    pub distribution: DistributionResult,
-    pub split_event: SplitEventResult,
-    pub overview: OverviewResult,
-    pub remove_add_sender: RemoveAddSenderResult,
-    pub deregister: DeregisterResult,
-    pub errors: Vec<String>,
+    pub dynamic: DynamicStrategyOutput,
+    pub static_strategy: StaticStrategyOutput,
+    pub explicit: ExplicitStrategyOutput,
 }
 
 impl fmt::Display for DoctorOutput {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Print JSON output
         writeln!(f, "{}", serde_json::to_string_pretty(&self).unwrap())?;
         Ok(())
     }
 }
 
-// --- Result types for each test step ---
-
-#[derive(Debug, Serialize)]
-pub struct ReservationResult {
-    pub lb_id: String,
-    pub url: EjfatUrl,
-}
-
-#[derive(Debug, Serialize)]
-pub struct FirstPacketResult {
-    pub duration_ms: u128,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DataIdResult {
-    pub correct: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct PacketLossResult {
-    pub sent: usize,
-    pub received: usize,
-    pub lost: usize,
-    pub loss_pct: f64,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DynamicReceiverResult {
-    pub duration_ms: u128,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DistributionResult {
-    pub sent: usize,
-    pub recv1: usize,
-    pub recv2: usize,
-}
-
-#[derive(Debug, Serialize)]
-pub struct SplitEventResult {
-    pub split_count: usize,
-    pub split_keys: Vec<(u64, u16)>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct OverviewResult {
-    pub found: bool,
-    pub errors: Vec<String>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct RemoveAddSenderResult {
-    pub after_remove: usize,
-    pub remove_duration_ms: u128,
-    pub add_sender_ok: bool,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DeregisterResult {
-    pub ok: bool,
-}
-
-// --- Test context holding shared state ---
-
-struct DoctorTestContext {
-    client: ControlPlaneClient,
-    parsed_url: EjfatUrl,
-    lb_id: String,
-    ip_address: IpAddr,
-    port: u16,
-    mtu: usize,
-    with_lb_headers: bool,
-}
-
-// --- Modular test steps ---
-
-async fn reserve_load_balancer(
+async fn test_dynamic_strategy(
     url: &str,
     ip_address: IpAddr,
     port: u16,
     mtu: usize,
     with_lb_headers: bool,
-    strategy: String,
-) -> Result<(DoctorTestContext, ReservationResult)> {
+) -> Result<DynamicStrategyOutput> {
+    let mut errors = Vec::new();
+
+    // Reserve load balancer
+    tracing::info!("Reserving load balancer for dynamic strategy");
     let mut client = ControlPlaneClient::from_url(url).await?;
     let expiration = SystemTime::now() + Duration::from_secs(180);
     let expiration_timestamp = Timestamp::from(expiration);
-
     let ip_family = match ip_address {
         IpAddr::V4(_) => IpFamily::Ipv4,
         IpAddr::V6(_) => IpFamily::Ipv6,
@@ -143,7 +114,7 @@ async fn reserve_load_balancer(
             Some(expiration_timestamp),
             vec![ip_address.to_string()],
             ip_family,
-            strategy,
+            "dynamic".to_string(),
         )
         .await?
         .into_inner();
@@ -151,46 +122,30 @@ async fn reserve_load_balancer(
     let mut parsed_url: EjfatUrl = url.parse().expect("Invalid EJFAT url");
     client.lb_id = Some(reply.lb_id.clone());
     parsed_url.update_from_reservation(&reply);
-
     parsed_url = match ip_family {
         IpFamily::Ipv4 => parsed_url.without_v6(),
         IpFamily::Ipv6 => parsed_url.without_v4(),
         _ => parsed_url,
     };
 
-    let ctx = DoctorTestContext {
-        client,
-        parsed_url: parsed_url.clone(),
-        lb_id: reply.lb_id.clone(),
-        ip_address,
-        port,
-        mtu,
-        with_lb_headers,
-    };
-    let res = ReservationResult {
-        lb_id: reply.lb_id,
-        url: parsed_url,
-    };
-    Ok((ctx, res))
-}
+    let lb_id = reply.lb_id.clone();
+    let ejfat_url = parsed_url.clone();
 
-async fn test_first_packet(ctx: &mut DoctorTestContext) -> Result<(Receiver, FirstPacketResult)> {
-    let offset = if ctx.with_lb_headers {
+    tracing::info!("Starting first packet test; EJFAT_URI: {}", ejfat_url);
+
+    // Test first packet
+    let offset = if with_lb_headers {
         std::mem::size_of::<LBHeader>()
     } else {
         0
     };
-    let mut receiver = Receiver::new_simple_uncontrolled(
-        "doctor-node1",
-        ctx.ip_address.to_string(),
-        ctx.port,
-        ctx.mtu,
-        offset,
-        &mut ctx.client,
-        None,
-    )
-    .await?;
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    let mut receiver1 = ReceiverBuilder::new("doctor-node1", ip_address.to_string(), port)
+        .mtu(mtu)
+        .offset(offset)
+        .build(&mut client)
+        .await?;
+
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let cancel = CancellationToken::new();
     let cancel_cloned = cancel.clone();
     let jh = tokio::spawn(async move {
@@ -198,43 +153,36 @@ async fn test_first_packet(ctx: &mut DoctorTestContext) -> Result<(Receiver, Fir
             .generate_test_stream(500, 1, Duration::from_millis(10), cancel_cloned)
             .await
     });
-    let _ = receiver.count_packets(1, Duration::from_secs(5)).await;
-    let mut duration = receiver
+    let _ = receiver1.count_packets(1, Duration::from_secs(5)).await;
+    let mut duration = receiver1
         .first_packet_duration()
-        .expect("no packets received!");
+        .ok_or_else(|| crate::errors::Error::Runtime("no packets received!".to_string()))?;
     duration += Duration::from_millis(100);
     cancel.cancel();
     jh.await.unwrap();
-    receiver.clear();
-    Ok((
-        receiver,
-        FirstPacketResult {
-            duration_ms: duration.as_millis(),
-        },
-    ))
-}
+    receiver1.clear();
+    let first_packet_ms = duration.as_millis();
+    tracing::info!("✓ First packet test: {}ms", first_packet_ms);
 
-async fn test_data_id(
-    ctx: &mut DoctorTestContext,
-    receiver: &mut Receiver,
-) -> Result<DataIdResult> {
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    // Test data ID
+    tracing::info!("Starting data ID test");
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let data_id_test_data = vec![0u8; 100];
     sender.send_ts(&data_id_test_data, 1234).await;
-    let correct = match timeout(Duration::from_secs(5), receiver.rx.recv()).await {
+    let data_id_correct = match timeout(Duration::from_secs(5), receiver1.rx.recv()).await {
         Ok(Some(event)) => event.data_id == 1234,
         _ => false,
     };
-    receiver.clear();
-    Ok(DataIdResult { correct })
-}
+    receiver1.clear();
+    tracing::info!(
+        "✓ Data ID test: {}",
+        if data_id_correct { "PASS" } else { "FAIL" }
+    );
 
-async fn test_packet_loss(
-    ctx: &mut DoctorTestContext,
-    receiver: &mut Receiver,
-) -> Result<PacketLossResult> {
+    // Test packet loss
+    tracing::info!("Starting packet loss test");
     let num_packets = 1000;
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let cancel = CancellationToken::new();
     let cancel_cloned = cancel.clone();
     let jh = tokio::spawn(async move {
@@ -242,40 +190,33 @@ async fn test_packet_loss(
             .generate_test_stream(num_packets, 1, Duration::from_micros(5), cancel_cloned)
             .await
     });
-    let received = receiver
+    let received = receiver1
         .count_packets(num_packets, Duration::from_millis(100))
         .await;
     let lost = num_packets - received;
+    let loss_pct = 100.0 - ((received as f64 / num_packets as f64) * 100.0);
     cancel.cancel();
     jh.await.unwrap();
-    receiver.clear();
-    Ok(PacketLossResult {
-        sent: num_packets,
-        received,
-        lost,
-        loss_pct: 100.0 - ((received as f64 / num_packets as f64) * 100.0),
-    })
-}
+    receiver1.clear();
+    let packets_sent = num_packets;
+    let packets_received = received;
+    let packets_lost = lost;
+    tracing::info!(
+        "✓ Packet loss test: sent={}, received={}, lost={}, loss={:.2}%",
+        packets_sent,
+        packets_received,
+        packets_lost,
+        loss_pct
+    );
 
-async fn test_dynamic_receiver(
-    ctx: &mut DoctorTestContext,
-) -> Result<(Receiver, DynamicReceiverResult)> {
-    let offset = if ctx.with_lb_headers {
-        std::mem::size_of::<LBHeader>()
-    } else {
-        0
-    };
-    let mut receiver2 = Receiver::new_simple_uncontrolled(
-        "doctor-node2",
-        ctx.ip_address.to_string(),
-        ctx.port + 1,
-        ctx.mtu,
-        offset,
-        &mut ctx.client,
-        None,
-    )
-    .await?;
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    // Test dynamic receiver
+    tracing::info!("Starting dynamic receiver test");
+    let mut receiver2 = ReceiverBuilder::new("doctor-node2", ip_address.to_string(), port + 1)
+        .mtu(mtu)
+        .offset(offset)
+        .build(&mut client)
+        .await?;
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let cancel = CancellationToken::new();
     let cancel_cloned = cancel.clone();
     let jh = tokio::spawn(async move {
@@ -284,28 +225,20 @@ async fn test_dynamic_receiver(
             .await
     });
     let _ = receiver2.count_packets(1, Duration::from_secs(5)).await;
-    let duration = receiver2
-        .first_packet_duration()
-        .expect("second receiver - no packets received!");
+    let duration = receiver2.first_packet_duration().ok_or_else(|| {
+        crate::errors::Error::Runtime("second receiver - no packets received!".to_string())
+    })?;
     cancel.cancel();
     jh.await.unwrap();
     receiver2.clear();
-    Ok((
-        receiver2,
-        DynamicReceiverResult {
-            duration_ms: duration.as_millis(),
-        },
-    ))
-}
+    let dynamic_receiver_ms = duration.as_millis();
+    tracing::info!("✓ Dynamic receiver test: {}ms", dynamic_receiver_ms);
 
-async fn test_distribution(
-    ctx: &mut DoctorTestContext,
-    receiver1: &mut Receiver,
-    receiver2: &mut Receiver,
-) -> Result<DistributionResult> {
+    // Test distribution
+    tracing::info!("Starting distribution test");
     receiver1.clear();
     receiver2.clear();
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let num_packets = 5000;
     let cancel = CancellationToken::new();
     let cancel_cloned = cancel.clone();
@@ -320,15 +253,19 @@ async fn test_distribution(
     );
     cancel.cancel();
     jh.await.unwrap();
-    Ok(DistributionResult {
-        sent: num_packets,
-        recv1,
-        recv2,
-    })
-}
+    let distribution_sent = num_packets;
+    let distribution_recv1 = recv1;
+    let distribution_recv2 = recv2;
+    tracing::info!(
+        "✓ Distribution test: sent={}, recv1={}, recv2={}, total={}",
+        distribution_sent,
+        distribution_recv1,
+        distribution_recv2,
+        recv1 + recv2
+    );
 
-async fn test_split_event(receiver1: &Receiver, receiver2: &Receiver) -> Result<SplitEventResult> {
-    use std::collections::HashSet;
+    // Test split events
+    tracing::info!("Starting split event test");
     async fn incomplete_event_keys(receiver: &Receiver) -> HashSet<(u64, u16)> {
         let reassembler = receiver.reassembler.lock().await;
         reassembler
@@ -343,69 +280,22 @@ async fn test_split_event(receiver1: &Receiver, receiver2: &Receiver) -> Result<
             })
             .collect()
     }
-    let split_candidates_1 = incomplete_event_keys(receiver1).await;
-    let split_candidates_2 = incomplete_event_keys(receiver2).await;
+    let split_candidates_1 = incomplete_event_keys(&receiver1).await;
+    let split_candidates_2 = incomplete_event_keys(&receiver2).await;
     let split_events: HashSet<_> = split_candidates_1
         .intersection(&split_candidates_2)
         .cloned()
         .collect();
-    Ok(SplitEventResult {
-        split_count: split_events.len(),
-        split_keys: split_events.into_iter().collect(),
-    })
-}
+    let split_event_keys: Vec<_> = split_events.into_iter().collect();
+    let split_event_count = split_event_keys.len();
+    tracing::info!(
+        "✓ Split event test: {} split events found",
+        split_event_count
+    );
 
-async fn test_overview(ctx: &mut DoctorTestContext) -> Result<OverviewResult> {
-    let mut errors = Vec::new();
-    let reply = ctx.client.overview().await?;
-    let our_lb = reply
-        .get_ref()
-        .load_balancers
-        .iter()
-        .find(|lb| lb.reservation.as_ref().unwrap().lb_id == ctx.lb_id);
-    let mut found = false;
-    if let Some(lb) = our_lb {
-        found = true;
-        if lb.name != "ejfat-doctor" {
-            errors.push("name mismatch".to_string());
-        }
-        let reservation = lb.reservation.as_ref().unwrap();
-        let status = lb.status.as_ref().unwrap();
-        if reservation.lb_id != ctx.lb_id {
-            errors.push("lb id mismatch".to_string());
-        }
-        if let Some(sync_addr_v4) = &ctx.parsed_url.sync_addr_v4 {
-            if &reservation.sync_ipv4_address != sync_addr_v4 {
-                errors.push("sync ipv4 mismatch".to_string());
-            }
-        }
-        if let Some(sync_addr_v6) = &ctx.parsed_url.sync_addr_v6 {
-            if &reservation.sync_ipv6_address != sync_addr_v6 {
-                errors.push("sync ipv6 mismatch".to_string());
-            }
-        }
-        if let Some(sync_udp_port) = ctx.parsed_url.sync_udp_port {
-            if reservation.sync_udp_port as u16 != sync_udp_port {
-                errors.push("sync udp port mismatch".to_string());
-            }
-        }
-        if status.sender_addresses != vec![ctx.ip_address.to_string()] {
-            errors.push("sender address mismatch".to_string());
-        }
-        if status.expires_at.is_none() {
-            errors.push("expiration time is missing".to_string());
-        }
-    } else {
-        errors.push("our lb not found in overview".to_string());
-    }
-    Ok(OverviewResult { found, errors })
-}
-
-async fn test_remove_add_sender(
-    ctx: &mut DoctorTestContext,
-    receiver: &mut Receiver,
-) -> Result<RemoveAddSenderResult> {
-    let mut sender = Sender::from_url(&ctx.parsed_url, None, ctx.ip_address.is_ipv6()).await?;
+    // Test remove/add sender
+    tracing::info!("Starting remove/add sender test");
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
     let cancel = CancellationToken::new();
     let cancel_cloned = cancel.clone();
     let jh = tokio::spawn(async move {
@@ -414,172 +304,570 @@ async fn test_remove_add_sender(
             .await
     });
     let remove_start = Instant::now();
-    ctx.client
-        .remove_senders(vec![ctx.ip_address.to_string()])
-        .await?;
-    let after_remove = receiver.count_packets(500, Duration::from_secs(1)).await;
+    client.remove_senders(vec![ip_address.to_string()]).await?;
+    let after_remove = receiver1.count_packets(500, Duration::from_secs(1)).await;
     let remove_duration = remove_start.elapsed() - Duration::from_secs(1);
     cancel.cancel();
     jh.await.unwrap();
-
-    // Add sender back
-    let add_sender_ok = ctx
-        .client
-        .add_senders(vec![ctx.ip_address.to_string()])
+    let add_sender_ok = client
+        .add_senders(vec![ip_address.to_string()])
         .await
         .is_ok();
-    Ok(RemoveAddSenderResult {
-        after_remove,
-        remove_duration_ms: remove_duration.as_millis(),
-        add_sender_ok,
+    let remove_add_after_remove = after_remove;
+    let remove_add_duration_ms = remove_duration.as_millis();
+    let remove_add_sender_ok = add_sender_ok;
+    tracing::info!(
+        "✓ Remove/add sender test: after_remove={}, duration={}ms, add_ok={}",
+        remove_add_after_remove,
+        remove_add_duration_ms,
+        remove_add_sender_ok
+    );
+
+    // Test overview
+    tracing::info!("Starting overview test");
+    let mut overview_errors = Vec::new();
+    let reply = client.overview().await?;
+    let our_lb = reply
+        .get_ref()
+        .load_balancers
+        .iter()
+        .find(|lb| lb.reservation.as_ref().unwrap().lb_id == lb_id);
+    let mut overview_found = false;
+    if let Some(lb) = our_lb {
+        overview_found = true;
+        if lb.name != "ejfat-doctor" {
+            overview_errors.push("name mismatch".to_string());
+        }
+        let reservation = lb.reservation.as_ref().unwrap();
+        let status = lb.status.as_ref().unwrap();
+        if reservation.lb_id != lb_id {
+            overview_errors.push("lb id mismatch".to_string());
+        }
+        if let Some(sync_addr_v4) = &parsed_url.sync_addr_v4 {
+            if &reservation.sync_ipv4_address != sync_addr_v4 {
+                overview_errors.push("sync ipv4 mismatch".to_string());
+            }
+        }
+        if let Some(sync_addr_v6) = &parsed_url.sync_addr_v6 {
+            if &reservation.sync_ipv6_address != sync_addr_v6 {
+                overview_errors.push("sync ipv6 mismatch".to_string());
+            }
+        }
+        if let Some(sync_udp_port) = parsed_url.sync_udp_port {
+            if reservation.sync_udp_port as u16 != sync_udp_port {
+                overview_errors.push("sync udp port mismatch".to_string());
+            }
+        }
+        if status.sender_addresses != vec![ip_address.to_string()] {
+            overview_errors.push("sender address mismatch".to_string());
+        }
+        if status.expires_at.is_none() {
+            overview_errors.push("expiration time is missing".to_string());
+        }
+    } else {
+        overview_errors.push("our lb not found in overview".to_string());
+    }
+    tracing::info!(
+        "✓ Overview test: found={}, errors={}",
+        overview_found,
+        overview_errors.len()
+    );
+
+    // Test deregister
+    tracing::info!("Starting deregister test");
+    let deregister_ok = client.deregister().await.is_ok();
+    tracing::info!(
+        "✓ Deregister test: {}",
+        if deregister_ok { "PASS" } else { "FAIL" }
+    );
+
+    // Cleanup receivers
+    receiver1.cancel_tasks();
+    receiver2.cancel_tasks();
+
+    // Free the load balancer
+    tracing::info!("Freeing load balancer {}", lb_id);
+    if let Err(e) = client.free_load_balancer().await {
+        tracing::warn!("Failed to free load balancer: {}", e);
+        errors.push(format!("free_load_balancer: {e}"));
+    } else {
+        tracing::info!("freed load balancer {}", lb_id);
+    }
+
+    Ok(DynamicStrategyOutput {
+        lb_id,
+        url: ejfat_url,
+        first_packet_ms,
+        data_id_correct,
+        packets_sent,
+        packets_received,
+        packets_lost,
+        loss_pct,
+        dynamic_receiver_ms,
+        distribution_sent,
+        distribution_recv1,
+        distribution_recv2,
+        split_event_count,
+        split_event_keys,
+        overview_found,
+        overview_errors,
+        remove_add_after_remove,
+        remove_add_duration_ms,
+        remove_add_sender_ok,
+        deregister_ok,
+        errors,
     })
 }
 
-async fn test_deregister(ctx: &mut DoctorTestContext) -> Result<DeregisterResult> {
-    let ok = ctx.client.deregister().await.is_ok();
-    Ok(DeregisterResult { ok })
+async fn test_static_strategy(
+    url: &str,
+    ip_address: IpAddr,
+    port: u16,
+    mtu: usize,
+    with_lb_headers: bool,
+) -> Result<StaticStrategyOutput> {
+    let mut errors = Vec::new();
+    let base_port = port + 10; // Avoid conflicts with dynamic strategy
+
+    // Reserve load balancer
+    tracing::info!("Reserving load balancer for static strategy");
+    let mut client = ControlPlaneClient::from_url(url).await?;
+    let expiration = SystemTime::now() + Duration::from_secs(180);
+    let expiration_timestamp = Timestamp::from(expiration);
+    let ip_family = match ip_address {
+        IpAddr::V4(_) => IpFamily::Ipv4,
+        IpAddr::V6(_) => IpFamily::Ipv6,
+    };
+
+    let reply = client
+        .reserve_load_balancer(
+            "ejfat-doctor".to_string(),
+            Some(expiration_timestamp),
+            vec![ip_address.to_string()],
+            ip_family,
+            "static".to_string(),
+        )
+        .await?
+        .into_inner();
+
+    let mut parsed_url: EjfatUrl = url.parse().expect("Invalid EJFAT url");
+    client.lb_id = Some(reply.lb_id.clone());
+    parsed_url.update_from_reservation(&reply);
+    parsed_url = match ip_family {
+        IpFamily::Ipv4 => parsed_url.without_v6(),
+        IpFamily::Ipv6 => parsed_url.without_v4(),
+        _ => parsed_url,
+    };
+
+    let lb_id = reply.lb_id.clone();
+    let ejfat_url = parsed_url.clone();
+
+    tracing::info!("Starting first packet test; EJFAT_URI: {}", ejfat_url);
+
+    // Test first packet to ensure LB is ready
+    let offset = if with_lb_headers {
+        std::mem::size_of::<LBHeader>()
+    } else {
+        0
+    };
+    let mut receiver1 = ReceiverBuilder::new("doctor-node1", ip_address.to_string(), base_port)
+        .mtu(mtu)
+        .offset(offset)
+        .build(&mut client)
+        .await?;
+
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+    let cancel = CancellationToken::new();
+    let cancel_cloned = cancel.clone();
+    let jh = tokio::spawn(async move {
+        sender
+            .generate_test_stream(500, 1, Duration::from_millis(10), cancel_cloned)
+            .await
+    });
+    let _ = receiver1.count_packets(1, Duration::from_secs(5)).await;
+    let mut duration = receiver1
+        .first_packet_duration()
+        .ok_or_else(|| crate::errors::Error::Runtime("no packets received!".to_string()))?;
+    duration += Duration::from_millis(100);
+    cancel.cancel();
+    jh.await.unwrap();
+    receiver1.clear();
+    let first_packet_ms = duration.as_millis();
+    tracing::info!("✓ First packet test: {}ms", first_packet_ms);
+
+    receiver1.cancel_tasks();
+    client.deregister().await.ok();
+
+    // Test static strategy slot demands
+    tracing::info!("Starting static strategy slot demand test");
+
+    // Register receiver 1 with slot demands
+    let demands1 = vec![SlotRange {
+        index: 0,
+        length: 256,
+    }];
+    let mut receiver1 =
+        ReceiverBuilder::new("doctor-static-1", ip_address.to_string(), base_port + 2)
+            .mtu(mtu)
+            .offset(offset)
+            .slot_demands(demands1)
+            .build(&mut client)
+            .await?;
+    let session_id1 = client.session_id.clone().unwrap();
+
+    // Register receiver 2 with no slot demands
+    let mut receiver2 =
+        ReceiverBuilder::new("doctor-static-2", ip_address.to_string(), base_port + 3)
+            .mtu(mtu)
+            .offset(offset)
+            .build(&mut client)
+            .await?;
+    let session_id2 = client.session_id.clone().unwrap();
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send traffic and check initial distribution
+    let num_packets = 2000;
+    let cancel = CancellationToken::new();
+    let jh = {
+        let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+        let cancel_cloned = cancel.clone();
+        tokio::spawn(async move {
+            sender
+                .generate_test_stream(num_packets, 20000, Duration::from_millis(5), cancel_cloned)
+                .await
+        })
+    };
+
+    let (initial_recv1, initial_recv2): (usize, usize) = tokio::join!(
+        receiver1.count_packets(num_packets, Duration::from_millis(1000)),
+        receiver2.count_packets(num_packets, Duration::from_millis(1000))
+    );
+    cancel.cancel();
+    jh.await.unwrap();
+    tracing::info!(
+        "✓ Initial distribution: recv1={}, recv2={}",
+        initial_recv1,
+        initial_recv2
+    );
+
+    receiver1.clear();
+    receiver2.clear();
+
+    // Update slot demands for receiver 2
+    let demands2 = vec![
+        SessionSlotRanges {
+            session_id: session_id1,
+            slots: vec![SlotRange {
+                index: 0,
+                length: 128,
+            }],
+        },
+        SessionSlotRanges {
+            session_id: session_id2,
+            slots: vec![SlotRange {
+                index: -1,
+                length: 384,
+            }],
+        },
+    ];
+    let set_demands_ok = client.set_slot_demands(demands2).await.is_ok();
+    tracing::info!(
+        "✓ Set slot demands: {}",
+        if set_demands_ok { "PASS" } else { "FAIL" }
+    );
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send traffic again and check updated distribution
+    let cancel = CancellationToken::new();
+    let jh = {
+        let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+        let cancel_cloned = cancel.clone();
+        tokio::spawn(async move {
+            sender
+                .generate_test_stream(num_packets, 20000, Duration::from_millis(5), cancel_cloned)
+                .await
+        })
+    };
+
+    let (updated_recv1, updated_recv2): (usize, usize) = tokio::join!(
+        receiver1.count_packets(num_packets, Duration::from_millis(1000)),
+        receiver2.count_packets(num_packets, Duration::from_millis(1000))
+    );
+    cancel.cancel();
+    jh.await.unwrap();
+    tracing::info!(
+        "✓ Updated distribution: recv1={}, recv2={}",
+        updated_recv1,
+        updated_recv2
+    );
+
+    // Cleanup
+    receiver1.cancel_tasks();
+    receiver2.cancel_tasks();
+    client.deregister().await.ok();
+
+    tracing::info!("Freeing load balancer {}", lb_id);
+    if let Err(e) = client.free_load_balancer().await {
+        tracing::warn!("Failed to free load balancer: {}", e);
+        errors.push(format!("free_load_balancer: {e}"));
+    } else {
+        tracing::info!("freed load balancer {}", lb_id);
+    }
+
+    Ok(StaticStrategyOutput {
+        lb_id,
+        url: ejfat_url,
+        first_packet_ms,
+        initial_recv1,
+        initial_recv2,
+        updated_recv1,
+        updated_recv2,
+        set_demands_ok,
+        errors,
+    })
 }
 
-// --- Main doctor orchestrator ---
+async fn test_explicit_strategy(
+    url: &str,
+    ip_address: IpAddr,
+    port: u16,
+    mtu: usize,
+    with_lb_headers: bool,
+) -> Result<ExplicitStrategyOutput> {
+    let mut errors = Vec::new();
+    let base_port = port + 20; // Avoid conflicts with other strategies
 
+    // Reserve load balancer
+    tracing::info!("Reserving load balancer for explicit strategy");
+    let mut client = ControlPlaneClient::from_url(url).await?;
+    let expiration = SystemTime::now() + Duration::from_secs(180);
+    let expiration_timestamp = Timestamp::from(expiration);
+    let ip_family = match ip_address {
+        IpAddr::V4(_) => IpFamily::Ipv4,
+        IpAddr::V6(_) => IpFamily::Ipv6,
+    };
+
+    let reply = client
+        .reserve_load_balancer(
+            "ejfat-doctor".to_string(),
+            Some(expiration_timestamp),
+            vec![ip_address.to_string()],
+            ip_family,
+            "explicit".to_string(),
+        )
+        .await?
+        .into_inner();
+
+    let mut parsed_url: EjfatUrl = url.parse().expect("Invalid EJFAT url");
+    client.lb_id = Some(reply.lb_id.clone());
+    parsed_url.update_from_reservation(&reply);
+    parsed_url = match ip_family {
+        IpFamily::Ipv4 => parsed_url.without_v6(),
+        IpFamily::Ipv6 => parsed_url.without_v4(),
+        _ => parsed_url,
+    };
+
+    let lb_id = reply.lb_id.clone();
+    let ejfat_url = parsed_url.clone();
+
+    tracing::info!("Starting first packet test; EJFAT_URI: {}", ejfat_url);
+
+    // Test first packet to ensure LB is ready (with slot demands for explicit strategy)
+    let offset = if with_lb_headers {
+        std::mem::size_of::<LBHeader>()
+    } else {
+        0
+    };
+    let slot_demands = vec![SlotRange {
+        index: 0,
+        length: 512,
+    }];
+    let mut receiver1 = ReceiverBuilder::new("doctor-node1", ip_address.to_string(), base_port)
+        .mtu(mtu)
+        .offset(offset)
+        .slot_demands(slot_demands)
+        .build(&mut client)
+        .await?;
+
+    let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+    let cancel = CancellationToken::new();
+    let cancel_cloned = cancel.clone();
+    let jh = tokio::spawn(async move {
+        sender
+            .generate_test_stream(500, 1, Duration::from_millis(10), cancel_cloned)
+            .await
+    });
+    let _ = receiver1.count_packets(1, Duration::from_secs(5)).await;
+    let mut duration = receiver1
+        .first_packet_duration()
+        .ok_or_else(|| crate::errors::Error::Runtime("no packets received!".to_string()))?;
+    duration += Duration::from_millis(100);
+    cancel.cancel();
+    jh.await.unwrap();
+    receiver1.clear();
+    let first_packet_ms = duration.as_millis();
+    tracing::info!("✓ First packet test: {}ms", first_packet_ms);
+
+    receiver1.cancel_tasks();
+    client.deregister().await.ok();
+
+    // Test explicit strategy slot coverage
+    tracing::info!("Starting explicit strategy slot coverage test");
+
+    // Register receiver 1 with partial slot coverage
+    let demands1 = vec![SlotRange {
+        index: 0,
+        length: 256,
+    }];
+    let mut receiver1 =
+        ReceiverBuilder::new("doctor-explicit-1", ip_address.to_string(), base_port + 2)
+            .mtu(mtu)
+            .offset(offset)
+            .slot_demands(demands1)
+            .build(&mut client)
+            .await?;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send traffic and check initial loss (should lose ~50% since only half slots covered)
+    let num_packets = 2000;
+    let cancel = CancellationToken::new();
+    let jh = {
+        let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+        let cancel_cloned = cancel.clone();
+        tokio::spawn(async move {
+            sender
+                .generate_test_stream(num_packets, 20000, Duration::from_millis(5), cancel_cloned)
+                .await
+        })
+    };
+
+    let initial_recv = receiver1
+        .count_packets(num_packets, Duration::from_millis(1000))
+        .await;
+    cancel.cancel();
+    jh.await.unwrap();
+    let initial_loss_pct = 100.0 - ((initial_recv as f64 / num_packets as f64) * 100.0);
+    tracing::info!(
+        "✓ Initial slot coverage: recv={}, loss={:.2}%",
+        initial_recv,
+        initial_loss_pct
+    );
+
+    receiver1.clear();
+
+    // Register receiver 2 to cover remaining slots
+    let demands2 = vec![SlotRange {
+        index: -1,
+        length: 256,
+    }];
+    let mut receiver2 =
+        ReceiverBuilder::new("doctor-explicit-2", ip_address.to_string(), base_port + 3)
+            .mtu(mtu)
+            .offset(offset)
+            .slot_demands(demands2)
+            .build(&mut client)
+            .await?;
+
+    tokio::time::sleep(Duration::from_millis(500)).await;
+
+    // Send traffic again and check updated loss (should be minimal now)
+    let cancel = CancellationToken::new();
+    let jh = {
+        let mut sender = Sender::from_url(&parsed_url, None, ip_address.is_ipv6()).await?;
+        let cancel_cloned = cancel.clone();
+        tokio::spawn(async move {
+            sender
+                .generate_test_stream(num_packets, 20000, Duration::from_millis(5), cancel_cloned)
+                .await
+        })
+    };
+
+    let (updated_recv1, updated_recv2): (usize, usize) = tokio::join!(
+        receiver1.count_packets(num_packets, Duration::from_millis(1000)),
+        receiver2.count_packets(num_packets, Duration::from_millis(1000))
+    );
+    cancel.cancel();
+    jh.await.unwrap();
+    let updated_recv = updated_recv1 + updated_recv2;
+    let updated_loss_pct = 100.0 - ((updated_recv as f64 / num_packets as f64) * 100.0);
+    tracing::info!(
+        "✓ Full slot coverage: recv1={}, recv2={}, total={}, loss={:.2}%",
+        updated_recv1,
+        updated_recv2,
+        updated_recv,
+        updated_loss_pct
+    );
+
+    // Cleanup
+    receiver1.cancel_tasks();
+    receiver2.cancel_tasks();
+    client.deregister().await.ok();
+
+    tracing::info!("Freeing load balancer {}", lb_id);
+    if let Err(e) = client.free_load_balancer().await {
+        tracing::warn!("Failed to free load balancer: {}", e);
+        errors.push(format!("free_load_balancer: {e}"));
+    } else {
+        tracing::info!("freed load balancer {}", lb_id);
+    }
+
+    Ok(ExplicitStrategyOutput {
+        lb_id,
+        url: ejfat_url,
+        first_packet_ms,
+        initial_recv,
+        initial_loss_pct,
+        updated_recv,
+        updated_loss_pct,
+        errors,
+    })
+}
+
+/// Run the doctor test for a single address, testing all strategies.
 pub async fn doctor(
-    url: String,
+    url: &str,
     ip_address: IpAddr,
     port: u16,
     mtu: usize,
     with_lb_headers: bool,
 ) -> Result<DoctorOutput> {
-    let mut errors = Vec::new();
+    tracing::info!("Testing dynamic strategy");
+    let dynamic = test_dynamic_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
 
-    tracing::info!("Starting reservation step");
-    let (mut ctx, reservation) = reserve_load_balancer(
-        &url,
-        ip_address,
-        port,
-        mtu,
-        with_lb_headers,
-        "dynamic".to_string(),
-    )
-    .await
-    .map_err(|e| {
-        errors.push(format!("reservation: {e}"));
-        e
-    })?;
+    tracing::info!("Testing static strategy");
+    let static_strategy =
+        test_static_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
 
-    tracing::info!("Starting first packet test; EJFAT_URI: {}", reservation.url);
-    let (mut receiver1, first_packet) = test_first_packet(&mut ctx).await.map_err(|e| {
-        errors.push(format!("first_packet: {e}"));
-        e
-    })?;
+    tracing::info!("Testing explicit strategy");
+    let explicit = test_explicit_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
 
-    tracing::info!("Starting data ID test; previous result: {:?}", first_packet);
-    let data_id = test_data_id(&mut ctx, &mut receiver1).await.map_err(|e| {
-        errors.push(format!("data_id: {e}"));
-        e
-    })?;
-
-    tracing::info!("Starting packet loss test; previous result: {:?}", data_id);
-    let packet_loss = test_packet_loss(&mut ctx, &mut receiver1)
-        .await
-        .map_err(|e| {
-            errors.push(format!("packet_loss: {e}"));
-            e
-        })?;
-
-    tracing::info!(
-        "Starting dynamic receiver test; previous result: {:?}",
-        packet_loss
-    );
-    let (mut receiver2, dynamic_receiver) = test_dynamic_receiver(&mut ctx).await.map_err(|e| {
-        errors.push(format!("dynamic_receiver: {e}"));
-        e
-    })?;
-
-    tracing::info!(
-        "Starting distribution test; previous result: {:?}",
-        dynamic_receiver
-    );
-    let distribution = test_distribution(&mut ctx, &mut receiver1, &mut receiver2)
-        .await
-        .map_err(|e| {
-            errors.push(format!("distribution: {e}"));
-            e
-        })?;
-
-    tracing::info!(
-        "Starting split event test; previous result: {:?}",
-        distribution
-    );
-    let split_event = test_split_event(&receiver1, &receiver2)
-        .await
-        .map_err(|e| {
-            errors.push(format!("split_event: {e}"));
-            e
-        })?;
-
-    tracing::info!("Starting overview test; previous result: {:?}", split_event);
-    let overview = test_overview(&mut ctx).await.map_err(|e| {
-        errors.push(format!("overview: {e}"));
-        e
-    })?;
-
-    tracing::info!(
-        "Starting remove/add sender test; previous result: {:?}",
-        overview
-    );
-    let remove_add_sender = test_remove_add_sender(&mut ctx, &mut receiver1)
-        .await
-        .map_err(|e| {
-            errors.push(format!("remove_add_sender: {e}"));
-            e
-        })?;
-
-    tracing::info!(
-        "Starting deregister test; previous result: {:?}",
-        remove_add_sender
-    );
-    let deregister = test_deregister(&mut ctx).await.map_err(|e| {
-        errors.push(format!("deregister: {e}"));
-        e
-    })?;
-
-    // Cleanup
-    receiver1.cancel_tasks();
-    receiver2.cancel_tasks();
-    let _ = ctx.client.free_load_balancer().await;
-
-    let output = DoctorOutput {
+    Ok(DoctorOutput {
         address: ip_address.to_string(),
-        reservation,
-        first_packet,
-        data_id,
-        packet_loss,
-        dynamic_receiver,
-        distribution,
-        split_event,
-        overview,
-        remove_add_sender,
-        deregister,
-        errors,
-    };
-
-    Ok(output)
+        dynamic,
+        static_strategy,
+        explicit,
+    })
 }
 
 /// Run the doctor test for multiple addresses, returning a Vec of results.
 pub async fn doctor_multi(
-    url: String,
+    url: &str,
     addresses: Vec<String>,
     port: u16,
     mtu: usize,
     with_lb_headers: bool,
 ) -> Vec<Result<DoctorOutput>> {
     let mut results = Vec::new();
-    for addr in addresses {
+
+    for addr in &addresses {
         let ip_addr = addr
             .parse::<IpAddr>()
             .expect("Invalid IP address in doctor_multi");
-        let res = doctor(url.clone(), ip_addr, port, mtu, with_lb_headers).await;
+
+        let res = doctor(url, ip_addr, port, mtu, with_lb_headers).await;
         results.push(res);
     }
     results

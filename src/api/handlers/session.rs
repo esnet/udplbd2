@@ -146,6 +146,15 @@ impl LoadBalancerService {
         .await
         .map_err(|e| Status::internal(format!("Failed to delete session: {e}")))?;
 
+        // Clear associated slot demands
+        sqlx::query!(
+            "UPDATE slot_demand SET deleted_at = unixepoch('subsec') * 1000 WHERE session_id = ?1 AND deleted_at IS NULL",
+            session_id
+        )
+        .execute(&self.db.write_pool)
+        .await
+        .map_err(|e| Status::internal(format!("Failed to clear slot demands: {e}")))?;
+
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());

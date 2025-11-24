@@ -13,7 +13,7 @@ use zerocopy::FromBytes;
 
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
-use crate::dataplane::doctor::{doctor, doctor_multi};
+use crate::dataplane::doctor::doctor_multi;
 use crate::dataplane::meta_events::MetaEventContext;
 use crate::dataplane::protocol::EjfatEvent;
 use crate::dataplane::protocol::{
@@ -276,30 +276,12 @@ impl DataplaneCli {
                 send_file(args.file.clone(), target_addr, url.to_string(), 0).await?;
             }
             DataplaneCommand::Doctor(args) => {
-                if args.addresses.len() == 1 {
-                    let output = doctor(
-                        url.to_string(),
-                        args.addresses[0].parse()?,
-                        args.port,
-                        args.mtu,
-                        args.lb,
-                    )
-                    .await?;
-                    println!("{output}");
-                } else {
-                    let results = doctor_multi(
-                        url.to_string(),
-                        args.addresses.clone(),
-                        args.port,
-                        args.mtu,
-                        args.lb,
-                    )
-                    .await;
-                    for res in results {
-                        match res {
-                            Ok(output) => println!("{output}"),
-                            Err(e) => eprintln!("doctor error: {e}"),
-                        }
+                let results =
+                    doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb).await;
+                for res in results {
+                    match res {
+                        Ok(output) => println!("{output}"),
+                        Err(e) => eprintln!("doctor error: {e}"),
                     }
                 }
             }
