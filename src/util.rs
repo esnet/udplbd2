@@ -12,7 +12,10 @@ use tracing::warn;
 /// - Slashes and colons to enable different names for mutiple processes on the same host (e.g. /1 or :port)
 /// - Underscores allowed for backwards compatibility
 pub fn is_valid_name(name: &str) -> bool {
-    if name.is_empty() || name.len() > 253 {
+    if name.is_empty() {
+        return true;
+    }
+    if name.len() > 253 {
         return false;
     }
     for label in name.split('.') {
