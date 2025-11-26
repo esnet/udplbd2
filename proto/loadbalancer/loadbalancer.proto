@@ -331,7 +331,7 @@ message TimeseriesRequest {
 }
 
 message FloatSample {
-	int64 timestamp = 1; // ms since epoch
+	int64 timestamp = 1; // ms since UNIX epoch
 	float value = 2;
 	google.protobuf.Struct meta = 3;
 }
@@ -340,12 +340,13 @@ message FloatTimeseries {
 }
 
 message IntegerSample {
-	int64 timestamp = 1;  // ms since epoch
+	int64 timestamp = 1;  // ms since UNIX epoch
 	int64 value = 2;
 	google.protobuf.Struct meta = 3;
 }
 message IntegerTimeseries {
-	repeated IntegerTimeseries data = 4;
+	repeated IntegerSample data = 1;
+	reserved 4;
 }
 
 message Timeseries {
@@ -415,6 +416,7 @@ message TokenDetails {
 	string name = 1;
 	repeated TokenPermission permissions = 2;
 	string created_at = 3;
+	uint32 id = 4;
 }
 
 message ListTokenPermissionsReply {

@@ -404,7 +404,7 @@ pub struct TimeseriesRequest {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct FloatSample {
-    /// ms since epoch
+    /// ms since UNIX epoch
     #[prost(int64, tag = "1")]
     pub timestamp: i64,
     #[prost(float, tag = "2")]
@@ -421,7 +421,7 @@ pub struct FloatTimeseries {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IntegerSample {
-    /// ms since epoch
+    /// ms since UNIX epoch
     #[prost(int64, tag = "1")]
     pub timestamp: i64,
     #[prost(int64, tag = "2")]
@@ -432,8 +432,8 @@ pub struct IntegerSample {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct IntegerTimeseries {
-    #[prost(message, repeated, tag = "4")]
-    pub data: ::prost::alloc::vec::Vec<IntegerTimeseries>,
+    #[prost(message, repeated, tag = "1")]
+    pub data: ::prost::alloc::vec::Vec<IntegerSample>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -619,6 +619,8 @@ pub struct TokenDetails {
     pub permissions: ::prost::alloc::vec::Vec<TokenPermission>,
     #[prost(string, tag = "3")]
     pub created_at: ::prost::alloc::string::String,
+    #[prost(uint32, tag = "4")]
+    pub id: u32,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]

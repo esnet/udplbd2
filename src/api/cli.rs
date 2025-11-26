@@ -2,6 +2,7 @@
 /// CLI subcommands that interact with the gRPC API
 use chrono::{TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};
+use std::fmt;
 
 use prost_wkt_types::Timestamp;
 
@@ -10,7 +11,7 @@ use crate::api::client::{ControlPlaneClient, EjfatUrl};
 use crate::config::{parse_duration, Config};
 use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::{
-    token_permission::PermissionType, token_permission::ResourceType, TokenPermission,
+    token_permission::PermissionType, token_permission::ResourceType, TokenDetails, TokenPermission,
 };
 
 /// API commands that call the gRPC control plane.
@@ -330,22 +331,12 @@ async fn create_token(
     Ok(())
 }
 
-async fn list_token_permissions(url: String, token: Option<String>) -> Result<()> {
-    let mut client = ControlPlaneClient::from_url(&url).await?;
-
-    let reply = match token {
-        Some(t) => client
-            .list_token_permissions_for_token(t)
-            .await?
-            .into_inner(),
-        None => client.list_token_permissions().await?.into_inner(),
-    };
-
-    if let Some(details) = reply.token {
-        println!("Token: {}", details.name);
-        println!("Created at: {}", details.created_at);
-        println!("\nPermissions:");
-        for perm in details.permissions {
+impl fmt::Display for TokenDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Token {}: {}", self.id, self.name)?;
+        writeln!(f, "Created at: {}", self.created_at)?;
+        writeln!(f, "\nPermissions:")?;
+        for perm in &self.permissions {
             let resource_type = match perm.resource_type() {
                 ResourceType::All => "ALL",
                 ResourceType::LoadBalancer => "LOAD_BALANCER",
@@ -361,14 +352,32 @@ async fn list_token_permissions(url: String, token: Option<String>) -> Result<()
             };
 
             if perm.resource_id.is_empty() {
-                println!("  - {permission} {resource_type} (all resources)");
+                writeln!(f, "  - {permission} {resource_type} (all resources)")?;
             } else {
-                println!(
-                    "  - {} {} (id: {})",
-                    permission, resource_type, perm.resource_id
-                );
+                writeln!(
+                    f,
+                    "  - {permission} {resource_type} (id: {})",
+                    perm.resource_id
+                )?;
             }
         }
+        Ok(())
+    }
+}
+
+async fn list_token_permissions(url: String, token: Option<String>) -> Result<()> {
+    let mut client = ControlPlaneClient::from_url(&url).await?;
+
+    let reply = match token {
+        Some(t) => client
+            .list_token_permissions_for_token(t)
+            .await?
+            .into_inner(),
+        None => client.list_token_permissions().await?.into_inner(),
+    };
+
+    if let Some(details) = reply.token {
+        print!("{}", details);
     } else {
         println!("Token not found");
     }
@@ -385,33 +394,7 @@ async fn list_child_tokens(url: String) -> Result<()> {
     }
 
     for token in reply.tokens {
-        println!("\nToken: {}", token.name);
-        println!("Created at: {}", token.created_at);
-        println!("Permissions:");
-        for perm in token.permissions {
-            let resource_type = match perm.resource_type() {
-                ResourceType::All => "ALL",
-                ResourceType::LoadBalancer => "LOAD_BALANCER",
-                ResourceType::Reservation => "RESERVATION",
-                ResourceType::Session => "SESSION",
-            };
-
-            let permission = match perm.permission() {
-                PermissionType::ReadOnly => "READ_ONLY",
-                PermissionType::Register => "REGISTER",
-                PermissionType::Reserve => "RESERVE",
-                PermissionType::Update => "UPDATE",
-            };
-
-            if perm.resource_id.is_empty() {
-                println!("  - {permission} {resource_type} (all resources)");
-            } else {
-                println!(
-                    "  - {permission} {resource_type} (id: {})",
-                    perm.resource_id
-                );
-            }
-        }
+        println!("\n{}", token);
     }
     Ok(())
 }

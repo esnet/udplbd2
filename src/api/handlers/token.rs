@@ -327,6 +327,7 @@ impl LoadBalancerService {
                 name: details.name,
                 permissions: proto_permissions,
                 created_at: details.created_at.to_rfc3339(),
+                id: details.id as u32,
             }),
         }))
     }
@@ -408,6 +409,7 @@ impl LoadBalancerService {
                 name: child.name,
                 permissions: proto_permissions,
                 created_at: child.created_at.to_rfc3339(),
+                id: child.id as u32,
             });
         }
 
