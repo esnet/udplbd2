@@ -335,7 +335,7 @@ impl fmt::Display for TokenDetails {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "Token {}: {}", self.id, self.name)?;
         writeln!(f, "Created at: {}", self.created_at)?;
-        writeln!(f, "\nPermissions:")?;
+        writeln!(f, "Permissions:")?;
         for perm in &self.permissions {
             let resource_type = match perm.resource_type() {
                 ResourceType::All => "ALL",
