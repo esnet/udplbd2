@@ -13,7 +13,7 @@ use zerocopy::FromBytes;
 
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
-use crate::dataplane::doctor::{doctor, doctor_multi};
+use crate::dataplane::doctor::doctor_multi;
 use crate::dataplane::meta_events::MetaEventContext;
 use crate::dataplane::protocol::EjfatEvent;
 use crate::dataplane::protocol::{
@@ -22,7 +22,6 @@ use crate::dataplane::protocol::{
 use crate::dataplane::sender::Sender;
 use crate::dataplane::tester;
 use crate::errors::{Error, Result};
-use crate::proto::loadbalancer::v1::PortRange;
 
 use crate::dataplane::meta_events::MetaEventType;
 use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
@@ -109,7 +108,7 @@ pub struct RecvArgs {
     #[arg(long, default_value = "1500")]
     pub mtu: usize,
     /// Name of the backend.
-    #[arg(long, default_value = "default_hostname")]
+    #[arg(long, default_value = "unnamed")]
     pub name: String,
     /// Expect packets to still contain LB headers.
     #[arg(long)]
@@ -123,6 +122,9 @@ pub struct RecvArgs {
     /// Number of worker threads.
     #[arg(short, long, default_value = "4")]
     pub threads: usize,
+    /// Slot demands for receiver, e.g. --slots 0-128 --slots auto:128
+    #[arg(long = "slots", value_name = "SLOT_DEMAND", num_args = 0.., value_delimiter = ' ', required = false)]
+    pub slots: Vec<String>,
     /// Command and its arguments to run on each received file.
     #[arg(last = true)]
     pub command: Vec<String>,
@@ -244,6 +246,8 @@ impl DataplaneCli {
 
         match &self.command {
             DataplaneCommand::Recv(args) => {
+                // Parse slot demands
+                let slot_demands = parse_slot_demands(&args.slots)?;
                 receive_files(
                     url.to_string(),
                     args.name.clone(),
@@ -260,6 +264,7 @@ impl DataplaneCli {
                     args.minf,
                     args.maxf,
                     args.threads,
+                    slot_demands,
                 )
                 .await?;
             }
@@ -271,30 +276,12 @@ impl DataplaneCli {
                 send_file(args.file.clone(), target_addr, url.to_string(), 0).await?;
             }
             DataplaneCommand::Doctor(args) => {
-                if args.addresses.len() == 1 {
-                    let output = doctor(
-                        url.to_string(),
-                        args.addresses[0].parse()?,
-                        args.port,
-                        args.mtu,
-                        args.lb,
-                    )
-                    .await?;
-                    println!("{}", output);
-                } else {
-                    let results = doctor_multi(
-                        url.to_string(),
-                        args.addresses.clone(),
-                        args.port,
-                        args.mtu,
-                        args.lb,
-                    )
-                    .await;
-                    for res in results {
-                        match res {
-                            Ok(output) => println!("{}", output),
-                            Err(e) => eprintln!("doctor error: {}", e),
-                        }
+                let results =
+                    doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb).await;
+                for res in results {
+                    match res {
+                        Ok(output) => println!("{output}"),
+                        Err(e) => eprintln!("doctor error: {e}"),
                     }
                 }
             }
@@ -307,9 +294,10 @@ impl DataplaneCli {
                     ip_addr,
                     args.port,
                     &meta_event_manager,
+                    "dynamic".to_string(), // TODO: support additional strategies
                 )
                 .await?;
-                println!("{}", output);
+                println!("{output}");
             }
             DataplaneCommand::Print(args) => {
                 print_udp_payloads(&args.address, args.port).await?;
@@ -340,7 +328,7 @@ impl DataplaneCli {
                 tokio::task::spawn(async move {
                     tokio::task::block_in_place(move || {
                         if let Err(e) = run_pcap_analysis(&file, lb) {
-                            eprintln!("pcap analysis failed: {}", e);
+                            eprintln!("pcap analysis failed: {e}");
                         }
                     });
                 });
@@ -349,11 +337,11 @@ impl DataplaneCli {
                 for ip_str in &args.ips {
                     match ip_str.parse::<IpAddr>() {
                         Ok(ip) => match get_mac_addr(ip).await {
-                            Ok(mac) => println!("{} -> {}", ip, mac),
-                            Err(e) => eprintln!("{} -> error: {}", ip, e),
+                            Ok(mac) => println!("{ip} -> {mac}"),
+                            Err(e) => eprintln!("{ip} -> error: {e}"),
                         },
                         Err(e) => {
-                            eprintln!("{} -> invalid IP address: {}", ip_str, e);
+                            eprintln!("{ip_str} -> invalid IP address: {e}");
                         }
                     }
                 }
@@ -387,37 +375,8 @@ pub async fn send_file(
         }
     };
 
-    println!("{}", packets_sent);
+    println!("{packets_sent}");
     Ok(())
-}
-
-#[allow(clippy::too_many_arguments)]
-pub async fn register(
-    url: String,
-    hostname: String,
-    weight: f32,
-    ip_address: String,
-    port: u16,
-    port_range: PortRange,
-    min_factor: f32,
-    max_factor: f32,
-    keep_lb_header: bool,
-) -> Result<ControlPlaneClient> {
-    let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
-    client
-        .register(
-            hostname.to_string(),
-            weight,
-            ip_address.to_string(),
-            port,
-            port_range,
-            min_factor,
-            max_factor,
-            keep_lb_header,
-        )
-        .await?
-        .into_inner();
-    Ok(client)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -437,6 +396,7 @@ async fn receive_files(
     min_factor: f32,
     max_factor: f32,
     max_concurrent_tasks: usize,
+    slot_demands: Vec<crate::proto::loadbalancer::v1::SlotRange>,
 ) -> Result<()> {
     if with_lb_headers {
         let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
@@ -444,35 +404,35 @@ async fn receive_files(
         println!("export 'EJFAT_URI={parsed_url}'");
     }
 
-    let mut client = register(
-        url.clone(),
-        hostname,
-        1.0,
-        ip_address.clone(),
-        port,
-        PortRange::PortRange1,
-        min_factor,
-        max_factor,
-        with_lb_headers,
-    )
-    .await?;
+    let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
 
-    recieve_and_execute(
-        &mut client,
-        command,
-        output_dir,
-        set_point,
+    let mut offset = 0;
+    if with_lb_headers {
+        offset = size_of::<LBHeader>();
+    }
+
+    let receiver = Receiver::new(
+        &hostname,
+        ip_address,
+        port,
+        1.0,
+        mtu,
+        1_073_741_824,
         kp,
         ki,
         kd,
-        mtu,
-        ip_address,
-        port,
-        with_lb_headers,
-        max_concurrent_tasks,
+        set_point,
+        min_factor,
+        max_factor,
+        offset,
+        &mut client,
         None,
+        slot_demands,
     )
-    .await;
+    .await
+    .unwrap();
+
+    process_events(receiver.rx, command, output_dir, max_concurrent_tasks, None).await;
 
     Ok(())
 }
@@ -519,7 +479,7 @@ async fn process_event(
 
             while let Some(line) = lines.next_line().await? {
                 let prefixed_line = format!("{} | {}", event.tick, line);
-                println!("{}", prefixed_line);
+                println!("{prefixed_line}");
             }
             Ok::<(), io::Error>(())
         };
@@ -528,6 +488,40 @@ async fn process_event(
         read_res?;
     }
     Ok(())
+}
+
+// Parse slot demand strings like "0-128" or "auto:128" into SlotRange
+fn parse_slot_demands(args: &[String]) -> Result<Vec<crate::proto::loadbalancer::v1::SlotRange>> {
+    let mut slot_ranges = Vec::new();
+    for arg in args {
+        let arg = arg.trim();
+        if let Some(len_str) = arg.strip_prefix("auto:") {
+            // auto:128
+            let length: u32 = len_str
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid auto slot length: {arg}")))?;
+            slot_ranges.push(crate::proto::loadbalancer::v1::SlotRange { index: -1, length });
+        } else if let Some((start, end)) = arg.split_once('-') {
+            // 0-128
+            let index: i32 = start
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid slot index: {arg}")))?;
+            let end: u32 = end
+                .parse()
+                .map_err(|_| Error::Usage(format!("Invalid slot end: {arg}")))?;
+            let length = if end > index as u32 {
+                end - index as u32
+            } else {
+                return Err(Error::Usage(format!(
+                    "End must be greater than start in slot range: {arg}"
+                )));
+            };
+            slot_ranges.push(crate::proto::loadbalancer::v1::SlotRange { index, length });
+        } else {
+            return Err(Error::Usage(format!("Invalid slot demand format: {arg}")));
+        }
+    }
+    Ok(slot_ranges)
 }
 
 pub async fn process_events(
@@ -547,7 +541,7 @@ pub async fn process_events(
         tokio::spawn(async move {
             let tick = event.tick;
             if let Err(err) = process_event(event, subcommand_clone, output_dir_clone).await {
-                eprintln!("{} ! failed to process event: {}", tick, err);
+                eprintln!("{tick} ! failed to process event: {err}");
             } else if let Some(ctx) = context {
                 ctx.emit(MetaEventType::Complete { tick });
             }
@@ -559,7 +553,7 @@ pub async fn process_events(
 fn print_user_payload(payload: &[u8]) {
     print!("  ");
     for (i, &byte) in payload.iter().enumerate() {
-        print!("{:02X} ", byte);
+        print!("{byte:02X} ");
         if (i + 1) % 16 == 0 {
             print!("\n  ");
         }
@@ -599,7 +593,7 @@ pub fn parse_and_print_udp_payload(payload: &[u8]) {
 
 pub async fn print_udp_payloads(address: &str, port: u16) -> Result<()> {
     let socket = UdpSocket::bind((address, port)).await?;
-    println!("listening on {}:{}", address, port);
+    println!("listening on {address}:{port}");
 
     let mut buffer = vec![0u8; 65536];
     loop {
@@ -608,65 +602,13 @@ pub async fn print_udp_payloads(address: &str, port: u16) -> Result<()> {
     }
 }
 
-#[allow(clippy::too_many_arguments)]
-pub async fn recieve_and_execute(
-    client: &mut ControlPlaneClient,
-    subcommand: Vec<String>,
-    output_dir: Option<String>,
-    set_point: usize,
-    kp: f64,
-    ki: f64,
-    kd: f64,
-    mtu: usize,
-    listener_ip: String,
-    listener_port: u16,
-    with_lb_headers: bool,
-    max_concurrent_tasks: usize,
-    meta_event_context: Option<MetaEventContext>,
-) {
-    let mut offset = 0;
-    if with_lb_headers {
-        offset = size_of::<LBHeader>();
-    }
-    let meta_event_context_clone = meta_event_context.clone();
-
-    let receiver = Receiver::new(
-        "udplbd-executor",
-        listener_ip,
-        listener_port,
-        1.0,
-        mtu,
-        1_073_741_824,
-        kp,
-        ki,
-        kd,
-        set_point,
-        0.0,
-        0.0,
-        offset,
-        client,
-        meta_event_context_clone,
-    )
-    .await
-    .unwrap();
-
-    process_events(
-        receiver.rx,
-        subcommand,
-        output_dir,
-        max_concurrent_tasks,
-        meta_event_context,
-    )
-    .await;
-}
-
 /// Run a PCAP analysis by processing the given file, then print any errors and incomplete events.
 /// `pcap_path` accepts any type that implements `AsRef<Path>`.
 pub fn run_pcap_analysis<P: AsRef<Path>>(pcap_path: P, lb: bool) -> Result<()> {
     // Process the PCAP file and collect a report.
     let report: PcapReassemblyReport = reassemble_from_pcap(pcap_path, lb)?;
     // Print final statistics.
-    println!("{}", report);
+    println!("{report}");
 
     Ok(())
 }

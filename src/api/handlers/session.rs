@@ -11,7 +11,7 @@ use crate::proto::loadbalancer::v1::{
     DeregisterReply, DeregisterRequest, RegisterReply, RegisterRequest, SendStateReply,
     SendStateRequest,
 };
-use crate::util::is_valid_dns_name;
+use crate::util::is_valid_name;
 
 impl LoadBalancerService {
     pub(crate) async fn handle_register(
@@ -26,27 +26,26 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Reservation(reservation_id),
                 PermissionType::Register,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "register: permission denied. reservation_id={}, source={}",
-                reservation_id, src
+                "register: permission denied. reservation_id={}, token_id={:?}, source={}",
+                reservation_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
 
-        // Validate DNS name
-        if !is_valid_dns_name(&request.name) {
-            return Err(Status::invalid_argument("Name must contain only valid DNS characters (letters, digits, hyphens, periods), and each label must start/end with a letter or digit"));
+        if !is_valid_name(&request.name) {
+            return Err(Status::invalid_argument("Name must contain only alphanumeric characters plus '.' ':' '/' '_' '-', and two periods may not follow each other"));
         }
 
         let addr = IpAddr::from_str(&request.ip_address)
@@ -58,6 +57,12 @@ impl LoadBalancerService {
             .get_mac_addr(addr)
             .await
             .map_err(|e| Status::internal(format!("Failed to get MAC address: {e}")))?;
+
+        let slot_demands_vec: Vec<(i32, u32)> = request
+            .slot_demands
+            .iter()
+            .map(|sr| (sr.index, sr.length))
+            .collect();
 
         let session = self
             .db
@@ -71,6 +76,7 @@ impl LoadBalancerService {
                 f64::from(request.max_factor),
                 mac_address,
                 request.keep_lb_header,
+                slot_demands_vec,
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to add session: {e}")))?;
@@ -93,8 +99,8 @@ impl LoadBalancerService {
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
         info!(
-            "register: session_id={}, name={}, socket_addr={}, reservation_id={}, source={}",
-            session.id, &request.name, socket_addr, reservation_id, src
+            "register: session_id={}, name={}, socket_addr={}, reservation_id={}, token_id={:?}, source={}",
+            session.id, &request.name, socket_addr, reservation_id, token_id, src
         );
         Ok(Response::new(RegisterReply {
             token,
@@ -114,20 +120,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid session ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Session(session_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "deregister: permission denied. session_id={}, source={}",
-                session_id, src
+                "deregister: permission denied. session_id={}, token_id={:?}, source={}",
+                session_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -140,10 +146,22 @@ impl LoadBalancerService {
         .await
         .map_err(|e| Status::internal(format!("Failed to delete session: {e}")))?;
 
+        // Clear associated slot demands
+        sqlx::query!(
+            "UPDATE slot_demand SET deleted_at = unixepoch('subsec') * 1000 WHERE session_id = ?1 AND deleted_at IS NULL",
+            session_id
+        )
+        .execute(&self.db.write_pool)
+        .await
+        .map_err(|e| Status::internal(format!("Failed to clear slot demands: {e}")))?;
+
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        info!("deregister: session_id={}, source={}", session_id, src);
+        info!(
+            "deregister: session_id={}, token_id={:?}, source={}",
+            session_id, token_id, src
+        );
         Ok(Response::new(DeregisterReply {}))
     }
 
@@ -159,20 +177,20 @@ impl LoadBalancerService {
             .parse::<i64>()
             .map_err(|_| Status::invalid_argument("Invalid session ID"))?;
 
-        if !self
+        let (ok, token_id) = self
             .validate_token(
                 &token,
                 Resource::Session(session_id),
                 PermissionType::Update,
             )
-            .await?
-        {
+            .await?;
+        if !ok {
             let src = remote_addr
                 .map(|a| a.to_string())
                 .unwrap_or_else(|| "unknown".to_string());
             warn!(
-                "send_state: permission denied. session_id={}, source={}",
-                session_id, src
+                "send_state: permission denied. session_id={}, token_id={:?}, source={}",
+                session_id, token_id, src
             );
             return Err(Status::permission_denied("Permission denied"));
         }
@@ -205,7 +223,12 @@ impl LoadBalancerService {
         let src = remote_addr
             .map(|a| a.to_string())
             .unwrap_or_else(|| "unknown".to_string());
-        trace!("send_state: session_id={}, source={}", session_id, src);
+        trace!(
+            "send_state: session_id={}, token_id={:?}, source={}",
+            session_id,
+            token_id,
+            src
+        );
         Ok(Response::new(SendStateReply {}))
     }
 }

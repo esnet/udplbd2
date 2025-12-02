@@ -17,7 +17,7 @@ use crate::reservation::ReservationManager;
 use super::service::LoadBalancerService;
 
 /// Creates a test service instance with an in-memory database
-pub async fn create_test_service() -> LoadBalancerService {
+pub async fn create_test_service() -> (LoadBalancerService, i64, i64) {
     let db = Arc::new(setup_db().await);
     let clients = MultiSNP4Client::new(vec![]);
 
@@ -30,31 +30,142 @@ pub async fn create_test_service() -> LoadBalancerService {
         "127.0.0.1:0".parse().ok(),
         "[::1]:0".parse().ok(),
     )));
-    LoadBalancerService::new(db, manager)
+    // Create a real reservation and session
+    let (_, reservation) = crate::db::tests::setup_test_loadbalancer(&db).await;
+    let sessions = db.get_reservation_sessions(reservation.id).await.unwrap();
+    let session_id = sessions[0].id;
+    (
+        LoadBalancerService::new(db, manager),
+        reservation.id,
+        session_id,
+    )
 }
 
 #[tokio::test]
 async fn test_create_token_invalid_parent() {
-    let service = create_test_service().await;
+    let (service, _, _) = create_test_service().await;
     let mut request = Request::new(CreateTokenRequest {
         name: "test".to_string(),
         permissions: vec![],
     });
-    request
-        .metadata_mut()
-        .insert("authorization", MetadataValue::from_static("invalid"));
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
 
     let result = service.handle_create_token(request).await;
     assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not found"),
+        "Expected error to contain 'not found', got: {}",
+        err
+    );
 }
 
-// Add more tests as needed
+#[tokio::test]
+async fn test_get_load_balancer_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::GetLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_get_load_balancer(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_load_balancer_status_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::LoadBalancerStatusRequest {
+        lb_id: reservation_id.to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_load_balancer_status(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_free_load_balancer_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::FreeLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_free_load_balancer(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("permission"));
+}
+
+#[tokio::test]
+async fn test_add_senders_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::AddSendersRequest {
+        lb_id: reservation_id.to_string(),
+        sender_addresses: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_add_senders(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_remove_senders_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RemoveSendersRequest {
+        lb_id: reservation_id.to_string(),
+        sender_addresses: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_remove_senders(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
 
 #[tokio::test]
 async fn test_register_invalid_token() {
-    let service = create_test_service().await;
+    let (service, reservation_id, _) = create_test_service().await;
     let mut request = Request::new(RegisterRequest {
-        lb_id: "1".to_string(),
+        lb_id: reservation_id.to_string(),
         name: "test".to_string(),
         ip_address: "127.0.0.1".to_string(),
         udp_port: 8000,
@@ -63,28 +174,246 @@ async fn test_register_invalid_token() {
         min_factor: 0.0,
         max_factor: 1.0,
         keep_lb_header: false,
+        slot_demands: Vec::new(),
     });
-    request
-        .metadata_mut()
-        .insert("authorization", MetadataValue::from_static("invalid"));
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
 
     let result = service.handle_register(request).await;
     assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
 }
 
 #[tokio::test]
 async fn test_reserve_load_balancer_invalid_token() {
-    let service = create_test_service().await;
+    let (service, _, _) = create_test_service().await;
     let mut request = Request::new(ReserveLoadBalancerRequest {
         until: None,
         sender_addresses: vec![],
         name: "test".to_string(),
         ..Default::default()
     });
-    request
-        .metadata_mut()
-        .insert("authorization", MetadataValue::from_static("invalid"));
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
 
     let result = service.handle_reserve_load_balancer(request).await;
     assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_set_slot_demands_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::SetSlotDemandsRequest {
+        lb_id: reservation_id.to_string(),
+        slot_constraints: Vec::new(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_set_slot_demands(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("permission"));
+}
+
+#[tokio::test]
+async fn test_deregister_invalid_token() {
+    let (service, reservation_id, session_id) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::DeregisterRequest {
+        lb_id: reservation_id.to_string(),
+        session_id: session_id.to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_deregister(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(err.contains("permission"));
+}
+
+#[tokio::test]
+async fn test_send_state_invalid_token() {
+    let (service, reservation_id, session_id) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::SendStateRequest {
+        lb_id: reservation_id.to_string(),
+        session_id: session_id.to_string(),
+        timestamp: None,
+        fill_percent: 0.0,
+        control_signal: 0.0,
+        is_ready: false,
+        total_events_recv: 0,
+        total_events_reassembled: 0,
+        total_events_reassembly_err: 0,
+        total_events_dequeued: 0,
+        total_event_enqueue_err: 0,
+        total_bytes_recv: 0,
+        total_packets_recv: 0,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_send_state(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_overview_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::OverviewRequest {});
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_overview(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_timeseries_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::TimeseriesRequest {
+        series_selector: vec!["/lb/1/*".to_string()],
+        since: None,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_timeseries(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_version_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::VersionRequest {});
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_version(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_list_token_permissions_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(
+        crate::proto::loadbalancer::v1::ListTokenPermissionsRequest {
+            target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+                token_selector: Some(
+                    crate::proto::loadbalancer::v1::token_selector::TokenSelector::Token(
+                        "test".to_string(),
+                    ),
+                ),
+            }),
+        },
+    );
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_list_token_permissions(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not found"),
+        "Expected error to contain 'not found', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_list_child_tokens_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Token(
+                    "test".to_string(),
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_list_child_tokens(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not found"),
+        "Expected error to contain 'not found', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_revoke_token_invalid_token() {
+    let (service, _, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Token(
+                    "test".to_string(),
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_revoke_token(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("not found"),
+        "Expected error to contain 'not found', got: {}",
+        err
+    );
 }

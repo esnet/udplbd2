@@ -15,10 +15,12 @@ use crate::proto::smartnic::cfg_v2::{
 use futures::{future::join_all, StreamExt};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
-    transport::{Channel, ClientTlsConfig},
+    transport::{Channel, ClientTlsConfig, Certificate},
     Request, Status,
 };
-// use tracing::{trace, warn};
+use std::path::PathBuf;
+
+use tracing::{debug, info};
 
 #[derive(Debug, Clone)]
 pub struct SNCfgClient {
@@ -31,12 +33,24 @@ impl SNCfgClient {
         addr: &str,
         device_id: i32,
         verify: bool,
+	ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
         let mut channel = Channel::from_shared(addr.to_string()).unwrap();
 
         if addr.starts_with("https://") {
-            let tls_config = ClientTlsConfig::new().with_enabled_roots();
+            let tls_config: ClientTlsConfig;
+            if let Some(ca_file) = ca_file {
+                let ca_file_str = ca_file.to_string_lossy();
+                info!("sn-cfg client for {addr} only trusting configured CA in {ca_file_str}");
+
+                let pem = std::fs::read_to_string(ca_file).expect("Failed to read CA certificate");
+                let cert = Certificate::from_pem(pem);
+                tls_config = ClientTlsConfig::new().ca_certificate(cert);
+            } else {
+                debug!("sn-cfg client for {addr} has no ca cert provided, trusting system root CAs");
+                tls_config = ClientTlsConfig::new().with_enabled_roots();
+            }
             if !verify {
                 // TODO: Support disabling TLS verification if needed
                 unimplemented!()

@@ -222,7 +222,7 @@ impl fmt::Display for EjfatEvent {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "tick {} data_id {}", self.tick, self.data_id)?;
         for (i, chunk) in self.data.chunks(16).enumerate() {
-            let hex_line: Vec<String> = chunk.iter().map(|byte| format!("{:02x}", byte)).collect();
+            let hex_line: Vec<String> = chunk.iter().map(|byte| format!("{byte:02x}")).collect();
             let utf8_line: String = chunk
                 .iter()
                 .map(|&byte| if byte.is_ascii() { byte as char } else { '.' })

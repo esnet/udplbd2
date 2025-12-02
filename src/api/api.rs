@@ -9,8 +9,8 @@ use crate::{
         LoadBalancerStatusReply, LoadBalancerStatusRequest, OverviewReply, OverviewRequest,
         RegisterReply, RegisterRequest, RemoveSendersReply, RemoveSendersRequest,
         ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
-        SendStateReply, SendStateRequest, TimeseriesRequest, TimeseriesResponse, VersionReply,
-        VersionRequest,
+        SendStateReply, SendStateRequest, SetSlotDemandsReply, SetSlotDemandsRequest,
+        TimeseriesRequest, TimeseriesResponse, VersionReply, VersionRequest,
     },
 };
 use tonic::{Request, Response, Status};
@@ -79,6 +79,14 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     ) -> Result<Response<DeregisterReply>, Status> {
         INBOUND_GRPC.inc();
         self.handle_deregister(request).await
+    }
+
+    async fn set_slot_demands(
+        &self,
+        request: Request<SetSlotDemandsRequest>,
+    ) -> Result<Response<SetSlotDemandsReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_set_slot_demands(request).await
     }
 
     async fn send_state(

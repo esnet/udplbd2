@@ -176,7 +176,7 @@ impl ReservationManager {
             )
             .await
             {
-                panic!("update loop failed: {:?}", e);
+                panic!("update loop failed: {e:?}");
             }
         }));
 
@@ -554,7 +554,7 @@ async fn dump_updates_to_file(dir: &PathBuf, updates: &[TableUpdate]) -> std::io
     std::fs::create_dir_all(dir)?;
 
     let now_str = Utc::now().format("%Y%m%d_%H%M%S%.3f").to_string();
-    let filename = format!("rule_delta_{}.txt", now_str);
+    let filename = format!("rule_delta_{now_str}.txt");
     let path = dir.join(&filename);
 
     let mut file = OpenOptions::new()

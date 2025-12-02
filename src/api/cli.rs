@@ -2,6 +2,7 @@
 /// CLI subcommands that interact with the gRPC API
 use chrono::{TimeZone, Utc};
 use clap::{Args, Parser, Subcommand};
+use std::fmt;
 
 use prost_wkt_types::Timestamp;
 
@@ -10,7 +11,7 @@ use crate::api::client::{ControlPlaneClient, EjfatUrl};
 use crate::config::{parse_duration, Config};
 use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::{
-    token_permission::PermissionType, token_permission::ResourceType, TokenPermission,
+    token_permission::PermissionType, token_permission::ResourceType, TokenDetails, TokenPermission,
 };
 
 /// API commands that call the gRPC control plane.
@@ -87,6 +88,12 @@ pub struct ReserveArgs {
     /// Duration offset for reservation expiration (e.g., "1hour 30min 2s").
     #[arg(long)]
     pub after: Option<String>,
+    /// Slot assignment strategy: 'dynamic', 'static', or 'explicit'
+    #[arg(long, value_name = "STRATEGY", default_value = "dynamic")]
+    pub strategy: String,
+    /// IP family to use: 'dualstack', 'ipv4', or 'ipv6'.
+    #[arg(long, value_name = "IP_FAMILY", default_value = "dualstack")]
+    pub ip_family: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -141,7 +148,7 @@ impl ApiCli {
                 let listen_addr = config.server.listen.first().ok_or(Error::Config(
                     "no listen address in server config".to_string(),
                 ))?;
-                format!("ejfat://{}@{}", config.server.auth_token, listen_addr)
+                format!("ejfat://{}@{listen_addr}", config.server.auth_token)
             }
         };
 
@@ -200,7 +207,29 @@ impl ApiCli {
                         ))
                     }
                 };
-                reserve_lb(url, args.name.clone(), expiration, args.sender.clone()).await?;
+
+                // Parse ip_family string to enum
+                let ip_family = match args.ip_family.to_lowercase().as_str() {
+                    "dualstack" => crate::proto::loadbalancer::v1::IpFamily::DualStack,
+                    "ipv4" => crate::proto::loadbalancer::v1::IpFamily::Ipv4,
+                    "ipv6" => crate::proto::loadbalancer::v1::IpFamily::Ipv6,
+                    other => {
+                        return Err(Error::Usage(format!(
+                            "Invalid ip_family: {}. Options are: dualstack, ipv4, ipv6",
+                            other
+                        )))
+                    }
+                };
+
+                reserve_lb(
+                    url,
+                    args.name.clone(),
+                    expiration,
+                    args.sender.clone(),
+                    ip_family,
+                    args.strategy.clone(),
+                )
+                .await?;
             }
             ApiCommand::Tokens { action } => match action {
                 TokensCommand::Create(args) => {
@@ -233,16 +262,13 @@ async fn reserve_lb(
     name: String,
     until: Option<Timestamp>,
     sender_addresses: Vec<String>,
+    ip_family: crate::proto::loadbalancer::v1::IpFamily,
+    strategy: String,
 ) -> Result<()> {
     let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
     let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
     let reply = client
-        .reserve_load_balancer(
-            name,
-            until,
-            sender_addresses,
-            crate::proto::loadbalancer::v1::IpFamily::DualStack,
-        )
+        .reserve_load_balancer(name, until, sender_addresses, ip_family, strategy)
         .await?
         .into_inner();
     parsed_url.update_from_reservation(&reply);
@@ -305,22 +331,12 @@ async fn create_token(
     Ok(())
 }
 
-async fn list_token_permissions(url: String, token: Option<String>) -> Result<()> {
-    let mut client = ControlPlaneClient::from_url(&url).await?;
-
-    let reply = match token {
-        Some(t) => client
-            .list_token_permissions_for_token(t)
-            .await?
-            .into_inner(),
-        None => client.list_token_permissions().await?.into_inner(),
-    };
-
-    if let Some(details) = reply.token {
-        println!("Token: {}", details.name);
-        println!("Created at: {}", details.created_at);
-        println!("\nPermissions:");
-        for perm in details.permissions {
+impl fmt::Display for TokenDetails {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "Token {}: {}", self.id, self.name)?;
+        writeln!(f, "Created at: {}", self.created_at)?;
+        writeln!(f, "Permissions:")?;
+        for perm in &self.permissions {
             let resource_type = match perm.resource_type() {
                 ResourceType::All => "ALL",
                 ResourceType::LoadBalancer => "LOAD_BALANCER",
@@ -336,14 +352,32 @@ async fn list_token_permissions(url: String, token: Option<String>) -> Result<()
             };
 
             if perm.resource_id.is_empty() {
-                println!("  - {} {} (all resources)", permission, resource_type);
+                writeln!(f, "  - {permission} {resource_type} (all resources)")?;
             } else {
-                println!(
-                    "  - {} {} (id: {})",
-                    permission, resource_type, perm.resource_id
-                );
+                writeln!(
+                    f,
+                    "  - {permission} {resource_type} (id: {})",
+                    perm.resource_id
+                )?;
             }
         }
+        Ok(())
+    }
+}
+
+async fn list_token_permissions(url: String, token: Option<String>) -> Result<()> {
+    let mut client = ControlPlaneClient::from_url(&url).await?;
+
+    let reply = match token {
+        Some(t) => client
+            .list_token_permissions_for_token(t)
+            .await?
+            .into_inner(),
+        None => client.list_token_permissions().await?.into_inner(),
+    };
+
+    if let Some(details) = reply.token {
+        print!("{}", details);
     } else {
         println!("Token not found");
     }
@@ -360,33 +394,7 @@ async fn list_child_tokens(url: String) -> Result<()> {
     }
 
     for token in reply.tokens {
-        println!("\nToken: {}", token.name);
-        println!("Created at: {}", token.created_at);
-        println!("Permissions:");
-        for perm in token.permissions {
-            let resource_type = match perm.resource_type() {
-                ResourceType::All => "ALL",
-                ResourceType::LoadBalancer => "LOAD_BALANCER",
-                ResourceType::Reservation => "RESERVATION",
-                ResourceType::Session => "SESSION",
-            };
-
-            let permission = match perm.permission() {
-                PermissionType::ReadOnly => "READ_ONLY",
-                PermissionType::Register => "REGISTER",
-                PermissionType::Reserve => "RESERVE",
-                PermissionType::Update => "UPDATE",
-            };
-
-            if perm.resource_id.is_empty() {
-                println!("  - {} {} (all resources)", permission, resource_type);
-            } else {
-                println!(
-                    "  - {} {} (id: {})",
-                    permission, resource_type, perm.resource_id
-                );
-            }
-        }
+        println!("\n{}", token);
     }
     Ok(())
 }
@@ -407,7 +415,7 @@ async fn overview_to_string(url: String) -> Result<String> {
         return Ok("No load balancers currently active".to_string());
     }
     for lb in reply.load_balancers {
-        let (lb_id, name, sync_ip, sync_port, data_ipv4, data_ipv6, fpga_lb_id) =
+        let (lb_id, name, sync_ip, sync_port, data_ipv4, data_ipv6, fpga_lb_id, strategy) =
             if let Some(res) = &lb.reservation {
                 (
                     res.lb_id.clone(),
@@ -417,6 +425,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                     res.data_ipv4_address.clone(),
                     res.data_ipv6_address.clone(),
                     res.fpga_lb_id,
+                    res.strategy.clone(),
                 )
             } else {
                 (
@@ -427,14 +436,16 @@ async fn overview_to_string(url: String) -> Result<String> {
                     "".to_string(),
                     "".to_string(),
                     0,
+                    "unreserved".to_string(),
                 )
             };
 
         output.push_str(&format!("LB {lb_id} - \"{name}\"\n"));
-        output.push_str(&format!("  sync: {}:{}\n", sync_ip, sync_port));
-        output.push_str(&format!("  ipv4: {}\n", data_ipv4));
-        output.push_str(&format!("  ipv6: {}\n", data_ipv6));
-        output.push_str(&format!("  fpga_lb_id: {}\n", fpga_lb_id));
+        output.push_str(&format!("  sync: {sync_ip}:{sync_port}\n"));
+        output.push_str(&format!("  ipv4: {data_ipv4}\n"));
+        output.push_str(&format!("  ipv6: {data_ipv6}\n"));
+        output.push_str(&format!("  fpga_lb_id: {fpga_lb_id}\n"));
+        output.push_str(&format!("  strategy: {strategy}\n"));
 
         if let Some(status) = &lb.status {
             let expires = status
@@ -453,8 +464,8 @@ async fn overview_to_string(url: String) -> Result<String> {
                         .to_rfc3339()
                 })
                 .unwrap_or_else(|| "never".to_string());
-            output.push_str(&format!("  expires_at: {}\n", expires));
-            output.push_str(&format!("  status_time: {}\n", timestamp));
+            output.push_str(&format!("  expires_at: {expires}\n"));
+            output.push_str(&format!("  status_time: {timestamp}\n"));
             output.push_str(&format!("  current_epoch: {}\n", status.current_epoch));
             output.push_str(&format!(
                 "  predicted_event: {}\n",
@@ -467,7 +478,7 @@ async fn overview_to_string(url: String) -> Result<String> {
                 ));
             }
             if !status.workers.is_empty() {
-                output.push_str("  workers:");
+                output.push_str("  workers:\n");
             }
             for worker in &status.workers {
                 let last_updated = worker
@@ -478,17 +489,16 @@ async fn overview_to_string(url: String) -> Result<String> {
                             .to_rfc3339()
                     })
                     .unwrap_or_else(|| "never".to_string());
-                output.push_str(&format!("  - worker: {}\n", worker.name));
+                output.push_str(&format!("  [ {} ]\n", worker.name));
+                output.push_str(&format!("    last_updated: {last_updated}\n"));
                 output.push_str(&format!(
                     "    ip: {}  port: {}  port_range: {:?}\n",
                     worker.ip_address, worker.udp_port, worker.port_range
                 ));
-                output.push_str(&format!("    slots_assigned: {}\n", worker.slots_assigned));
                 output.push_str(&format!(
-                    "    fill_percent: {:.2}  control_signal: {:.2}\n",
-                    worker.fill_percent, worker.control_signal
+                    "    slots_assigned: {}  fill_percent: {:.2}  control_signal: {:.2}\n",
+                    worker.slots_assigned, worker.fill_percent, worker.control_signal
                 ));
-                output.push_str(&format!("    last_updated: {}\n", last_updated));
                 output.push_str(&format!(
                     "    min_factor: {:.2}  max_factor: {:.2}  keep_lb_header: {}\n",
                     worker.min_factor, worker.max_factor, worker.keep_lb_header

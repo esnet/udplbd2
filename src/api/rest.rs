@@ -117,7 +117,7 @@ fn create_request<T>(
     let mut request = TonicRequest::new(inner);
     request.metadata_mut().insert(
         "authorization",
-        format!("Bearer {}", token).parse().map_err(|_| {
+        format!("Bearer {token}").parse().map_err(|_| {
             (
                 StatusCode::INTERNAL_SERVER_ERROR,
                 Json(ErrorResponse {
@@ -312,6 +312,7 @@ struct ReserveLoadBalancerBody {
     until: Option<String>,
     sender_addresses: Vec<String>,
     ip_family: Option<String>,
+    strategy: Option<String>,
 }
 
 async fn reserve_load_balancer_handler(
@@ -331,7 +332,7 @@ async fn reserve_load_balancer_handler(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        error: format!("Invalid timestamp format for 'until': {}", e),
+                        error: format!("Invalid timestamp format for 'until': {e}"),
                         code: StatusCode::BAD_REQUEST.as_u16(),
                     }),
                 ));
@@ -362,6 +363,7 @@ async fn reserve_load_balancer_handler(
         until: until_timestamp,
         sender_addresses: body.sender_addresses,
         ip_family: ip_family.into(),
+        strategy: body.strategy.unwrap_or_else(|| "dynamic".to_string()),
     };
     grpc_to_rest(
         headers,
@@ -476,6 +478,7 @@ struct RegisterBody {
     min_factor: f32,
     max_factor: f32,
     keep_lb_header: bool,
+    slot_demands: Option<Vec<crate::proto::loadbalancer::v1::SlotRange>>,
 }
 
 async fn register_handler(
@@ -498,6 +501,7 @@ async fn register_handler(
             min_factor: body.min_factor,
             max_factor: body.max_factor,
             keep_lb_header: body.keep_lb_header,
+            slot_demands: body.slot_demands.unwrap_or_default(),
         },
         Some(addr),
         |svc, req| async move { svc.handle_register(req).await },
@@ -558,7 +562,7 @@ async fn send_state_handler(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        error: format!("Invalid timestamp format for state update: {}", e),
+                        error: format!("Invalid timestamp format for state update: {e}"),
                         code: StatusCode::BAD_REQUEST.as_u16(),
                     }),
                 ));
@@ -719,7 +723,7 @@ async fn timeseries_handler(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        error: format!("Invalid timestamp format for 'since': {}", e),
+                        error: format!("Invalid timestamp format for 'since': {e}"),
                         code: StatusCode::BAD_REQUEST.as_u16(),
                     }),
                 ));
@@ -748,7 +752,7 @@ async fn timeseries_path_handler(
     Form(params): Form<TimeseriesQuery>,
 ) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
     let normalized_path = if !path.starts_with('/') {
-        format!("/{}", path)
+        format!("/{path}")
     } else {
         path
     };
@@ -761,7 +765,7 @@ async fn timeseries_path_handler(
                 return Err((
                     StatusCode::BAD_REQUEST,
                     Json(ErrorResponse {
-                        error: format!("Invalid timestamp format for 'since': {}", e),
+                        error: format!("Invalid timestamp format for 'since': {e}"),
                         code: StatusCode::BAD_REQUEST.as_u16(),
                     }),
                 ));

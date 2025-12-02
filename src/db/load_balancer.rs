@@ -20,7 +20,6 @@ impl LoadBalancerDB {
         for lb in active_loadbalancers {
             used_ids.insert(lb.fpga_lb_id as u16);
         }
-
         for fpga_lb_id in 0..8u16 {
             if !used_ids.contains(&fpga_lb_id) {
                 return Ok(fpga_lb_id);
@@ -280,6 +279,108 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
         })
+    }
+
+    /// Helper to resolve slot demands, handling index -1 and conflict checking.
+    /// Returns a Vec of (session_id, slot_index, slot_length) with no conflicts.
+    pub async fn resolve_slot_demands(
+        &self,
+        reservation_id: i64,
+        slot_demands: Vec<(Option<i64>, i32, u32)>,
+    ) -> Result<Vec<(Option<i64>, i32, u32)>> {
+        // Fetch all active slot demands for this reservation, sorted by slot_index
+        let existing = sqlx::query!(
+            "SELECT slot_index, slot_length FROM slot_demand WHERE reservation_id = ?1 AND deleted_at IS NULL ORDER BY slot_index",
+            reservation_id
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        let mut occupied: Vec<(i32, i32)> = existing
+            .iter()
+            .map(|row| {
+                let start = row.slot_index as i32;
+                let end = start + row.slot_length as i32;
+                (start, end)
+            })
+            .collect();
+
+        let mut resolved = Vec::new();
+        for (session_id, mut slot_index, slot_length) in slot_demands {
+            let range_len = slot_length as i32;
+            if slot_index == -1 {
+                // Find first gap between occupied ranges large enough for range_len
+                let mut prev_end = 0;
+                let mut found = false;
+                for &(occ_start, occ_end) in &occupied {
+                    if occ_start - prev_end >= range_len {
+                        slot_index = prev_end;
+                        found = true;
+                        break;
+                    }
+                    prev_end = occ_end;
+                }
+                // If no gap found, place after last occupied range
+                if !found {
+                    slot_index = prev_end;
+                }
+            }
+            // Check for overlap with any occupied range
+            let start = slot_index;
+            let end = start + range_len;
+            for &(occ_start, occ_end) in &occupied {
+                if start < occ_end && end > occ_start {
+                    return Err(Error::Usage(format!(
+                        "Slot demand conflict at range [{}, {})",
+                        start, end
+                    )));
+                }
+            }
+            // Insert new range into occupied, keep sorted
+            occupied.push((start, end));
+            // No need to sort, as we only care about gaps and conflicts
+            resolved.push((session_id, slot_index, slot_length));
+        }
+        Ok(resolved)
+    }
+
+    /// Sets slot demands for a reservation, replacing all previous demands.
+    /// slot_demands: Vec of (session_id, slot_index, slot_length)
+    pub async fn set_slot_demands(
+        &self,
+        reservation_id: i64,
+        slot_demands: Vec<(Option<i64>, i32, u32)>,
+    ) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Mark all previous slot demands as deleted
+        sqlx::query!(
+            "UPDATE slot_demand SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&mut *tx)
+        .await?;
+
+        // Resolve and check for conflicts
+        let resolved = self
+            .resolve_slot_demands(reservation_id, slot_demands)
+            .await?;
+
+        // Insert new slot demands
+        for (session_id, slot_index, slot_length) in resolved {
+            sqlx::query!(
+                "INSERT INTO slot_demand (reservation_id, session_id, slot_index, slot_length, created_at) VALUES (?1, ?2, ?3, ?4, unixepoch('subsec') * 1000)",
+                reservation_id,
+                session_id,
+                slot_index,
+                slot_length
+            )
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        tx.commit().await?;
+        Ok(())
     }
 
     /// Soft deletes a loadbalancer by ID.

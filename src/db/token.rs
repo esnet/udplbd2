@@ -265,7 +265,7 @@ impl LoadBalancerDB {
         token: &str,
         resource: Resource,
         required_permission: PermissionType,
-    ) -> Result<bool> {
+    ) -> Result<(bool, Option<i64>)> {
         let mut hasher = Sha256::new();
         hasher.update(token.as_bytes());
         let token_hash = hex::encode(hasher.finalize());
@@ -275,7 +275,7 @@ impl LoadBalancerDB {
             .await?
         {
             Some(record) => record.id,
-            None => return Ok(false),
+            None => return Ok((false, None)),
         };
 
         // Check global permissions first
@@ -289,7 +289,7 @@ impl LoadBalancerDB {
         for perm in global_perms {
             let permission: PermissionType = perm.permission.parse().unwrap();
             if Self::permission_implies(&permission, &required_permission) {
-                return Ok(true);
+                return Ok((true, Some(token_id)));
             }
         }
 
@@ -297,7 +297,7 @@ impl LoadBalancerDB {
         match resource {
             Resource::All => {
                 // Only global permissions can grant access to all resources
-                Ok(false)
+                Ok((false, Some(token_id)))
             }
             Resource::LoadBalancer(lb_id) => {
                 let perms = sqlx::query!(
@@ -313,10 +313,10 @@ impl LoadBalancerDB {
                 for perm in perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
-                Ok(false)
+                Ok((false, Some(token_id)))
             }
             Resource::Reservation(res_id) => {
                 // Check direct reservation permissions
@@ -333,7 +333,7 @@ impl LoadBalancerDB {
                 for perm in res_perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
 
@@ -352,10 +352,10 @@ impl LoadBalancerDB {
                 for perm in lb_perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
-                Ok(false)
+                Ok((false, Some(token_id)))
             }
             Resource::Session(session_id) => {
                 // Check direct session permissions
@@ -372,7 +372,7 @@ impl LoadBalancerDB {
                 for perm in session_perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
 
@@ -391,7 +391,7 @@ impl LoadBalancerDB {
                 for perm in res_perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
 
@@ -411,10 +411,10 @@ impl LoadBalancerDB {
                 for perm in lb_perms {
                     let permission: PermissionType = perm.permission.parse().unwrap();
                     if Self::permission_implies(&permission, &required_permission) {
-                        return Ok(true);
+                        return Ok((true, Some(token_id)));
                     }
                 }
-                Ok(false)
+                Ok((false, Some(token_id)))
             }
         }
     }
@@ -452,7 +452,7 @@ impl LoadBalancerDB {
         Ok(())
     }
 
-    pub async fn token_exists(&self, token: &str) -> Result<bool> {
+    pub async fn token_exists(&self, token: &str) -> Result<Option<i64>> {
         let mut hasher = Sha256::new();
         hasher.update(token.as_bytes());
         let token_hash = hex::encode(hasher.finalize());
@@ -462,7 +462,7 @@ impl LoadBalancerDB {
             .await
             .map_err(Error::Database)?;
 
-        Ok(result.is_some())
+        Ok(result.map(|record| record.id))
     }
 
     pub async fn remove_permission(&self, token: &str, resource: &Resource) -> Result<()> {

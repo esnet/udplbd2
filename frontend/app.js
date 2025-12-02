@@ -43,6 +43,7 @@ let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/
     // Buttons
     const tokenMgmtBtn = document.getElementById('token-mgmt-btn');
     const sysInfoBtn = document.getElementById('sys-info-btn');
+    const logoutBtn = document.getElementById('logout-btn');
     const addSenderBtn = document.getElementById('add-sender-btn');
     const generateChildTokenBtn = document.getElementById('generate-child-token-btn');
     const fullResetBtn = document.getElementById('full-reset-btn');
@@ -1433,6 +1434,12 @@ const renderSessions = (workers) => {
     if (sysInfoBtn) {
         sysInfoBtn.addEventListener('click', () => {
             navigateTo('/tools/system');
+        });
+    }
+    if (logoutBtn) {
+        logoutBtn.addEventListener('click', () => {
+            eraseCookie(AUTH_COOKIE_NAME);
+            window.location.reload();
         });
     }
 

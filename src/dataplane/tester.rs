@@ -12,6 +12,7 @@ use crate::dataplane::meta_events::{MetaEventManager, MetaEventType};
 use crate::dataplane::receiver::Receiver;
 use crate::dataplane::sender::Sender;
 use crate::errors::Result;
+use crate::proto::loadbalancer::v1::SlotRange;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(1);
 fn get_id() -> usize {
@@ -48,6 +49,8 @@ pub struct ReceiverConfig {
     pub max_factor: f32,
     #[serde(default = "default_sp")]
     pub sp: usize,
+    #[serde(default = "default_slot_demands")]
+    pub slot_demands: Vec<SlotRange>,
 }
 
 fn default_name() -> String {
@@ -56,6 +59,10 @@ fn default_name() -> String {
 
 fn default_sp() -> usize {
     5
+}
+
+fn default_slot_demands() -> Vec<SlotRange> {
+    Vec::new()
 }
 
 pub fn load_config_from_json(file_path: &str) -> Result<TestConfig> {
@@ -85,8 +92,7 @@ impl fmt::Display for TestOutput {
         let total_loss_pct = 100.0 - ((events_recieved as f64 / self.events_sent as f64) * 100.0);
         writeln!(
             f,
-            "total recv: {} (lost {}, {:.3}%)",
-            events_recieved, total_lost, total_loss_pct
+            "total recv: {events_recieved} (lost {total_lost}, {total_loss_pct:.3}%)"
         )?;
         Ok(())
     }
@@ -98,6 +104,7 @@ pub async fn run_test(
     ip_address: std::net::IpAddr,
     port: u16,
     meta_event_manager: &MetaEventManager,
+    strategy: String,
 ) -> Result<TestOutput> {
     let TestConfig { sender, receivers } = config;
     let SenderConfig {
@@ -114,6 +121,7 @@ pub async fn run_test(
             None,
             vec![ip_address.to_string()],
             crate::proto::loadbalancer::v1::IpFamily::DualStack,
+            strategy,
         )
         .await?
         .into_inner();
@@ -146,6 +154,7 @@ pub async fn run_test(
             0,
             &mut control_plane_client,
             recv_event_context,
+            receiver_config.slot_demands,
         )
         .await?;
 

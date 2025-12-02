@@ -16,7 +16,7 @@ use crate::proto::loadbalancer::v1::{
     ListTokenPermissionsReply, ListTokenPermissionsRequest, RevokeTokenReply, RevokeTokenRequest,
     TokenDetails, TokenPermission, TokenSelector,
 };
-use crate::util::is_valid_dns_name;
+use crate::util::is_valid_name;
 
 impl LoadBalancerService {
     async fn resolve_token(
@@ -67,9 +67,8 @@ impl LoadBalancerService {
         let remote_addr = request.remote_addr();
         let request = request.into_inner();
 
-        // Validate DNS name
-        if !is_valid_dns_name(&request.name) {
-            return Err(Status::invalid_argument("Name must contain only valid DNS characters (letters, digits, hyphens, periods), and each label must start/end with a letter or digit"));
+        if !is_valid_name(&request.name) {
+            return Err(Status::invalid_argument("Name must contain only alphanumeric characters plus '.' ':' '/' '_' '-', and two periods may not follow each other"));
         }
 
         let mut permissions = Vec::new();
@@ -205,8 +204,7 @@ impl LoadBalancerService {
                     permission, resource, src
                 );
                 return Err(Status::permission_denied(format!(
-                    "Parent token does not have sufficient permission to grant {:?} on {:?}",
-                    permission, resource
+                    "Parent token does not have sufficient permission to grant {permission:?} on {resource:?}"
                 )));
             }
 
@@ -329,6 +327,7 @@ impl LoadBalancerService {
                 name: details.name,
                 permissions: proto_permissions,
                 created_at: details.created_at.to_rfc3339(),
+                id: details.id as u32,
             }),
         }))
     }
@@ -410,6 +409,7 @@ impl LoadBalancerService {
                 name: child.name,
                 permissions: proto_permissions,
                 created_at: child.created_at.to_rfc3339(),
+                id: child.id as u32,
             });
         }
 

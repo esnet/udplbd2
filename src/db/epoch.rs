@@ -153,13 +153,24 @@ impl LoadBalancerDB {
         Ok(prediction)
     }
 
-    /// Generates slot assignments based on current session states
+    /// Generates slot assignments based on current session states and reservation strategy
     pub async fn generate_epoch_assignments(
         &self,
         reservation_id: i64,
         shuffle: bool,
     ) -> Result<Vec<u16>> {
-        // Get the latest session state for each session with readiness info
+        // Fetch reservation strategy
+        let strategy_row = sqlx::query!(
+            "SELECT strategy FROM reservation WHERE id = ?1",
+            reservation_id
+        )
+        .fetch_optional(&self.read_pool)
+        .await?;
+        let strategy = strategy_row
+            .and_then(|r| r.strategy)
+            .unwrap_or_else(|| "dynamic".to_string());
+
+        // Get session states and slot demands
         let session_states = sqlx::query!(
             r#"
             SELECT
@@ -171,11 +182,38 @@ impl LoadBalancerDB {
             FROM session s
             WHERE s.reservation_id = $1
             AND s.deleted_at IS NULL
+            ORDER BY s.name DESC
             "#,
             reservation_id
         )
         .fetch_all(&self.read_pool)
         .await?;
+
+        // Get slot demands for all sessions in this reservation
+        let slot_demands_rows = sqlx::query!(
+            r#"
+            SELECT session_id, slot_index, slot_length
+            FROM slot_demand
+            WHERE reservation_id = ?1
+            AND deleted_at IS NULL
+            "#,
+            reservation_id
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        // Map: session_id -> Vec<(index, length)>
+        let mut slot_demands_map: std::collections::HashMap<u16, Vec<(i32, u32)>> =
+            std::collections::HashMap::new();
+        for row in slot_demands_rows {
+            if let Some(session_id) = row.session_id {
+                let member_id = (session_id % (u16::MAX as i64)) as u16;
+                slot_demands_map
+                    .entry(member_id)
+                    .or_default()
+                    .push((row.slot_index as i32, row.slot_length as u32));
+            }
+        }
 
         let mut slots = vec![65535u16; NUM_SLOTS];
 
@@ -212,71 +250,168 @@ impl LoadBalancerDB {
 
         let even_slot_distribution = NUM_SLOTS / member_count;
 
-        // Step 1: Calculate base slots and apply constraints
-        let mut assigned_slots = std::collections::HashMap::new();
-        let mut total_assigned_slots = 0;
-
-        for i in 0..member_count {
-            let member_id = member_ids[i];
-            let normalized_priority = relative_priorities[i] / total_relative_priority;
-            let base_slots = (NUM_SLOTS as f64 * f64::from(normalized_priority)).round() as i32;
-
-            let constraints = member_constraints[&member_id];
-            let min_slots = (even_slot_distribution as f32 * constraints[0]).round() as i32;
-            let max_slots = if constraints[1] == 0.0 {
-                NUM_SLOTS as i32
-            } else {
-                (even_slot_distribution as f32 * constraints[1]).round() as i32
-            };
-
-            let mut slots_to_add = base_slots;
-            if slots_to_add < min_slots {
-                slots_to_add = min_slots;
-            }
-            if slots_to_add > max_slots {
-                slots_to_add = max_slots;
-            }
-
-            assigned_slots.insert(member_id, slots_to_add);
-            total_assigned_slots += slots_to_add;
-        }
-
-        // Step 2: Distribute leftover slots evenly
-        let mut leftover_slots = NUM_SLOTS as i32 - total_assigned_slots;
-        while leftover_slots > 0 {
-            let index = (leftover_slots as usize) % member_count;
-            let member_id = member_ids[index];
-            *assigned_slots.get_mut(&member_id).unwrap() += 1;
-            leftover_slots -= 1;
-        }
-
-        // Step 3: Assign slots in round-robin fashion
-        let mut i = 0;
-        'outer: loop {
-            for &member_id in &member_ids {
-                if let Some(remaining) = assigned_slots.get_mut(&member_id) {
-                    if *remaining > 0 {
-                        slots[i] = member_id;
-                        *remaining -= 1;
-                        i += 1;
-                        if i >= NUM_SLOTS {
-                            break 'outer;
+        match strategy.as_str() {
+            "explicit" => {
+                // Only assign slots as specified in slotDemands, all others remain unassigned
+                for (&member_id, ranges) in &slot_demands_map {
+                    for &(index, length) in ranges {
+                        let start = if index < 0 { 0 } else { index as usize };
+                        let end = (start + length as usize).min(NUM_SLOTS);
+                        for slot in slots.iter_mut().take(end).skip(start) {
+                            *slot = member_id;
                         }
                     }
                 }
+                // No shuffling for explicit
+                Ok(slots)
             }
-            if i >= NUM_SLOTS {
-                break;
+            "static" => {
+                // Assign slots according to weight and slotDemands at registration, only rebalance on registration/slotDemand updates
+                // First, assign all slotDemands
+                let mut assigned = vec![false; NUM_SLOTS];
+                for (&member_id, ranges) in &slot_demands_map {
+                    for &(index, length) in ranges {
+                        let start = if index < 0 { 0 } else { index as usize };
+                        let end = (start + length as usize).min(NUM_SLOTS);
+                        for i in start..end {
+                            slots[i] = member_id;
+                            assigned[i] = true;
+                        }
+                    }
+                }
+                // Next, assign remaining slots by weight/min/max, but do not use control signals
+                let mut assigned_slots = std::collections::HashMap::new();
+                let mut total_assigned_slots = 0;
+                for i in 0..member_count {
+                    let member_id = member_ids[i];
+                    let normalized_priority = relative_priorities[i] / total_relative_priority;
+                    let base_slots =
+                        (NUM_SLOTS as f64 * f64::from(normalized_priority)).round() as i32;
+
+                    let constraints = member_constraints[&member_id];
+                    let min_slots = (even_slot_distribution as f32 * constraints[0]).round() as i32;
+                    let max_slots = if constraints[1] == 0.0 {
+                        NUM_SLOTS as i32
+                    } else {
+                        (even_slot_distribution as f32 * constraints[1]).round() as i32
+                    };
+
+                    let mut slots_to_add = base_slots;
+                    if slots_to_add < min_slots {
+                        slots_to_add = min_slots;
+                    }
+                    if slots_to_add > max_slots {
+                        slots_to_add = max_slots;
+                    }
+
+                    assigned_slots.insert(member_id, slots_to_add);
+                    total_assigned_slots += slots_to_add;
+                }
+                // Distribute leftover slots evenly
+                let mut leftover_slots = NUM_SLOTS as i32 - total_assigned_slots;
+                while leftover_slots > 0 {
+                    let index = (leftover_slots as usize) % member_count;
+                    let member_id = member_ids[index];
+                    *assigned_slots.get_mut(&member_id).unwrap() += 1;
+                    leftover_slots -= 1;
+                }
+                // Assign remaining slots in round-robin, skipping already assigned
+                let mut i = 0;
+                'outer: loop {
+                    for &member_id in &member_ids {
+                        if let Some(remaining) = assigned_slots.get_mut(&member_id) {
+                            while i < NUM_SLOTS && assigned[i] {
+                                i += 1;
+                            }
+                            if i >= NUM_SLOTS {
+                                break 'outer;
+                            }
+                            if *remaining > 0 {
+                                slots[i] = member_id;
+                                *remaining -= 1;
+                                i += 1;
+                                if i >= NUM_SLOTS {
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                    if i >= NUM_SLOTS {
+                        break;
+                    }
+                }
+                // No shuffling for static
+                Ok(slots)
+            }
+            _ => {
+                // "dynamic" or unknown: balance undemanded slots according to control signals
+                let mut assigned_slots = std::collections::HashMap::new();
+                let mut total_assigned_slots = 0;
+
+                for i in 0..member_count {
+                    let member_id = member_ids[i];
+                    let normalized_priority = relative_priorities[i] / total_relative_priority;
+                    let base_slots =
+                        (NUM_SLOTS as f64 * f64::from(normalized_priority)).round() as i32;
+
+                    let constraints = member_constraints[&member_id];
+                    let min_slots = (even_slot_distribution as f32 * constraints[0]).round() as i32;
+                    let max_slots = if constraints[1] == 0.0 {
+                        NUM_SLOTS as i32
+                    } else {
+                        (even_slot_distribution as f32 * constraints[1]).round() as i32
+                    };
+
+                    let mut slots_to_add = base_slots;
+                    if slots_to_add < min_slots {
+                        slots_to_add = min_slots;
+                    }
+                    if slots_to_add > max_slots {
+                        slots_to_add = max_slots;
+                    }
+
+                    assigned_slots.insert(member_id, slots_to_add);
+                    total_assigned_slots += slots_to_add;
+                }
+
+                // Step 2: Distribute leftover slots evenly
+                let mut leftover_slots = NUM_SLOTS as i32 - total_assigned_slots;
+                while leftover_slots > 0 {
+                    let index = (leftover_slots as usize) % member_count;
+                    let member_id = member_ids[index];
+                    *assigned_slots.get_mut(&member_id).unwrap() += 1;
+                    leftover_slots -= 1;
+                }
+
+                // Step 3: Assign slots in round-robin fashion
+                let mut i = 0;
+                'outer: loop {
+                    for &member_id in &member_ids {
+                        if let Some(remaining) = assigned_slots.get_mut(&member_id) {
+                            if *remaining > 0 {
+                                slots[i] = member_id;
+                                *remaining -= 1;
+                                i += 1;
+                                if i >= NUM_SLOTS {
+                                    break 'outer;
+                                }
+                            }
+                        }
+                    }
+                    if i >= NUM_SLOTS {
+                        break;
+                    }
+                }
+
+                if shuffle {
+                    // Step 4: Shuffle slots
+                    let mut rng = rng();
+                    slots.shuffle(&mut rng);
+                }
+
+                Ok(slots)
             }
         }
-
-        if shuffle {
-            // Step 4: Shuffle slots
-            let mut rng = rng();
-            slots.shuffle(&mut rng);
-        }
-
-        Ok(slots)
     }
 
     /// Creates a new epoch with given boundary event and slot assignments, using epoch_count from RankedEpochs CTE
@@ -297,7 +432,7 @@ impl LoadBalancerDB {
         )
         .fetch_one(&mut *tx)
         .await?;
-        let new_epoch_count = reservation_row.current_epoch + 1;
+        let new_epoch_count = (reservation_row.current_epoch + 1) as i32;
 
         // Soft delete epochs beyond our 5 most recent
         sqlx::query!(
@@ -627,7 +762,7 @@ mod tests {
             remote_timestamp: now.timestamp_millis(),
         };
         let offset = Duration::milliseconds(1000); // Predict 1 second in the future
-        let result = predict_epoch_boundary_from_samples(&[sample.clone()], offset);
+        let result = predict_epoch_boundary_from_samples(std::slice::from_ref(&sample), offset);
         // Should predict about 1100 (1000 + 100*1)
         assert!((result - 1100).abs() <= 2, "result: {result}");
     }

@@ -78,16 +78,25 @@ log:
 # smartnic:
 #   - # [bool] Use mock SmartNIC (for testing)
 #     mock: false
-#     # [String] Hostname or IP of SmartNIC
+#     # [String] Hostname or IP of SmartNIC Config Service
+#     cfg_host: "dataplane"
+#     # [u16] gRPC port of SmartNIC Config Service
+#     cfg_port: 8440
+#     # [String] Auth token for SmartNIC Config Service
+#     cfg_auth_token: ""
+#     # [String] Hostname or IP of SmartNIC P4 Service
 #     host: "dataplane"
-#     # [u16] gRPC port of SmartNIC
-#     port: 50051
-#     # [String] Auth token for SmartNIC
+#     # [u16] gRPC port of SmartNIC P4 Service
+#     port: 8440
+#     # [String] Auth token for SmartNIC P4 Service
 #     auth_token: ""
 #     # TLS client options for SmartNIC
 #     tls:
 #       # [bool] Enable TLS for SmartNIC client
 #       enable: false
+#       # [Path, optional] PEM encoded TLS CA certificate file
+#       # This should only be used when the smartnic host does not have a globally trusted cert
+#       ca_file: ""
 #       # [bool] Verify server certificate
 #       verify: false
 

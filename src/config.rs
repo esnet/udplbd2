@@ -143,7 +143,7 @@ where
 
     for addr_str in strs {
         let addr = addr_str.parse().map_err(|e| {
-            serde::de::Error::custom(format!("Invalid socket address '{}': {}", addr_str, e))
+            serde::de::Error::custom(format!("Invalid socket address '{addr_str}': {e}"))
         })?;
         addrs.push(addr);
     }
@@ -177,6 +177,8 @@ fn default_rest_enabled() -> bool {
 pub struct TlsClientOptions {
     pub enable: bool,
     pub verify: bool,
+    #[serde(default)]
+    pub ca_file: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -254,6 +256,7 @@ impl Config {
                 tls: TlsClientOptions {
                     enable: false,
                     verify: false,
+		    ca_file: None,
                 },
                 clear_table_repeats: 1,
                 cfg_host: None,
@@ -286,6 +289,61 @@ impl Config {
         }
     }
 
+    /// Merge two serde_yaml::Value configs, with `b` taking precedence over `a`.
+    fn merge_yaml_values(a: serde_yaml::Value, b: serde_yaml::Value) -> serde_yaml::Value {
+        use serde_yaml::Value;
+        match (&a, &b) {
+            (Value::Mapping(_), Value::Mapping(_)) => {
+                let mut a_map = match a {
+                    Value::Mapping(m) => m,
+                    _ => unreachable!(),
+                };
+                let b_map = match b {
+                    Value::Mapping(m) => m,
+                    _ => unreachable!(),
+                };
+                for (k, v_b) in b_map {
+                    let v_a = a_map.remove(&k);
+                    let merged = if let Some(v_a) = v_a {
+                        Config::merge_yaml_values(v_a, v_b.clone())
+                    } else {
+                        v_b.clone()
+                    };
+                    a_map.insert(k, merged);
+                }
+                Value::Mapping(a_map)
+            }
+            // For sequences (lists), always replace with b
+            (_, Value::Sequence(_)) => b.clone(),
+            // For all other types, b takes precedence
+            (_, _) => b.clone(),
+        }
+    }
+
+    /// Load and merge multiple config files. The first file in the list has lowest precedence,
+    /// the last file has highest precedence (overrides previous).
+    pub fn from_files<P: AsRef<std::path::Path>>(paths: &[P]) -> Result<Self, ConfigError> {
+        use serde_yaml::Value;
+        let mut merged: Value = {
+            // Start with the first config, or default config if none
+            if let Some(first) = paths.first() {
+                let s = std::fs::read_to_string(first)
+                    .unwrap_or_else(|_| DEFAULT_CONFIG_STR.to_string());
+                serde_yaml::from_str(&s).map_err(ConfigError::Parse)?
+            } else {
+                serde_yaml::from_str(DEFAULT_CONFIG_STR).map_err(ConfigError::Parse)?
+            }
+        };
+        for p in &paths[1..] {
+            let s = std::fs::read_to_string(p).unwrap_or_else(|_| DEFAULT_CONFIG_STR.to_string());
+            let next: Value = serde_yaml::from_str(&s).map_err(ConfigError::Parse)?;
+            merged = Config::merge_yaml_values(merged, next);
+        }
+        let config: Config = serde_yaml::from_value(merged).map_err(ConfigError::Parse)?;
+        config.validate()?;
+        Ok(config)
+    }
+
     fn validate(&self) -> Result<(), ConfigError> {
         // Validate MAC addresses
         if let Some(mac_unicast) = &self.lb.mac_unicast {
@@ -298,8 +356,7 @@ impl Config {
         for (i, inst) in self.lb.instances.iter().enumerate() {
             if inst.ipv4.is_none() && inst.ipv6.is_none() {
                 return Err(ConfigError::Invalid(format!(
-                    "LoadBalancer instance at index {} must have at least one of ipv4 or ipv6 specified",
-                    i
+                    "LoadBalancer instance at index {i} must have at least one of ipv4 or ipv6 specified"
                 )));
             }
         }
@@ -346,8 +403,7 @@ impl Config {
         for (i, nic) in self.smartnic.iter().enumerate() {
             if nic.cfg_host.is_none() || nic.cfg_port.is_none() || nic.cfg_auth_token.is_none() {
                 eprintln!(
-                    "Warning: SmartNIC at index {} will NOT be auto-configured (cfg_host, cfg_port, or cfg_auth_token missing). Dataplane statistics will be unavailable.",
-                    i
+                    "Warning: SmartNIC at index {i} will NOT be auto-configured (cfg_host, cfg_port, or cfg_auth_token missing). Dataplane statistics will be unavailable."
                 );
             }
         }
@@ -430,5 +486,102 @@ mod test {
                 panic!("could not parse default config")
             }
         };
+    }
+
+    #[test]
+    fn test_config_merging() {
+        // Config 1: sets log.level to "info", smartnic list to one entry, and lb.mac_unicast
+        let yaml1 = r#"
+log:
+  level: "info"
+smartnic:
+  - host: "nic1"
+    port: 1
+    mock: true
+    auth_token: "a"
+    tls:
+      enable: false
+      verify: false
+    clear_table_repeats: 1
+lb:
+  mac_unicast: "00:00:00:00:00:01"
+  instances:
+    - event_number_port: 1000
+      ipv4: "10.0.0.1"
+database:
+  file: "/tmp/db1"
+  cleanup_interval: "10s"
+  cleanup_age: "1h"
+  fsync: false
+  archive_rotation: "1d"
+  archive_keep: 1
+controller:
+  duration: "1s"
+  offset: "1s"
+server:
+  listen: ["127.0.0.1:1234"]
+  auth_token: "tok1"
+  tls:
+    enable: false
+    cert_file: null
+    key_file: null
+rest:
+  enable: true
+"#;
+        // Config 2: overrides log.level, replaces smartnic list, overrides lb.mac_unicast, and adds a new instance
+        let yaml2 = r#"
+log:
+  level: "debug"
+smartnic:
+  - host: "nic2"
+    port: 2
+    mock: false
+    auth_token: "b"
+    tls:
+      enable: true
+      verify: true
+    clear_table_repeats: 2
+lb:
+  mac_unicast: "00:00:00:00:00:02"
+  instances:
+    - event_number_port: 2000
+      ipv4: "10.0.0.2"
+database:
+  file: "/tmp/db2"
+  cleanup_interval: "20s"
+  cleanup_age: "2h"
+  fsync: true
+  archive_rotation: "2d"
+  archive_keep: 2
+controller:
+  duration: "2s"
+  offset: "2s"
+rest:
+  enable: false
+"#;
+
+        let v1: serde_yaml::Value = serde_yaml::from_str(yaml1).unwrap();
+        let v2: serde_yaml::Value = serde_yaml::from_str(yaml2).unwrap();
+        let merged_value = super::Config::merge_yaml_values(v1, v2);
+        let merged: super::Config = serde_yaml::from_value(merged_value).unwrap();
+
+        // log.level should be from config2
+        assert_eq!(merged.log.level, "debug");
+        // smartnic list should be replaced by config2
+        assert_eq!(merged.smartnic.len(), 1);
+        assert_eq!(merged.smartnic[0].host, "nic2");
+        // lb.mac_unicast should be from config2
+        assert_eq!(merged.lb.mac_unicast.as_deref(), Some("00:00:00:00:00:02"));
+        // lb.instances should be replaced by config2
+        assert_eq!(merged.lb.instances.len(), 1);
+        assert_eq!(merged.lb.instances[0].event_number_port, 2000);
+        // database.file should be from config2
+        assert_eq!(merged.database.file.to_str(), Some("/tmp/db2"));
+        // rest.enable should be from config2
+        assert!(!merged.rest.enable);
+        // server.listen should be from config2
+        assert_eq!(merged.server.listen[0].to_string(), "127.0.0.1:1234");
+        // controller.duration should be from config2
+        assert_eq!(merged.controller.duration, "2s");
     }
 }

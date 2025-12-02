@@ -169,7 +169,7 @@ impl StaticReservation {
                 &session
                     .name
                     .clone()
-                    .unwrap_or_else(|| format!("session-{}", i)),
+                    .unwrap_or_else(|| format!("session-{i}")),
                 session.weight,
                 std::net::SocketAddr::new(session.ip_address, session.udp_port),
                 session.port_range,
@@ -177,6 +177,7 @@ impl StaticReservation {
                 session.max_factor,
                 mac_address,
                 session.keep_lb_header,
+                Vec::new(), // TODO: support slot demands in static reservation files
             )
             .await?;
         }

@@ -73,7 +73,7 @@ impl LoadBalancerService {
             .db
             .get_timeseries(&authorized_selectors, &since)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get timeseries data: {}", e)))?;
+            .map_err(|e| Status::internal(format!("Failed to get timeseries data: {e}")))?;
 
         // Convert to proto format
         let proto_timeseries: Vec<ProtoTimeseries> = timeseries_data
@@ -137,7 +137,7 @@ impl LoadBalancerService {
                             .filter(|r| r.loadbalancer_id == lb_id)
                         {
                             let concrete = selector.replace(
-                                &format!("/lb/{}/reservation/*", lb_id),
+                                &format!("/lb/{lb_id}/reservation/*"),
                                 &format!("/lb/{}/reservation/{}", lb_id, res.id),
                             );
                             expanded_request.insert(concrete);
@@ -156,7 +156,7 @@ impl LoadBalancerService {
                         if let Ok(res_id) = parts[3].parse::<i64>() {
                             for sess in session_list {
                                 let concrete = selector.replace(
-                                    &format!("/lb/{}/reservation/{}/session/*", lb_id, res_id),
+                                    &format!("/lb/{lb_id}/reservation/{res_id}/session/*"),
                                     &format!(
                                         "/lb/{}/reservation/{}/session/{}",
                                         lb_id, res_id, sess.id
@@ -175,7 +175,7 @@ impl LoadBalancerService {
             .db
             .get_token_details(token)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get token details: {}", e)))?;
+            .map_err(|e| Status::permission_denied(format!("permission denied: {e}")))?;
         let mut allowed_patterns = Vec::new();
         if token_details
             .as_ref()
@@ -193,7 +193,7 @@ impl LoadBalancerService {
                 match perm.resource {
                     Resource::LoadBalancer(lb_id) => {
                         // Permission for a loadbalancer: allowed selectors start with "/lb/{lb_id}/"
-                        allowed_patterns.push(format!("/lb/{}/", lb_id));
+                        allowed_patterns.push(format!("/lb/{lb_id}/"));
                     }
                     Resource::Reservation(res_id) => {
                         if let Ok(reservations) = self.db.list_reservations().await {
@@ -206,7 +206,7 @@ impl LoadBalancerService {
                         }
                     }
                     Resource::Session(session_id) => {
-                        allowed_patterns.push(format!("/session/{}", session_id));
+                        allowed_patterns.push(format!("/session/{session_id}"));
                     }
                     _ => {}
                 }
@@ -241,7 +241,7 @@ impl LoadBalancerService {
             .db
             .get_token_details(token)
             .await
-            .map_err(|e| Status::internal(format!("Failed to get token details: {}", e)))?;
+            .map_err(|e| Status::permission_denied(format!("permission denied: {e}")))?;
         if token_details
             .as_ref()
             .map(|td| {
@@ -259,15 +259,14 @@ impl LoadBalancerService {
         // List loadbalancers
         if let Ok(lbs) = self.db.list_loadbalancers().await {
             for lb in lbs {
-                if self
+                let (ok, _) = self
                     .validate_token(
                         token,
                         Resource::LoadBalancer(lb.id),
                         PermissionType::ReadOnly,
                     )
-                    .await
-                    .unwrap_or(false)
-                {
+                    .await?;
+                if ok {
                     allowed.push(format!("/lb/{}", lb.id));
                 } else {
                     // Check reservations for this loadbalancer.
@@ -277,29 +276,27 @@ impl LoadBalancerService {
                             .filter(|r| r.loadbalancer_id == lb.id)
                             .collect();
                         for res in lb_res {
-                            if self
+                            let (ok, _) = self
                                 .validate_token(
                                     token,
                                     Resource::Reservation(res.id),
                                     PermissionType::ReadOnly,
                                 )
-                                .await
-                                .unwrap_or(false)
-                            {
+                                .await?;
+                            if ok {
                                 allowed.push(format!("/lb/{}/reservation/{}", lb.id, res.id));
                             } else if let Ok(sessions) =
                                 self.db.get_reservation_sessions(res.id).await
                             {
                                 for sess in sessions {
-                                    if self
+                                    let (ok, _) = self
                                         .validate_token(
                                             token,
                                             Resource::Session(sess.id),
                                             PermissionType::ReadOnly,
                                         )
-                                        .await
-                                        .unwrap_or(false)
-                                    {
+                                        .await?;
+                                    if ok {
                                         allowed.push(format!(
                                             "/lb/{}/reservation/{}/session/{}",
                                             lb.id, res.id, sess.id

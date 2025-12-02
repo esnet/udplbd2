@@ -21,6 +21,7 @@ pub mod receiver {
             offset: usize,
             client: &mut ControlPlaneClient,
             meta_event_context: Option<MetaEventContext>,
+            slot_demands: Vec<SlotRange>,
         ) -> Result<Self, Error> {
             let (tx, rx) = mpsc::channel(1024);
             let pid_loop_tx = tx.clone();
@@ -37,6 +38,7 @@ pub mod receiver {
                     min_factor,
                     max_factor,
                     keep_lb_header,
+                    slot_demands,
                 )
                 .await?
                 .into_inner();
@@ -443,6 +445,7 @@ pub mod tester {
                                             None,
                                             addresses,
                                             crate::proto::loadbalancer::v1::IpFamily::DualStack,
+                                            "dynamic".to_string(), // TODO: support additional strategies
                                         )
                                         .await?;
                                     Ok(())
@@ -511,6 +514,7 @@ pub mod tester {
                                         0,
                                         &mut client,
                                         meta_event_ctx_clone,
+                                        Vec::new(), // TODO: support slot demands
                                     )
                                     .await
                                     .expect("failed to initialize receiver");
@@ -662,7 +666,7 @@ pub mod test {
 
     #[test]
     fn test_minimal_scenario() {
-        let test_config = include_str!("../../test/sim/minimal.yaml");
+        let test_config = include_str!("../../test/dataplane/sim/minimal.yaml");
         let (meta_event_manager, _) = MetaEventManager::new(false);
         let config: TurmoilConfig = serde_yaml::from_str(test_config).unwrap();
         let result = run_turmoil_test(&meta_event_manager, None, config);

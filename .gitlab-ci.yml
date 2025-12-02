@@ -1,7 +1,6 @@
 image: docker
 
 variables:
-  # Set CARGO_HOME within the project directory to cache it persistently
   CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
   DOCKER_TLS_CERT_DIR: ""
   RELEASE_BRANCH: "main"
@@ -13,10 +12,14 @@ stages:
   - build
   - test
   - push
+  - deploy
 
 include:
   - project: "security/container-scanning"
     file: ".ESnet-container-scan.yml"
+  - component: $CI_SERVER_FQDN/ht/cicd-common/aap-run@v0.3.0
+    inputs:
+      aap_token: $AAP_TOKEN
 
 .wharf_logout: &wharf_logout |-
   docker logout "$WHARF_SITE"
@@ -27,34 +30,32 @@ include:
 .docker_login: &docker_login |-
   echo "$CI_REGISTRY_PASSWORD" | docker login $CI_REGISTRY -u $CI_REGISTRY_USER --password-stdin
 
-x86-64:
-  stage: build
-  image: ghcr.io/rust-cross/cargo-zigbuild
-  cache:
-    key: "persistent-cache" # Use a constant key for persistent caching
-    policy: pull-push # Ensure cache is pulled at job start and pushed at job end
-    paths:
-      # Cache Debian package downloads (note: runner permissions might be needed)
-      - /var/cache/apt/archives/
-      # Cache Rust build artifacts and dependencies
-      - target/
-      - .cargo/registry/
-      - .cargo/git/
+.build_environment:
+  image: rust:latest
   before_script:
-    - echo "Installing dependencies"
     - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev sqlite3 libssl-dev musl-tools
     - rustup target add x86_64-unknown-linux-musl
-    - cargo install sqlx-cli
-  script:
+    - cargo install sqlx-cli cargo-audit
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
     - echo "Setting up database"
     - $CARGO_HOME/bin/sqlx database setup
-    - cargo test --release
-    - cargo zigbuild --release --target x86_64-unknown-linux-musl
+
+build_udplbd:
+  stage: build
+  extends: .build_environment
+  script:
+    - cargo build --release --target x86_64-unknown-linux-musl
+  artifacts:
+    paths:
+      - target/x86_64-unknown-linux-musl/release/udplbd
+    expire_in: 3 month
+
+build_docs:
+  stage: build
+  extends: .build_environment
+  script:
     - cargo doc --no-deps
-    - mkdir -p public
-    - mv target/doc public/doc
-    - mv target/x86_64-unknown-linux-musl/release/udplbd public/udplbd-linux-amd64
+    - mv target/doc public
   artifacts:
     paths:
       - public
@@ -65,6 +66,25 @@ build_container:
     - *docker_login
     - docker build --pull -t $IMAGE_TAG .
     - docker push $IMAGE_TAG
+
+test:unit:
+  extends: .build_environment
+  stage: test
+  script:
+    - cargo test --release --lib
+
+test:mock_integration:
+  extends: .build_environment
+  stage: test
+  script:
+    - cargo test --release --bin udplbd -- --nocapture
+
+test:audit:
+  extends: .build_environment
+  stage: test
+  script:
+    - cargo audit
+  allow_failure: true
 
 .push:
   stage: push
@@ -100,3 +120,12 @@ publish_release_container:
     TAGS: |
       $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:$CI_COMMIT_REF_NAME
       $WHARF_SITE/$WHARF_PROJECT/$CI_PROJECT_NAME:latest
+
+deploy_alpha:
+  extends: .aap_run
+  stage: deploy
+  variables:
+    AAP_JOB_TEMPLATE: 747
+    AAP_LIMIT: node3.fpga.es.net
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"

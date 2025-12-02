@@ -8,8 +8,8 @@ use crate::proto::loadbalancer::v1::{
     ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest, OverviewReply,
     OverviewRequest, PortRange, RegisterReply, RegisterRequest, RemoveSendersReply,
     RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply,
-    RevokeTokenRequest, SendStateReply, SendStateRequest, TokenPermission, TokenSelector,
-    VersionReply, VersionRequest,
+    RevokeTokenRequest, SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
+    SetSlotDemandsRequest, TokenPermission, TokenSelector, VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
 use serde::Serialize;
@@ -56,14 +56,14 @@ impl ControlPlaneClient {
 
         let channel = if parsed_url.tls_enabled {
             let tls_config = ClientTlsConfig::new().with_enabled_roots();
-            Channel::from_shared(format!("https://{}:{}", grpc_host, grpc_port))
+            Channel::from_shared(format!("https://{grpc_host}:{grpc_port}"))
                 .unwrap()
                 .tls_config(tls_config)
                 .unwrap()
                 .connect()
                 .await?
         } else {
-            Channel::from_shared(format!("http://{}:{}", grpc_host, grpc_port))
+            Channel::from_shared(format!("http://{grpc_host}:{grpc_port}"))
                 .unwrap()
                 .connect()
                 .await?
@@ -93,12 +93,14 @@ impl ControlPlaneClient {
         until: Option<Timestamp>,
         sender_addresses: Vec<String>,
         ip_family: crate::proto::loadbalancer::v1::IpFamily,
+        strategy: String,
     ) -> std::result::Result<tonic::Response<ReserveLoadBalancerReply>, tonic::Status> {
         let request = ReserveLoadBalancerRequest {
             name,
             until,
             sender_addresses,
             ip_family: ip_family as i32,
+            strategy,
         };
         let reply = self.client.reserve_load_balancer(request).await?;
         self.lb_id = Some(reply.get_ref().lb_id.clone());
@@ -171,6 +173,7 @@ impl ControlPlaneClient {
         min_factor: f32,
         max_factor: f32,
         keep_lb_header: bool,
+        slot_demands: Vec<crate::proto::loadbalancer::v1::SlotRange>,
     ) -> std::result::Result<tonic::Response<RegisterReply>, tonic::Status> {
         let request = RegisterRequest {
             lb_id: self
@@ -185,6 +188,7 @@ impl ControlPlaneClient {
             min_factor,
             max_factor,
             keep_lb_header,
+            slot_demands,
         };
         let reply = self.client.register(request).await?;
         self.session_id = Some(reply.get_ref().session_id.clone());
@@ -207,6 +211,20 @@ impl ControlPlaneClient {
         let reply = self.client.deregister(request).await?;
         self.session_id = None;
         Ok(reply)
+    }
+
+    pub async fn set_slot_demands(
+        &mut self,
+        slot_constraints: Vec<SessionSlotRanges>,
+    ) -> std::result::Result<tonic::Response<SetSlotDemandsReply>, tonic::Status> {
+        let request = SetSlotDemandsRequest {
+            lb_id: self
+                .lb_id
+                .clone()
+                .expect("cannot set_slot_demands when lb_id is None"),
+            slot_constraints,
+        };
+        self.client.set_slot_demands(request).await
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -444,7 +462,7 @@ impl fmt::Display for EjfatUrl {
         // Build query parameters.
         let mut query_params = Vec::new();
         if let Some(sync_ip) = &self.sync_addr_v4 {
-            let mut sync_param = format!("sync={}", sync_ip);
+            let mut sync_param = format!("sync={sync_ip}");
             if let Some(sync_port) = self.sync_udp_port {
                 sync_param.push(':');
                 sync_param.push_str(&sync_port.to_string());
@@ -453,7 +471,7 @@ impl fmt::Display for EjfatUrl {
         }
         if let Some(sync_v6) = &self.sync_addr_v6 {
             if !sync_v6.is_empty() {
-                let mut sync_param = format!("sync=[{}]", sync_v6);
+                let mut sync_param = format!("sync=[{sync_v6}]");
                 if let Some(sync_port) = self.sync_udp_port {
                     sync_param.push(':');
                     sync_param.push_str(&sync_port.to_string());
@@ -479,7 +497,7 @@ impl fmt::Display for EjfatUrl {
             url.push('?');
             url.push_str(&query_params.join("&"));
         }
-        write!(f, "{}", url)
+        write!(f, "{url}")
     }
 }
 

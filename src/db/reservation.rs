@@ -9,21 +9,28 @@ use std::net::IpAddr;
 
 impl LoadBalancerDB {
     /// Creates a new reservation.
-    pub async fn create_reservation(
+    pub async fn create_reservation_with_strategy(
         &self,
         lb_id: i64,
         name: &str,
         duration: Duration,
+        strategy: &str,
     ) -> Result<Reservation> {
         let reserved_until = (Utc::now() + duration).timestamp_millis();
+        if !matches!(strategy, "dynamic" | "static" | "explicit") {
+            return Err(Error::Usage(format!(
+                "'{strategy}' is not a valid strategy, must be 'dynamic', 'static', 'explicit'"
+            )));
+        }
 
         let record = sqlx::query!(
-            "INSERT INTO reservation (loadbalancer_id, name, reserved_until)
-             VALUES (?1, ?2, ?3)
-             RETURNING id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch",
+            "INSERT INTO reservation (loadbalancer_id, name, reserved_until, strategy)
+             VALUES (?1, ?2, ?3, ?4)
+             RETURNING id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch, strategy",
             lb_id,
             name,
             reserved_until,
+            strategy
         )
         .fetch_one(&self.write_pool)
         .await?;
@@ -41,13 +48,25 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             current_epoch: record.current_epoch,
+            strategy: record.strategy.unwrap_or("dynamic".to_string()),
         })
+    }
+
+    // Creates a new reservation with default 'dynamic' strategy
+    pub async fn create_reservation(
+        &self,
+        lb_id: i64,
+        name: &str,
+        duration: Duration,
+    ) -> Result<Reservation> {
+        self.create_reservation_with_strategy(lb_id, name, duration, "dynamic")
+            .await
     }
 
     /// Retrieves a reservation by ID.
     pub async fn get_reservation(&self, id: i64) -> Result<Reservation> {
         let reservation_record = sqlx::query!(
-            "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch
+            "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch, strategy
              FROM reservation
              WHERE id = ?1 AND deleted_at IS NULL",
             id
@@ -71,6 +90,7 @@ impl LoadBalancerDB {
                     .expect("deleted_at set but out of range!")
             }),
             current_epoch: reservation_record.current_epoch,
+            strategy: reservation_record.strategy.unwrap_or("dynamic".to_string()),
         })
     }
 
@@ -256,6 +276,7 @@ impl LoadBalancerDB {
                         .expect("deleted_at set but out of range!")
                 }),
                 current_epoch: record.current_epoch,
+                strategy: "dynamic".to_string(),
             });
         }
 
@@ -294,6 +315,7 @@ impl LoadBalancerDB {
                         .ok_or(Error::Parse("created_at out of range".to_string()))?,
                     deleted_at: None,
                     current_epoch: record.current_epoch,
+                    strategy: "dynamic".to_string(),
                 },
                 crate::db::models::LoadBalancer {
                     id: record.lb_id,
