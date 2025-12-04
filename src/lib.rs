@@ -41,12 +41,46 @@ use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
 use crate::sncfg::setup::{auto_configure_smartnics, smallest_mac_address};
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 
+/// Build SNCfg clients from the configuration
+pub async fn build_sncfg_clients(config: &Config) -> Result<MultiSNCfgClient> {
+    let mut sncfg_clients = Vec::new();
+    for smartnic in &config.smartnic {
+        if !smartnic.mock {
+            if let Some(cfg_auth_token) = &smartnic.cfg_auth_token {
+                let addr = format!(
+                    "{}://{}:{}",
+                    if smartnic.tls.enable { "https" } else { "http" },
+                    if let Some(cfg_host) = &smartnic.cfg_host {
+                        cfg_host
+                    } else {
+                        &smartnic.host
+                    },
+                    if let Some(cfg_port) = smartnic.cfg_port {
+                        cfg_port
+                    } else {
+                        smartnic.port
+                    }
+                );
+                let client = SNCfgClient::new(
+                    &addr,
+                    0,
+                    smartnic.tls.verify,
+                    smartnic.tls.ca_file.clone(),
+                    cfg_auth_token.clone(),
+                )
+                .await?;
+                sncfg_clients.push(client);
+            }
+        }
+    }
+    Ok(MultiSNCfgClient::new(sncfg_clients))
+}
+
 async fn build_smartnic_clients(
     config: &mut Config,
     snp4_client_table_index: i32,
 ) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
     let mut snp4_clients = Vec::new();
-    let mut sncfg_clients = Vec::new();
     for smartnic in &config.smartnic {
         if !smartnic.mock {
             let addr = format!(
@@ -66,39 +100,12 @@ async fn build_smartnic_clients(
             .await?;
             client.clear_table_repeats = smartnic.clear_table_repeats;
             snp4_clients.push(client);
-
-            if let Some(cfg_auth_token) = &smartnic.cfg_auth_token {
-                let addr = format!(
-                    "{}://{}:{}",
-                    if smartnic.tls.enable { "https" } else { "http" },
-                    if let Some(cfg_host) = &smartnic.cfg_host {
-                        cfg_host
-                    } else {
-                        &smartnic.host
-                    },
-                    if let Some(cfg_port) = smartnic.cfg_port {
-                        cfg_port
-                    } else {
-                        smartnic.port
-                    }
-                );
-                let client =
-                    SNCfgClient::new(
-                        &addr,
-                        0,
-                        smartnic.tls.verify,
-                        smartnic.tls.ca_file.clone(),
-                        cfg_auth_token.clone()
-                    )
-                    .await?;
-                sncfg_clients.push(client);
-            }
         }
     }
-    Ok((
-        MultiSNP4Client::new(snp4_clients),
-        MultiSNCfgClient::new(sncfg_clients),
-    ))
+
+    let sncfg_clients = build_sncfg_clients(config).await?;
+
+    Ok((MultiSNP4Client::new(snp4_clients), sncfg_clients))
 }
 
 pub async fn apply_static_config(

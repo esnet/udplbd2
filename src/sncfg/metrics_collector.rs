@@ -33,16 +33,16 @@ impl Default for MetricsCollectorConfig {
 pub fn start_metrics_collector(
     db: Arc<LoadBalancerDB>,
     mut sncfg: MultiSNCfgClient,
-    config: MetricsCollectorConfig,
+    metrics_collector_config: MetricsCollectorConfig,
 ) {
-    if !config.enabled {
-        info!("SmartNIC metrics collector is disabled by config");
+    if !metrics_collector_config.enabled {
+        info!("ESnet SmartNIC metrics collector is disabled by config, health check capability degraded");
         return;
     }
-    let interval = config.interval;
+    let interval = metrics_collector_config.interval;
     tokio::spawn(async move {
         info!(
-            "Starting SmartNIC metrics collector background task (interval: {:?})",
+            "starting ESnet SmartNIC metrics collector (interval: {:?})",
             interval
         );
         loop {
@@ -63,7 +63,7 @@ pub fn start_metrics_collector(
                     .map(|row| (row.fpga_lb_id as u32, row.reservation_id))
                     .collect::<std::collections::HashMap<u32, i64>>(),
                 Err(e) => {
-                    error!("Failed to query active reservations: {:?}", e);
+                    error!("failed to query active reservations: {e:?}");
                     sleep(interval).await;
                     continue;
                 }
