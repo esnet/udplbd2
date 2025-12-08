@@ -79,6 +79,8 @@ pub enum DataplaneCommand {
     Pcap(PcapArgs),
     /// Resolve MAC addresses for given IP addresses.
     MacAddr(MacAddrArgs),
+    /// Display all available metrics from the smartnic P4 dataplane.
+    Stats(StatsArgs),
 }
 
 #[derive(Args, Debug)]
@@ -204,6 +206,9 @@ pub struct MacAddrArgs {
     #[arg(value_name = "IP_ADDRS")]
     pub ips: Vec<String>,
 }
+
+#[derive(Args, Debug)]
+pub struct StatsArgs {}
 
 impl DataplaneCli {
     /// Run the dataplane command. If no URL is provided, a default is built from the server config.
@@ -345,6 +350,9 @@ impl DataplaneCli {
                         }
                     }
                 }
+            }
+            DataplaneCommand::Stats(_args) => {
+                stats_command(config).await?;
             }
         }
         Ok(())
@@ -609,6 +617,32 @@ pub fn run_pcap_analysis<P: AsRef<Path>>(pcap_path: P, lb: bool) -> Result<()> {
     let report: PcapReassemblyReport = reassemble_from_pcap(pcap_path, lb)?;
     // Print final statistics.
     println!("{report}");
+
+    Ok(())
+}
+
+async fn stats_command(config: &Config) -> Result<()> {
+    let mut snp4_clients = crate::build_snp4_clients(config, 0).await?;
+
+    // Get metrics from all smartnics
+    let all_metrics = match snp4_clients.get_pipeline_stats().await {
+        Ok(metrics) => metrics,
+        Err(errors) => {
+            eprintln!("errors getting stats from smartnics:");
+            for (idx, result) in errors.iter().enumerate() {
+                if let Err(e) = result {
+                    eprintln!("  Smartnic {}: {}", idx, e);
+                }
+            }
+            return Err(Error::Runtime(
+                "failed to get stats from one or more smartnics".into(),
+            ));
+        }
+    };
+
+    let json = serde_json::to_string_pretty(&all_metrics)
+        .map_err(|e| Error::Runtime(format!("failed to serialize to JSON: {}", e)))?;
+    println!("{}", json);
 
     Ok(())
 }

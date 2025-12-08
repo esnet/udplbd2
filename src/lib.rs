@@ -76,10 +76,11 @@ pub async fn build_sncfg_clients(config: &Config) -> Result<MultiSNCfgClient> {
     Ok(MultiSNCfgClient::new(sncfg_clients))
 }
 
-async fn build_smartnic_clients(
-    config: &mut Config,
+/// Build SNP4 clients from the configuration with optional table index
+pub async fn build_snp4_clients(
+    config: &Config,
     snp4_client_table_index: i32,
-) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
+) -> Result<MultiSNP4Client> {
     let mut snp4_clients = Vec::new();
     for smartnic in &config.smartnic {
         if !smartnic.mock {
@@ -102,10 +103,17 @@ async fn build_smartnic_clients(
             snp4_clients.push(client);
         }
     }
+    Ok(MultiSNP4Client::new(snp4_clients))
+}
 
+async fn build_smartnic_clients(
+    config: &mut Config,
+    snp4_client_table_index: i32,
+) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
+    let snp4_clients = build_snp4_clients(config, snp4_client_table_index).await?;
     let sncfg_clients = build_sncfg_clients(config).await?;
 
-    Ok((MultiSNP4Client::new(snp4_clients), sncfg_clients))
+    Ok((snp4_clients, sncfg_clients))
 }
 
 pub async fn apply_static_config(
