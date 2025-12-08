@@ -165,6 +165,9 @@ impl LoadBalancerService {
 
         let mut manager = self.manager.lock().await;
 
+        crate::snp4::metrics_collector::clear_lb_stats(&mut manager.snp4, lb.fpga_lb_id as u32)
+            .await;
+
         manager
             .start_reservation(reservation.id, lb.event_number_udp_port)
             .await

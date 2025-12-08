@@ -13,7 +13,7 @@ pub mod sncfg;
 pub mod snp4;
 pub mod util;
 
-use crate::sncfg::metrics_collector::start_metrics_collector;
+use crate::snp4::metrics_collector::start_metrics_collector;
 
 use api::fix_connect_info;
 use chrono::Utc;
@@ -210,10 +210,14 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
         }
     });
 
-    // Start SmartNIC metrics collector if enabled
+    // Start SmartNIC P4 pipeline metrics collector if enabled
     let metrics_collector_config = config.get_metrics_collector_config();
     if metrics_collector_config.enabled {
-        start_metrics_collector(db.clone(), cfg_clients.clone(), metrics_collector_config);
+        start_metrics_collector(
+            db.clone(),
+            smartnic_clients.clone(),
+            metrics_collector_config,
+        );
     }
 
     auto_configure_smartnics(&mut cfg_clients).await?;

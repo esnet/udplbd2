@@ -256,7 +256,7 @@ impl Config {
                 tls: TlsClientOptions {
                     enable: false,
                     verify: false,
-		    ca_file: None,
+                    ca_file: None,
                 },
                 clear_table_repeats: 1,
                 cfg_host: None,
@@ -424,8 +424,8 @@ impl Config {
     /// Convert the config file section to the runtime MetricsCollectorConfig
     pub fn get_metrics_collector_config(
         &self,
-    ) -> crate::sncfg::metrics_collector::MetricsCollectorConfig {
-        use crate::sncfg::metrics_collector::MetricsCollectorConfig;
+    ) -> crate::snp4::metrics_collector::MetricsCollectorConfig {
+        use crate::snp4::metrics_collector::MetricsCollectorConfig;
         let (enabled, interval) = if let Some(mc) = &self.metrics_collector {
             (
                 mc.enabled,

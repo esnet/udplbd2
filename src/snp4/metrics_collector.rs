@@ -1,17 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
-//! Background task for collecting SmartNIC metrics and inserting them into the database.
+//! Background task for collecting SmartNIC P4 pipeline metrics and inserting them into the database.
 
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use crate::db::models::{StatGlobalSample, StatLbSample, StatMemberSample};
 use crate::db::LoadBalancerDB;
-use crate::sncfg::client::MultiSNCfgClient;
+use crate::snp4::client::MultiSNP4Client;
 use std::collections::HashMap;
 
-/// Configuration for the SmartNIC metrics collector.
+/// Configuration for the SmartNIC P4 pipeline metrics collector.
 #[derive(Clone, Debug)]
 pub struct MetricsCollectorConfig {
     pub enabled: bool,
@@ -27,22 +27,22 @@ impl Default for MetricsCollectorConfig {
     }
 }
 
-/// Starts the SmartNIC metrics collector background task.
+/// Starts the SmartNIC P4 pipeline metrics collector background task.
 /// This should be called from start_server in lib.rs.
 /// If config.enabled is false, the collector is not started.
 pub fn start_metrics_collector(
     db: Arc<LoadBalancerDB>,
-    mut sncfg: MultiSNCfgClient,
+    mut snp4: MultiSNP4Client,
     metrics_collector_config: MetricsCollectorConfig,
 ) {
     if !metrics_collector_config.enabled {
-        info!("ESnet SmartNIC metrics collector is disabled by config, health check capability degraded");
+        warn!("health check capability degraded, metrics collector disabled by config");
         return;
     }
     let interval = metrics_collector_config.interval;
     tokio::spawn(async move {
         info!(
-            "starting ESnet SmartNIC metrics collector (interval: {:?})",
+            "starting ESnet SmartNIC P4 pipeline metrics collector (interval: {:?})",
             interval
         );
         loop {
@@ -86,8 +86,8 @@ pub fn start_metrics_collector(
                     }
                 };
 
-            // Fetch metrics from all SmartNICs
-            match sncfg.get_stats().await {
+            // Fetch metrics from all SmartNIC P4 pipelines
+            match snp4.get_pipeline_stats().await {
                 Ok(all_metrics) => {
                     // Accumulate stats across all FPGAs
                     let mut global_sample = StatGlobalSample::default();
@@ -175,30 +175,78 @@ pub fn start_metrics_collector(
                     // Insert global sample if timestamp is set
                     if global_sample.sample_ts_ms != 0 {
                         if let Err(e) = db.insert_stat_global_sample(&global_sample).await {
-                            error!("Failed to insert stat_global_sample: {:?}", e);
+                            error!("failed to insert stat_global_sample: {:?}", e);
                         }
                     }
 
                     // Insert all lb_samples
                     for sample in lb_samples.values() {
                         if let Err(e) = db.insert_stat_lb_sample(sample).await {
-                            error!("Failed to insert stat_lb_sample: {:?}", e);
+                            error!("failed to insert stat_lb_sample: {:?}", e);
                         }
                     }
 
                     // Insert all member_samples
                     for sample in member_samples.values() {
                         if let Err(e) = db.insert_stat_member_sample(sample).await {
-                            error!("Failed to insert stat_member_sample: {:?}", e);
+                            error!("failed to insert stat_member_sample: {:?}", e);
                         }
                     }
                 }
                 Err(_) => {
-                    error!("Failed to fetch SmartNIC metrics");
+                    error!("failed to fetch SmartNIC P4 pipeline metrics");
                 }
             }
             // Sleep before next collection
             sleep(interval).await;
         }
     });
+}
+
+/// Clear stats for a specific member (session) by member_id.
+/// This should be called when a new member is registered to reset counters.
+/// Clears: lb_mbr_tx_pkt_counter, lb_mbr_tx_byte_counter
+pub async fn clear_member_stats(snp4: &mut MultiSNP4Client, member_id: u32) {
+    let member_counter_names = &["lb_mbr_tx_pkt_counter", "lb_mbr_tx_byte_counter"];
+
+    if let Err(e) = snp4
+        .clear_stats_by_names_and_index(member_counter_names, member_id)
+        .await
+    {
+        error!("failed to clear stats for member_id {}: {:?}", member_id, e);
+    } else {
+        info!("cleared stats for member_id {}", member_id);
+    }
+}
+
+/// Clear stats for a specific load balancer by fpga_lb_id.
+/// This should be called when a new LB is reserved to reset counters.
+/// Clears: lb_ctx_drop_blocked_src_pkt_counter, lb_ctx_drop_epoch_assign_miss_pkt_counter,
+///         lb_ctx_drop_lb_calendar_miss_pkt_counter, lb_ctx_drop_mbr_info_miss_pkt_counter,
+///         lb_ctx_drop_no_udplb_hdr_pkt_counter, lb_ctx_drop_not_ip_pkt_counter,
+///         lb_ctx_rx_byte_counter, packet_rx_counter_bytes, packet_rx_counter_packets
+pub async fn clear_lb_stats(snp4: &mut MultiSNP4Client, fpga_lb_id: u32) {
+    let lb_counter_names = &[
+        "lb_ctx_drop_blocked_src_pkt_counter",
+        "lb_ctx_drop_epoch_assign_miss_pkt_counter",
+        "lb_ctx_drop_lb_calendar_miss_pkt_counter",
+        "lb_ctx_drop_mbr_info_miss_pkt_counter",
+        "lb_ctx_drop_no_udplb_hdr_pkt_counter",
+        "lb_ctx_drop_not_ip_pkt_counter",
+        "lb_ctx_rx_byte_counter",
+        "packet_rx_counter_bytes",
+        "packet_rx_counter_packets",
+    ];
+
+    if let Err(e) = snp4
+        .clear_stats_by_names_and_index(lb_counter_names, fpga_lb_id)
+        .await
+    {
+        error!(
+            "failed to clear stats for fpga_lb_id {}: {:?}",
+            fpga_lb_id, e
+        );
+    } else {
+        info!("cleared stats for fpga_lb_id {}", fpga_lb_id);
+    }
 }
