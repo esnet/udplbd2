@@ -288,7 +288,17 @@ impl LoadBalancerDB {
         };
 
         // STEP 2: Pre‐fetch all column‐lists BEFORE opening any transaction.
-        let tables_with_deleted_at = ["sender", "session", "epoch", "reservation", "loadbalancer"];
+        let tables_with_deleted_at = [
+            "sender",
+            "session",
+            "epoch",
+            "reservation",
+            "loadbalancer",
+            "slot_demand",
+            "stat_global_sample",
+            "stat_lb_sample",
+            "stat_member_sample",
+        ];
         let mut deleted_col_lists: HashMap<&str, String> = HashMap::new();
         for &table in &tables_with_deleted_at {
             let mut temp_cache = TableMetadataCache::new();
