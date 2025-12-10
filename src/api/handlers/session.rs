@@ -11,7 +11,7 @@ use crate::proto::loadbalancer::v1::{
     DeregisterReply, DeregisterRequest, RegisterReply, RegisterRequest, SendStateReply,
     SendStateRequest,
 };
-use crate::util::is_valid_name;
+use crate::util::{is_private_ip, is_valid_name};
 
 impl LoadBalancerService {
     pub(crate) async fn handle_register(
@@ -50,6 +50,36 @@ impl LoadBalancerService {
 
         let addr = IpAddr::from_str(&request.ip_address)
             .map_err(|_| Status::invalid_argument("Invalid IP address"))?;
+
+        // Validate IP address based on configuration
+        if !self.config.server.allow_loopback && addr.is_loopback() {
+            return Err(Status::invalid_argument(
+                "Registration from loopback addresses is not allowed",
+            ));
+        }
+
+        if !self.config.server.allow_private && is_private_ip(&addr) {
+            return Err(Status::invalid_argument(
+                "Registration from private IP addresses is not allowed",
+            ));
+        }
+
+        if self.config.server.require_registration_from_dataplane {
+            if let Some(remote) = remote_addr {
+                let remote_ip = remote.ip();
+                if remote_ip != addr {
+                    return Err(Status::invalid_argument(format!(
+                        "Registered IP address ({}) must match the request source address ({})",
+                        addr, remote_ip
+                    )));
+                }
+            } else {
+                return Err(Status::internal(
+                    "Cannot verify registration source: remote address unavailable",
+                ));
+            }
+        }
+
         let socket_addr = std::net::SocketAddr::new(addr, request.udp_port as u16);
 
         // Get MAC address for the IP

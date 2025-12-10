@@ -4,6 +4,7 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use tonic::{metadata::MetadataMap, Status};
 
+use crate::config::Config;
 use crate::db::models::{PermissionType, Resource};
 use crate::db::LoadBalancerDB;
 
@@ -11,12 +12,21 @@ use crate::db::LoadBalancerDB;
 pub struct LoadBalancerService {
     pub(crate) db: Arc<LoadBalancerDB>,
     pub(crate) manager: Arc<Mutex<ReservationManager>>,
+    pub(crate) config: Arc<Config>,
 }
 
 impl LoadBalancerService {
     #[must_use]
-    pub fn new(db: Arc<LoadBalancerDB>, manager: Arc<Mutex<ReservationManager>>) -> Self {
-        Self { db, manager }
+    pub fn new(
+        db: Arc<LoadBalancerDB>,
+        manager: Arc<Mutex<ReservationManager>>,
+        config: Arc<Config>,
+    ) -> Self {
+        Self {
+            db,
+            manager,
+            config,
+        }
     }
 
     pub(crate) async fn validate_token(

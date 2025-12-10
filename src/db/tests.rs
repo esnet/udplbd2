@@ -27,7 +27,14 @@ impl Drop for LoadBalancerDB {
 }
 
 /// Creates a test loadbalancer with a reservation, sessions, and senders
-pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Reservation) {
+///
+/// # Parameters
+/// * `db` - The database instance
+/// * `session_addrs` - List of socket addresses for sessions. Pass empty vec for no sessions.
+pub async fn setup_test_loadbalancer_with_sessions(
+    db: &LoadBalancerDB,
+    session_addrs: Vec<SocketAddr>,
+) -> (LoadBalancer, Reservation) {
     // Create loadbalancer
     let name = format!("test-lb-{}", Uuid::new_v4());
     let unicast_mac: MacAddr6 = "00:11:22:33:44:55".parse().unwrap();
@@ -47,11 +54,6 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
         .unwrap();
 
     // Add sessions
-    let session_addrs = [
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8001),
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8002),
-    ];
-
     for (i, addr) in session_addrs.iter().enumerate() {
         db.add_session(
             reservation.id,
@@ -80,6 +82,15 @@ pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Rese
     }
 
     (lb, reservation)
+}
+
+/// Creates a test loadbalancer with default sessions at 127.0.0.1:8001 and 127.0.0.1:8002
+pub async fn setup_test_loadbalancer(db: &LoadBalancerDB) -> (LoadBalancer, Reservation) {
+    let session_addrs = vec![
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8001),
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2)), 8002),
+    ];
+    setup_test_loadbalancer_with_sessions(db, session_addrs).await
 }
 
 #[tokio::test]

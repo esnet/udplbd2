@@ -76,15 +76,14 @@ async fn build_smartnic_clients(
                     cfg_host,
                     cfg_port
                 );
-                let client =
-                    SNCfgClient::new(
-                        &addr,
-                        0,
-                        smartnic.tls.verify,
-                        smartnic.tls.ca_file.clone(),
-                        cfg_auth_token.clone()
-                    )
-                    .await?;
+                let client = SNCfgClient::new(
+                    &addr,
+                    0,
+                    smartnic.tls.verify,
+                    smartnic.tls.ca_file.clone(),
+                    cfg_auth_token.clone(),
+                )
+                .await?;
                 sncfg_clients.push(client);
             }
         }
@@ -123,12 +122,15 @@ pub async fn apply_static_config(
 fn build_server_futures(
     db: Arc<LoadBalancerDB>,
     manager_arc: Arc<Mutex<ReservationManager>>,
-    config: &mut Config,
+    config: &Config,
 ) -> Vec<impl std::future::Future<Output = Result<()>>> {
+    let config_arc = Arc::new(config.clone());
     let mut server_futures = Vec::new();
     for addr in config.server.listen.iter() {
-        let lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
-        let http_lb_service = LoadBalancerService::new(db.clone(), manager_arc.clone());
+        let lb_service =
+            LoadBalancerService::new(db.clone(), manager_arc.clone(), config_arc.clone());
+        let http_lb_service =
+            LoadBalancerService::new(db.clone(), manager_arc.clone(), config_arc.clone());
         let svc = LoadBalancerServer::new(lb_service);
 
         // gRPC route: direct, no custom service

@@ -835,14 +835,13 @@ pub async fn doctor(
     with_lb_headers: bool,
 ) -> Result<DoctorOutput> {
     tracing::info!("Testing dynamic strategy");
-    let dynamic = test_dynamic_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
+    let dynamic = test_dynamic_strategy(url, ip_address, port, mtu, with_lb_headers).await?;
 
     tracing::info!("Testing static strategy");
-    let static_strategy =
-        test_static_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
+    let static_strategy = test_static_strategy(url, ip_address, port, mtu, with_lb_headers).await?;
 
     tracing::info!("Testing explicit strategy");
-    let explicit = test_explicit_strategy(&url, ip_address, port, mtu, with_lb_headers).await?;
+    let explicit = test_explicit_strategy(url, ip_address, port, mtu, with_lb_headers).await?;
 
     Ok(DoctorOutput {
         address: ip_address.to_string(),

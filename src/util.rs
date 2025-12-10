@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Misc. helper functions
-use std::net::Ipv6Addr;
+use std::net::{IpAddr, Ipv6Addr};
 
 use tracing::warn;
 
@@ -97,6 +97,50 @@ pub fn generate_solicited_node_multicast_ipv6(ipv6: &Ipv6Addr) -> Ipv6Addr {
     new_octets[14] = octets[14];
     new_octets[15] = octets[15];
     Ipv6Addr::from(new_octets)
+}
+
+/// Check if an IP address is a private/non-globally-routable address
+///
+/// This includes all addresses that are not globally reachable according to IANA registries:
+/// - RFC 1918 private addresses
+/// - RFC 4193 Unique Local Addresses (IPv6)
+/// - RFC 4291 Link-Local addresses (IPv6)
+/// - Shared address space (100.64.0.0/10)
+/// - Link-local addresses (169.254.0.0/16)
+/// - And other special-purpose addresses
+pub fn is_private_ip(addr: &IpAddr) -> bool {
+    match addr {
+        IpAddr::V4(ipv4) => {
+            let octets = ipv4.octets();
+
+            // RFC 1918 private ranges:
+            // 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
+            octets[0] == 10
+                || (octets[0] == 172 && (octets[1] >= 16 && octets[1] <= 31))
+                || (octets[0] == 192 && octets[1] == 168)
+                // Shared address space (RFC 6598): 100.64.0.0/10
+                || (octets[0] == 100 && (octets[1] >= 64 && octets[1] <= 127))
+                // Link-local (RFC 3927): 169.254.0.0/16
+                || (octets[0] == 169 && octets[1] == 254)
+                // Documentation addresses (RFC 5737): 192.0.2.0/24, 198.51.100.0/24, 203.0.113.0/24
+                || (octets[0] == 192 && octets[1] == 0 && octets[2] == 2)
+                || (octets[0] == 198 && octets[1] == 51 && octets[2] == 100)
+                || (octets[0] == 203 && octets[1] == 0 && octets[2] == 113)
+                // Benchmarking (RFC 2544): 198.18.0.0/15
+                || (octets[0] == 198 && (octets[1] == 18 || octets[1] == 19))
+        }
+        IpAddr::V6(ipv6) => {
+            let segments = ipv6.segments();
+            let first_segment = segments[0];
+
+            // RFC 4193 Unique Local Addresses (ULA): fc00::/7
+            // RFC 4291 Link-Local addresses: fe80::/10
+            (first_segment & 0xfe00 == 0xfc00)
+                || (first_segment & 0xffc0 == 0xfe80)
+                // Documentation prefix (RFC 3849): 2001:db8::/32
+                || (first_segment == 0x2001 && segments[1] == 0x0db8)
+        }
+    }
 }
 
 #[derive(Debug, Eq, PartialEq)]

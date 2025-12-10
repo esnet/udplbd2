@@ -70,7 +70,7 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
                     ftype: HostFunctionType::HostFuncPhysical as i32,
                     index: 0,
                 }),
-                base_queue: base_queue,
+                base_queue,
                 num_queues: num_queues_per_func,
             }],
             reset: true,
@@ -81,7 +81,7 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
             flow_control: None,
         };
         clients
-            .set_host_config(host_id as i32, host_config)
+            .set_host_config(host_id, host_config)
             .await
             .map_err(|_| crate::errors::Error::Runtime("failed to set host config".to_string()))?;
     }
