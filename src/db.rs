@@ -254,9 +254,10 @@ impl LoadBalancerDB {
     /// Cleans up old records from the database:
     /// - If archiving is enabled:
     ///   • Rotate (or re‐use) an existing archive file via `archive_manager`.
-    ///   • DETACH “archive” unconditionally (ignore errors).
+    ///   • DETACH "archive" unconditionally (ignore errors).
     ///   • ATTACH that archive once.
-    ///   • For each “deleted_at” table, INSERT … SELECT into archive.<table> and then DELETE.
+    ///   • For each "deleted_at" table, INSERT … SELECT into archive.<table> and then DELETE.
+    ///   • For each "created_at" table (stat_*), INSERT … SELECT into archive.<table> and then DELETE.
     ///   • For session_state and event_number, do the same in that single transaction.
     ///   • DETACH again, then COMMIT once.
     ///
@@ -295,15 +296,20 @@ impl LoadBalancerDB {
             "reservation",
             "loadbalancer",
             "slot_demand",
-            "stat_global_sample",
-            "stat_lb_sample",
-            "stat_member_sample",
         ];
+        let tables_with_created_at = ["stat_global_sample", "stat_lb_sample", "stat_member_sample"];
         let mut deleted_col_lists: HashMap<&str, String> = HashMap::new();
         for &table in &tables_with_deleted_at {
             let mut temp_cache = TableMetadataCache::new();
             let columns = temp_cache.get_columns(&self.write_pool, table).await?;
             deleted_col_lists.insert(table, columns.join(", "));
+        }
+
+        let mut created_col_lists: HashMap<&str, String> = HashMap::new();
+        for &table in &tables_with_created_at {
+            let mut temp_cache = TableMetadataCache::new();
+            let columns = temp_cache.get_columns(&self.write_pool, table).await?;
+            created_col_lists.insert(table, columns.join(", "));
         }
 
         let session_table = "session_state";
@@ -325,9 +331,9 @@ impl LoadBalancerDB {
         };
 
         // STEP 3: If archiving is enabled, do everything in one write_pool transaction:
-        // but first DETACH any leftover “archive” alias from a previous failure.
+        // but first DETACH any leftover "archive" alias from a previous failure.
         if let (Some(ref archive_path), true) = (&archive_path_opt, do_archive) {
-            // 3a) DETACH “archive” unconditionally, ignoring any error (it might not be attached).
+            // 3a) DETACH "archive" unconditionally, ignoring any error (it might not be attached).
             let _ = sqlx::query("DETACH DATABASE archive")
                 .execute(&self.write_pool)
                 .await;
@@ -341,7 +347,7 @@ impl LoadBalancerDB {
             // 3c) Begin a single transaction on write_pool
             let mut tx = self.write_pool.begin().await.map_err(Error::Database)?;
 
-            // 3d) ATTACH the archive DB under alias “archive”
+            // 3d) ATTACH the archive DB under alias "archive"
             let attach_sql = format!("ATTACH DATABASE '{archive_path}' AS archive");
             sqlx::query(&attach_sql)
                 .execute(&mut *tx)
@@ -354,7 +360,7 @@ impl LoadBalancerDB {
             //     .await
             //     .map_err(Error::Database)?;
 
-            // 3e) For each simple “deleted_at” table:
+            // 3e) For each simple "deleted_at" table:
             for &table in &tables_with_deleted_at {
                 let col_list = &deleted_col_lists[table];
 
@@ -381,7 +387,34 @@ impl LoadBalancerDB {
                 *per_table.entry(table).or_insert(0) += rows_deleted;
             }
 
-            // 3f) Prune session_state (keep the 5 most‐recent per active session)
+            // 3f) For each "created_at" table:
+            for &table in &tables_with_created_at {
+                let col_list = &created_col_lists[table];
+
+                // 3f‐i) INSERT … SELECT into archive.<table>
+                let insert_sql = format!(
+                    "INSERT INTO archive.`{table}` ({col_list})
+                     SELECT {col_list} FROM main.`{table}` WHERE created_at < ?"
+                );
+                sqlx::query(&insert_sql)
+                    .bind(older_than_ms)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(Error::Database)?;
+
+                // 3f‐ii) DELETE from main.<table>
+                let delete_sql = format!("DELETE FROM `{table}` WHERE created_at < ?");
+                let del_result = sqlx::query(&delete_sql)
+                    .bind(older_than_ms)
+                    .execute(&mut *tx)
+                    .await
+                    .map_err(Error::Database)?;
+                let rows_deleted = del_result.rows_affected();
+                total_deleted += rows_deleted;
+                *per_table.entry(table).or_insert(0) += rows_deleted;
+            }
+
+            // 3g) Prune session_state (keep the 5 most‐recent per active session)
             {
                 let col_list = &session_col_list;
                 let select_sql = format!(
@@ -430,7 +463,7 @@ impl LoadBalancerDB {
                 *per_table.entry(session_table).or_insert(0) += rows_deleted;
             }
 
-            // 3g) Prune event_number (keep the 5 most‐recent per active reservation)
+            // 3h) Prune event_number (keep the 5 most‐recent per active reservation)
             {
                 let col_list = &event_col_list;
                 let select_sql = format!(
@@ -479,24 +512,24 @@ impl LoadBalancerDB {
                 *per_table.entry(event_table).or_insert(0) += rows_deleted;
             }
 
-            // 3h) Re-enable FK checks (optional; archive is read-only after this)
+            // 3i) Re-enable FK checks (optional; archive is read-only after this)
             let _ = sqlx::query("PRAGMA foreign_keys = ON;")
                 .execute(&mut *tx)
                 .await;
 
-            // 3i) DETACH and COMMIT once
+            // 3j) DETACH and COMMIT once
             let _ = sqlx::query("DETACH DATABASE archive")
                 .execute(&mut *tx)
                 .await;
             tx.commit().await.map_err(Error::Database)?;
 
-            // 3j) Re-enable FK checks on main DB
+            // 3k) Re-enable FK checks on main DB
             sqlx::query("PRAGMA foreign_keys = ON;")
                 .execute(&self.write_pool)
                 .await
                 .map_err(Error::Database)?;
 
-            // 3k) VACUUM if anything was deleted
+            // 3l) VACUUM if anything was deleted
             if total_deleted > 0 {
                 let vacuum_start = Instant::now();
                 sqlx::query("VACUUM")
@@ -521,7 +554,7 @@ impl LoadBalancerDB {
 
         // STEP 4: If archiving is disabled, do plain DELETEs.
         {
-            // 4a) “deleted_at” tables
+            // 4a) "deleted_at" tables
             for &table in &tables_with_deleted_at {
                 let delete_sql = format!("DELETE FROM `{table}` WHERE deleted_at < ?");
                 let del_result = sqlx::query(&delete_sql)
@@ -534,7 +567,20 @@ impl LoadBalancerDB {
                 *per_table.entry(table).or_insert(0) += rows_deleted;
             }
 
-            // 4b) Prune session_state
+            // 4b) "created_at" tables
+            for &table in &tables_with_created_at {
+                let delete_sql = format!("DELETE FROM `{table}` WHERE created_at < ?");
+                let del_result = sqlx::query(&delete_sql)
+                    .bind(older_than_ms)
+                    .execute(&self.write_pool)
+                    .await
+                    .map_err(Error::Database)?;
+                let rows_deleted = del_result.rows_affected();
+                total_deleted += rows_deleted;
+                *per_table.entry(table).or_insert(0) += rows_deleted;
+            }
+
+            // 4c) Prune session_state
             {
                 let delete_sql = format!(
                     "DELETE FROM `{session_table}` WHERE created_at < ? AND id NOT IN (
@@ -558,7 +604,7 @@ impl LoadBalancerDB {
                 *per_table.entry(session_table).or_insert(0) += rows_deleted;
             }
 
-            // 4c) Prune event_number
+            // 4d) Prune event_number
             {
                 let delete_sql = format!(
                     "DELETE FROM `{event_table}` WHERE created_at < ? AND id NOT IN (
@@ -582,7 +628,7 @@ impl LoadBalancerDB {
                 *per_table.entry(event_table).or_insert(0) += rows_deleted;
             }
 
-            // 4d) VACUUM if needed
+            // 4e) VACUUM if needed
             if total_deleted > 0 {
                 let vacuum_start = Instant::now();
                 sqlx::query("VACUUM")
@@ -678,7 +724,7 @@ pub struct ArchiveDBManager {
     rotation: ChronoDuration,
     keep: u32,
 
-    /// Cached path to the “current” archive, if any
+    /// Cached path to the "current" archive, if any
     current_db_path: Option<PathBuf>,
     current_db_time: Option<DateTime<Utc>>,
     pool: Option<Pool<Sqlite>>,
@@ -692,7 +738,7 @@ impl ArchiveDBManager {
         // 1) Ensure the directory exists
         fs::create_dir_all(&dir).map_err(Error::IoError)?;
 
-        // 2) Look for the latest “archive_YYYYMMDDHHMMSS.sqlite” on disk
+        // 2) Look for the latest "archive_YYYYMMDDHHMMSS.sqlite" on disk
         let (current_db_path, current_db_time, pool) = match find_latest_archive(&dir) {
             Err(e) => {
                 // If the fs read_dir failed, propagate as IoError
@@ -736,7 +782,7 @@ impl ArchiveDBManager {
         })
     }
 
-    /// If “rotation” interval has elapsed (or no pool exists yet), drop the old pool
+    /// If "rotation" interval has elapsed (or no pool exists yet), drop the old pool
     /// and create a brand-new file. Otherwise, reuse the existing one.
     /// Always returns a valid `SqlitePool`.
     pub async fn get_or_rotate_and_get_pool(&mut self, now: DateTime<Utc>) -> Result<Pool<Sqlite>> {
@@ -769,7 +815,7 @@ impl ArchiveDBManager {
 
     /// Create a new file-based SQLite archive DB, run migrations on it, and set the pool.
     async fn create_new_archive(&mut self, now: DateTime<Utc>) -> Result<()> {
-        // Make a filename like “udplbd_archive_20250605120000.db”
+        // Make a filename like "udplbd_archive_20250605120000.db"
         let filename = format!("udplbd_archive_{}.db", now.format("%Y%m%d%H%M%S"));
         let db_path = self.dir.join(&filename);
 
@@ -796,9 +842,9 @@ impl ArchiveDBManager {
         Ok(())
     }
 
-    /// Remove all but the most recent `keep` files in `self.dir` matching “udplbd_archive_*.db”.
+    /// Remove all but the most recent `keep` files in `self.dir` matching "udplbd_archive_*.db".
     fn prune_old(&self) -> std::io::Result<()> {
-        // Gather all “udplbd_archive_YYYYMMDDHHMMSS.db” files
+        // Gather all "udplbd_archive_YYYYMMDDHHMMSS.db" files
         let mut candidates: Vec<(DateTime<Utc>, PathBuf)> = Vec::new();
         for entry in fs::read_dir(&self.dir)? {
             let entry = entry?;
