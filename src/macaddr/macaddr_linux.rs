@@ -196,7 +196,7 @@ pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
     {
         // for debugging :)
         trace!("get_mac_addr: special-case IP, returning dummy MAC");
-        return Ok(MacAddr6::new(0x01, 0x23, 0x45, 0x67, 0x89, 0xAB));
+        return Ok(MacAddr6::new(0x02, 0x00, 0xDE, 0xCA, 0xFB, 0xAD));
     }
     for attempt in 0..2 {
         trace!("get_mac_addr: attempt {}", attempt + 1);
