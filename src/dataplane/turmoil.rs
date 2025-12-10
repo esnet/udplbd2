@@ -401,9 +401,11 @@ pub mod tester {
                                         }
                                     };
 
+                                    let conf_arc = Arc::new(conf.clone());
                                     let lb_service = crate::api::turmoil::service::LoadBalancerService::new(
                                         db.clone(),
                                         manager_arc.clone(),
+                                        conf_arc,
                                     );
                                     let svc = crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer::new(lb_service);
                                     Server::builder()

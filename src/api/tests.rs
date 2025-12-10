@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 /// API handler tests
+use crate::config::Config;
 use crate::proto::loadbalancer::v1::{
     CreateTokenRequest, RegisterRequest, ReserveLoadBalancerRequest,
 };
@@ -16,7 +17,37 @@ use crate::reservation::ReservationManager;
 
 use super::service::LoadBalancerService;
 
-/// Creates a test service instance with an in-memory database
+/// Creates a test service instance with an in-memory database and custom config
+pub async fn create_test_service_with_config(config: Config) -> (LoadBalancerService, i64) {
+    let db = Arc::new(setup_db().await);
+    let clients = MultiSNP4Client::new(vec![]);
+
+    let manager = Arc::new(Mutex::new(ReservationManager::new(
+        db.clone(),
+        clients,
+        Duration::from_secs(1),
+        Duration::from_millis(1000),
+        "00:1A:2B:3C:4D:5E".parse().unwrap(),
+        "127.0.0.1:0".parse().ok(),
+        "[::1]:0".parse().ok(),
+    )));
+
+    // Create a root token for testing
+    db.create_admin_token("test").await.unwrap();
+
+    // Create a reservation without sessions (we'll register them in tests)
+    let (_, reservation) =
+        crate::db::tests::setup_test_loadbalancer_with_sessions(&db, vec![]).await;
+
+    let config = Arc::new(config);
+    (
+        LoadBalancerService::new(db, manager, config),
+        reservation.id,
+    )
+}
+
+/// Creates a test service instance with an in-memory database using default config
+/// Returns a service with a reservation that has 2 default sessions
 pub async fn create_test_service() -> (LoadBalancerService, i64, i64) {
     let db = Arc::new(setup_db().await);
     let clients = MultiSNP4Client::new(vec![]);
@@ -30,12 +61,15 @@ pub async fn create_test_service() -> (LoadBalancerService, i64, i64) {
         "127.0.0.1:0".parse().ok(),
         "[::1]:0".parse().ok(),
     )));
-    // Create a real reservation and session
+
+    // Create a reservation with default sessions (for backward compatibility with existing tests)
     let (_, reservation) = crate::db::tests::setup_test_loadbalancer(&db).await;
     let sessions = db.get_reservation_sessions(reservation.id).await.unwrap();
     let session_id = sessions[0].id;
+
+    let config = Arc::new(Config::turmoil());
     (
-        LoadBalancerService::new(db, manager),
+        LoadBalancerService::new(db, manager, config),
         reservation.id,
         session_id,
     )
@@ -416,4 +450,224 @@ async fn test_revoke_token_invalid_token() {
         "Expected error to contain 'not found', got: {}",
         err
     );
+}
+
+// IP Validation Tests
+
+#[tokio::test]
+async fn test_register_ip_validation_loopback_denied() {
+    let mut config = Config::turmoil();
+    config.server.allow_loopback = false;
+    let (service, reservation_id) = create_test_service_with_config(config).await;
+
+    // Test IPv4 loopback
+    let mut request = Request::new(RegisterRequest {
+        lb_id: reservation_id.to_string(),
+        name: "test-session-v4".to_string(),
+        ip_address: "127.0.0.1".to_string(),
+        udp_port: 8000,
+        port_range: 100,
+        weight: 1.0,
+        min_factor: 0.0,
+        max_factor: 1.0,
+        keep_lb_header: false,
+        slot_demands: Vec::new(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+
+    let result = service.handle_register(request).await;
+    assert!(
+        result.is_err(),
+        "Registration should fail for IPv4 loopback when allow_loopback is false"
+    );
+    assert!(result.unwrap_err().message().contains("loopback"));
+
+    // Test IPv6 loopback
+    let mut request = Request::new(RegisterRequest {
+        lb_id: reservation_id.to_string(),
+        name: "test-session-v6".to_string(),
+        ip_address: "::1".to_string(),
+        udp_port: 8000,
+        port_range: 100,
+        weight: 1.0,
+        min_factor: 0.0,
+        max_factor: 1.0,
+        keep_lb_header: false,
+        slot_demands: Vec::new(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+
+    let result = service.handle_register(request).await;
+    assert!(
+        result.is_err(),
+        "Registration should fail for IPv6 loopback when allow_loopback is false"
+    );
+    assert!(result.unwrap_err().message().contains("loopback"));
+}
+
+#[tokio::test]
+async fn test_register_ip_validation_private_denied() {
+    let mut config = Config::turmoil();
+    config.server.allow_private = false;
+    config.server.allow_loopback = true; // Allow loopback so we only test private
+    let (service, reservation_id) = create_test_service_with_config(config).await;
+
+    let test_cases = vec![
+        // RFC 1918 private ranges
+        ("10.0.0.1", "RFC 1918: 10.0.0.0/8"),
+        ("10.255.255.254", "RFC 1918: 10.0.0.0/8 (upper bound)"),
+        ("172.16.0.1", "RFC 1918: 172.16.0.0/12"),
+        ("172.31.255.254", "RFC 1918: 172.16.0.0/12 (upper bound)"),
+        ("192.168.1.1", "RFC 1918: 192.168.0.0/16"),
+        ("192.168.255.254", "RFC 1918: 192.168.0.0/16 (upper bound)"),
+        // Shared address space (RFC 6598)
+        ("100.64.0.1", "RFC 6598: Shared address space 100.64.0.0/10"),
+        (
+            "100.127.255.254",
+            "RFC 6598: Shared address space (upper bound)",
+        ),
+        // Link-local (RFC 3927)
+        ("169.254.0.1", "RFC 3927: Link-local 169.254.0.0/16"),
+        ("169.254.255.254", "RFC 3927: Link-local (upper bound)"),
+        // Documentation addresses (RFC 5737)
+        ("192.0.2.1", "RFC 5737: Documentation 192.0.2.0/24"),
+        ("198.51.100.1", "RFC 5737: Documentation 198.51.100.0/24"),
+        ("203.0.113.1", "RFC 5737: Documentation 203.0.113.0/24"),
+        // Benchmarking (RFC 2544)
+        ("198.18.0.1", "RFC 2544: Benchmarking 198.18.0.0/15"),
+        ("198.19.255.254", "RFC 2544: Benchmarking (upper bound)"),
+        // IPv6 addresses
+        ("fc00::1", "RFC 4193: IPv6 ULA fc00::/7"),
+        (
+            "fdff:ffff:ffff:ffff:ffff:ffff:ffff:fffe",
+            "RFC 4193: IPv6 ULA (upper bound)",
+        ),
+        ("fe80::1", "RFC 4291: IPv6 link-local fe80::/10"),
+        (
+            "febf:ffff:ffff:ffff:ffff:ffff:ffff:fffe",
+            "RFC 4291: IPv6 link-local (upper bound)",
+        ),
+        ("2001:db8::1", "RFC 3849: IPv6 documentation 2001:db8::/32"),
+    ];
+
+    for (ip, description) in test_cases {
+        let mut request = Request::new(RegisterRequest {
+            lb_id: reservation_id.to_string(),
+            name: format!("test-session-{}", ip.replace([':', '.'], "-")),
+            ip_address: ip.to_string(),
+            udp_port: 8000,
+            port_range: 100,
+            weight: 1.0,
+            min_factor: 0.0,
+            max_factor: 1.0,
+            keep_lb_header: false,
+            slot_demands: Vec::new(),
+        });
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from("Bearer test").unwrap(),
+        );
+
+        let result = service.handle_register(request).await;
+        assert!(
+            result.is_err(),
+            "Registration should fail for {} ({})",
+            description,
+            ip
+        );
+        assert!(
+            result.unwrap_err().message().contains("private"),
+            "Error should mention 'private' for {} ({})",
+            description,
+            ip
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_register_ip_validation_private_allowed() {
+    let mut config = Config::turmoil();
+    config.server.allow_private = true;
+    config.server.allow_loopback = true;
+    let (service, reservation_id) = create_test_service_with_config(config).await;
+
+    let test_cases = vec![
+        "10.0.0.1",
+        "172.16.0.1",
+        "192.168.1.100",
+        "fc00::1",
+        "fe80::1",
+    ];
+
+    for ip in test_cases {
+        let mut request = Request::new(RegisterRequest {
+            lb_id: reservation_id.to_string(),
+            name: format!("test-session-{}", ip.replace([':', '.'], "-")),
+            ip_address: ip.to_string(),
+            udp_port: 8000,
+            port_range: 100,
+            weight: 1.0,
+            min_factor: 0.0,
+            max_factor: 1.0,
+            keep_lb_header: false,
+            slot_demands: Vec::new(),
+        });
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from("Bearer test").unwrap(),
+        );
+
+        let result = service.handle_register(request).await;
+        // MAC address lookup will fail for these test IPs, but that's OK - it means the IP validation passed
+        if result.is_err() {
+            let err_stat = result.unwrap_err();
+            assert!(
+                err_stat.message().contains("MAC") || err_stat.message().contains("mac"),
+                "Error should be about MAC address lookup, not IP validation, for {}: {}",
+                ip,
+                err_stat.message()
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn test_register_ip_validation_public_allowed() {
+    let mut config = Config::turmoil();
+    config.server.allow_private = false;
+    config.server.allow_loopback = false;
+    let (service, reservation_id) = create_test_service_with_config(config).await;
+
+    let mut request = Request::new(RegisterRequest {
+        lb_id: reservation_id.to_string(),
+        name: "test-session-public".to_string(),
+        ip_address: "8.8.8.8".to_string(),
+        udp_port: 8000,
+        port_range: 100,
+        weight: 1.0,
+        min_factor: 0.0,
+        max_factor: 1.0,
+        keep_lb_header: false,
+        slot_demands: Vec::new(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+
+    let result = service.handle_register(request).await;
+    if result.is_err() {
+        let err_stat = result.unwrap_err();
+        assert!(
+            err_stat.message().contains("MAC") || err_stat.message().contains("mac"),
+            "Error should be about MAC address lookup, not IP validation, for 8.8.8.8: {}",
+            err_stat.message()
+        );
+    }
 }

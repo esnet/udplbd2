@@ -1,5 +1,13 @@
 # Load balancer configuration
 lb:
+  # [MAC address, string] Unicast MAC address for L2 rules, leave unset to fetch from sn-cfg
+  mac_unicast: null # "AB:CD:DE:F1:23:45"
+  # [bool] Allow registration from private addresses (RFC 1918 for IPv4, RFC 4193 for IPv6)
+  allow_private: true
+  # [bool] Allow registration from loopback addresses
+  allow_loopback: false
+  # [bool] Require that registered ip addresses match the address of the host making the request
+  require_registration_from_dataplane: false
   # List of load balancer instances. Each instance must specify IPv4, IPv6, and event number port.
   # These are the addresses you are assigning to the FPGA
   instances:
@@ -15,11 +23,6 @@ lb:
     - ipv4: "192.0.2.4"
       ipv6: "2001:DB8::4"
       event_number_port: 19534
-
-  # [MAC address, string] Unicast MAC address for L2 rules
-  mac_unicast: "AB:CD:DE:F1:23:45"
-  # [MAC address, string] Broadcast MAC address for L2 rules
-  mac_broadcast: "33:33:ff:00:00:16"
 
 # Database configuration
 database:

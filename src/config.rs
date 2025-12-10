@@ -131,6 +131,30 @@ pub struct ServerConfig {
     pub listen: Vec<SocketAddr>,
     pub auth_token: String,
     pub tls: TlsConfig,
+
+    /// Allow registration from private IP addresses (RFC 1918, RFC 4193)
+    #[serde(default = "default_allow_private")]
+    pub allow_private: bool,
+
+    /// Allow registration from localhost addresses (127.0.0.0/8, ::1)
+    #[serde(default = "default_allow_loopback")]
+    pub allow_loopback: bool,
+
+    /// Require that the registered IP address matches the gRPC request source address
+    #[serde(default = "default_require_registration_from_dataplane")]
+    pub require_registration_from_dataplane: bool,
+}
+
+fn default_allow_private() -> bool {
+    true
+}
+
+fn default_allow_loopback() -> bool {
+    false
+}
+
+fn default_require_registration_from_dataplane() -> bool {
+    false
 }
 
 // Custom deserializer for SocketAddr vector
@@ -243,6 +267,9 @@ impl Config {
                     cert_file: None,
                     key_file: None,
                 },
+                allow_private: true,
+                allow_loopback: true,
+                require_registration_from_dataplane: false,
             },
             rest: RestServerConfig { enable: true },
             log: LogConfig {
