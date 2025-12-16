@@ -27,8 +27,20 @@ impl LoadBalancerDB {
         sqlx::query!(
             "INSERT INTO stat_global_sample (
                 sample_ts_ms,
-                rx_rslt_0, rx_rslt_1, rx_rslt_2, rx_rslt_3, rx_rslt_4, rx_rslt_5, rx_rslt_6,
-                rx_rslt_7, rx_rslt_8, rx_rslt_9, rx_rslt_10, rx_rslt_11, rx_rslt_12, rx_rslt_13
+                rx_rslt_drop_parse_fail,
+                rx_rslt_drop_mac_dst_miss,
+                rx_rslt_drop_not_ip,
+                rx_rslt_drop_ip_dst_miss,
+                rx_rslt_drop_arp_bad_tpa,
+                rx_rslt_drop_icmpv4_echo_bad_dst,
+                rx_rslt_drop_icmpv6_echo_bad_dst,
+                rx_rslt_drop_ipv6nd_neigh_sol_bad_target,
+                rx_rslt_ok_arp_req,
+                rx_rslt_ok_icmpv4_echo,
+                rx_rslt_ok_icmpv6_echo,
+                rx_rslt_ok_ipv6nd_neigh_sol,
+                rx_rslt_ok_host,
+                rx_rslt_ok_lb
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             sample.sample_ts_ms,
             sample.rx_rslt[0],
@@ -60,27 +72,55 @@ impl LoadBalancerDB {
             "INSERT INTO stat_lb_sample (
                 reservation_id,
                 sample_ts_ms,
+                drop_bad_udplb_version,
                 drop_blocked_src,
                 drop_epoch_assign_miss,
                 drop_lb_calendar_miss,
                 drop_mbr_info_miss,
                 drop_no_udplb_hdr,
                 drop_not_ip,
-                lb_ctx_rx_bytes,
-                pkt_rx_bytes,
-                pkt_rx_pkts
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                rx_bytes,
+                rx_packets,
+                rx_v2,
+                rx_v3
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             sample.reservation_id,
             sample.sample_ts_ms,
+            sample.drop_bad_udplb_version,
             sample.drop_blocked_src,
             sample.drop_epoch_assign_miss,
             sample.drop_lb_calendar_miss,
             sample.drop_mbr_info_miss,
             sample.drop_no_udplb_hdr,
             sample.drop_not_ip,
-            sample.lb_ctx_rx_bytes,
-            sample.pkt_rx_bytes,
-            sample.pkt_rx_pkts
+            sample.rx_bytes,
+            sample.rx_packets,
+            sample.rx_v2,
+            sample.rx_v3
+        )
+        .execute(&self.write_pool)
+        .await?;
+        Ok(())
+    }
+
+    /// Insert a row into stat_lb_scoped_sample.
+    pub async fn insert_stat_lb_scoped_sample(
+        &self,
+        sample: &crate::db::models::StatLbScopedSample,
+    ) -> Result<()> {
+        sqlx::query!(
+            "INSERT INTO stat_lb_scoped_sample (
+                reservation_id,
+                stat_scope_id,
+                sample_ts_ms,
+                rx_bytes,
+                rx_packets
+            ) VALUES (?, ?, ?, ?, ?)",
+            sample.reservation_id,
+            sample.stat_scope_id,
+            sample.sample_ts_ms,
+            sample.rx_bytes,
+            sample.rx_packets
         )
         .execute(&self.write_pool)
         .await?;
@@ -115,29 +155,30 @@ impl LoadBalancerDB {
         metric: &str,
         since: &DateTime<Utc>,
     ) -> Result<Timeseries> {
-        // Only allow rx_rslt_0..rx_rslt_13
-        let allowed_metrics = [
-            "rx_rslt_0",
-            "rx_rslt_1",
-            "rx_rslt_2",
-            "rx_rslt_3",
-            "rx_rslt_4",
-            "rx_rslt_5",
-            "rx_rslt_6",
-            "rx_rslt_7",
-            "rx_rslt_8",
-            "rx_rslt_9",
-            "rx_rslt_10",
-            "rx_rslt_11",
-            "rx_rslt_12",
-            "rx_rslt_13",
-        ];
-        if !allowed_metrics.contains(&metric) {
-            return Err(Error::Usage(format!(
-                "Invalid global stat metric: {}",
-                metric
-            )));
-        }
+        // Map old metric names to new column names for backward compatibility
+        let column_name = match metric {
+            "rx_rslt_drop_parse_fail"
+            | "rx_rslt_drop_mac_dst_miss"
+            | "rx_rslt_drop_not_ip"
+            | "rx_rslt_drop_ip_dst_miss"
+            | "rx_rslt_drop_arp_bad_tpa"
+            | "rx_rslt_drop_icmpv4_echo_bad_dst"
+            | "rx_rslt_drop_icmpv6_echo_bad_dst"
+            | "rx_rslt_drop_ipv6nd_neigh_sol_bad_target"
+            | "rx_rslt_ok_arp_req"
+            | "rx_rslt_ok_icmpv4_echo"
+            | "rx_rslt_ok_icmpv6_echo"
+            | "rx_rslt_ok_ipv6nd_neigh_sol"
+            | "rx_rslt_ok_host"
+            | "rx_rslt_ok_lb" => metric,
+            _ => {
+                return Err(Error::Usage(format!(
+                    "Invalid global stat metric: {}",
+                    metric
+                )))
+            }
+        };
+
         let ts_name = format!("/smartnic/global/{}", metric);
         let since_ms = since.timestamp_millis();
         let query = format!(
@@ -145,7 +186,7 @@ impl LoadBalancerDB {
              FROM stat_global_sample
              WHERE sample_ts_ms >= ?
              ORDER BY sample_ts_ms ASC",
-            metric
+            column_name
         );
         let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
             .bind(since_ms)
@@ -170,15 +211,15 @@ impl LoadBalancerDB {
     ) -> Result<Timeseries> {
         // Only allow drop and rx counter columns
         let allowed_metrics = [
+            "drop_bad_udplb_version",
             "drop_blocked_src",
             "drop_epoch_assign_miss",
             "drop_lb_calendar_miss",
             "drop_mbr_info_miss",
             "drop_no_udplb_hdr",
             "drop_not_ip",
-            "lb_ctx_rx_bytes",
-            "pkt_rx_bytes",
-            "pkt_rx_pkts",
+            "rx_bytes",
+            "rx_packets",
         ];
         if !allowed_metrics.contains(&metric) {
             return Err(Error::Usage(format!("Invalid lb stat metric: {}", metric)));
@@ -253,8 +294,20 @@ impl LoadBalancerDB {
         let since_ms = since.timestamp_millis();
         let rows = sqlx::query!(
             "SELECT sample_ts_ms,
-                rx_rslt_0, rx_rslt_1, rx_rslt_2, rx_rslt_3, rx_rslt_4, rx_rslt_5, rx_rslt_6,
-                rx_rslt_7, rx_rslt_8, rx_rslt_9, rx_rslt_10, rx_rslt_11, rx_rslt_12, rx_rslt_13
+                rx_rslt_drop_parse_fail,
+                rx_rslt_drop_mac_dst_miss,
+                rx_rslt_drop_not_ip,
+                rx_rslt_drop_ip_dst_miss,
+                rx_rslt_drop_arp_bad_tpa,
+                rx_rslt_drop_icmpv4_echo_bad_dst,
+                rx_rslt_drop_icmpv6_echo_bad_dst,
+                rx_rslt_drop_ipv6nd_neigh_sol_bad_target,
+                rx_rslt_ok_arp_req,
+                rx_rslt_ok_icmpv4_echo,
+                rx_rslt_ok_icmpv6_echo,
+                rx_rslt_ok_ipv6nd_neigh_sol,
+                rx_rslt_ok_host,
+                rx_rslt_ok_lb
              FROM stat_global_sample
              WHERE sample_ts_ms >= ?
              ORDER BY sample_ts_ms ASC",
@@ -263,219 +316,247 @@ impl LoadBalancerDB {
         .fetch_all(&self.read_pool)
         .await?;
 
-        let mut rx_rslt_0 = Vec::new();
-        let mut rx_rslt_1 = Vec::new();
-        let mut rx_rslt_2 = Vec::new();
-        let mut rx_rslt_3 = Vec::new();
-        let mut rx_rslt_4 = Vec::new();
-        let mut rx_rslt_5 = Vec::new();
-        let mut rx_rslt_6 = Vec::new();
-        let mut rx_rslt_7 = Vec::new();
-        let mut rx_rslt_8 = Vec::new();
-        let mut rx_rslt_9 = Vec::new();
-        let mut rx_rslt_10 = Vec::new();
-        let mut rx_rslt_11 = Vec::new();
-        let mut rx_rslt_12 = Vec::new();
-        let mut rx_rslt_13 = Vec::new();
+        let mut rx_rslt_drop_parse_fail = Vec::new();
+        let mut rx_rslt_drop_mac_dst_miss = Vec::new();
+        let mut rx_rslt_drop_not_ip = Vec::new();
+        let mut rx_rslt_drop_ip_dst_miss = Vec::new();
+        let mut rx_rslt_drop_arp_bad_tpa = Vec::new();
+        let mut rx_rslt_drop_icmpv4_echo_bad_dst = Vec::new();
+        let mut rx_rslt_drop_icmpv6_echo_bad_dst = Vec::new();
+        let mut rx_rslt_drop_ipv6nd_neigh_sol_bad_target = Vec::new();
+        let mut rx_rslt_ok_arp_req = Vec::new();
+        let mut rx_rslt_ok_icmpv4_echo = Vec::new();
+        let mut rx_rslt_ok_icmpv6_echo = Vec::new();
+        let mut rx_rslt_ok_ipv6nd_neigh_sol = Vec::new();
+        let mut rx_rslt_ok_host = Vec::new();
+        let mut rx_rslt_ok_lb = Vec::new();
 
         for row in rows {
             let ts = row.sample_ts_ms;
-            rx_rslt_0.push(FloatSample {
+            rx_rslt_drop_parse_fail.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_0 as f32,
+                value: row.rx_rslt_drop_parse_fail as f32,
                 meta: None,
             });
-            rx_rslt_1.push(FloatSample {
+            rx_rslt_drop_mac_dst_miss.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_1 as f32,
+                value: row.rx_rslt_drop_mac_dst_miss as f32,
                 meta: None,
             });
-            rx_rslt_2.push(FloatSample {
+            rx_rslt_drop_not_ip.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_2 as f32,
+                value: row.rx_rslt_drop_not_ip as f32,
                 meta: None,
             });
-            rx_rslt_3.push(FloatSample {
+            rx_rslt_drop_ip_dst_miss.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_3 as f32,
+                value: row.rx_rslt_drop_ip_dst_miss as f32,
                 meta: None,
             });
-            rx_rslt_4.push(FloatSample {
+            rx_rslt_drop_arp_bad_tpa.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_4 as f32,
+                value: row.rx_rslt_drop_arp_bad_tpa as f32,
                 meta: None,
             });
-            rx_rslt_5.push(FloatSample {
+            rx_rslt_drop_icmpv4_echo_bad_dst.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_5 as f32,
+                value: row.rx_rslt_drop_icmpv4_echo_bad_dst as f32,
                 meta: None,
             });
-            rx_rslt_6.push(FloatSample {
+            rx_rslt_drop_icmpv6_echo_bad_dst.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_6 as f32,
+                value: row.rx_rslt_drop_icmpv6_echo_bad_dst as f32,
                 meta: None,
             });
-            rx_rslt_7.push(FloatSample {
+            rx_rslt_drop_ipv6nd_neigh_sol_bad_target.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_7 as f32,
+                value: row.rx_rslt_drop_ipv6nd_neigh_sol_bad_target as f32,
                 meta: None,
             });
-            rx_rslt_8.push(FloatSample {
+            rx_rslt_ok_arp_req.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_8 as f32,
+                value: row.rx_rslt_ok_arp_req as f32,
                 meta: None,
             });
-            rx_rslt_9.push(FloatSample {
+            rx_rslt_ok_icmpv4_echo.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_9 as f32,
+                value: row.rx_rslt_ok_icmpv4_echo as f32,
                 meta: None,
             });
-            rx_rslt_10.push(FloatSample {
+            rx_rslt_ok_icmpv6_echo.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_10 as f32,
+                value: row.rx_rslt_ok_icmpv6_echo as f32,
                 meta: None,
             });
-            rx_rslt_11.push(FloatSample {
+            rx_rslt_ok_ipv6nd_neigh_sol.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_11 as f32,
+                value: row.rx_rslt_ok_ipv6nd_neigh_sol as f32,
                 meta: None,
             });
-            rx_rslt_12.push(FloatSample {
+            rx_rslt_ok_host.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_12 as f32,
+                value: row.rx_rslt_ok_host as f32,
                 meta: None,
             });
-            rx_rslt_13.push(FloatSample {
+            rx_rslt_ok_lb.push(FloatSample {
                 timestamp: ts,
-                value: row.rx_rslt_13 as f32,
+                value: row.rx_rslt_ok_lb as f32,
                 meta: None,
             });
         }
 
         Ok(vec![
             Timeseries {
-                name: "/smartnic/global/rx_rslt_0".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_parse_fail".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_0 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_parse_fail,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_1".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_mac_dst_miss".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_1 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_mac_dst_miss,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_2".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_not_ip".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_2 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_not_ip,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_3".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_ip_dst_miss".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_3 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_ip_dst_miss,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_4".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_arp_bad_tpa".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_4 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_arp_bad_tpa,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_5".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_icmpv4_echo_bad_dst".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_5 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_icmpv4_echo_bad_dst,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_6".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_icmpv6_echo_bad_dst".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_6 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_icmpv6_echo_bad_dst,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_7".to_string(),
+                name: "/smartnic/global/rx_rslt_drop_ipv6nd_neigh_sol_bad_target".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_7 },
+                        FloatTimeseries {
+                            data: rx_rslt_drop_ipv6nd_neigh_sol_bad_target,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_8".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_arp_req".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_8 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_arp_req,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_9".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_icmpv4_echo".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_9 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_icmpv4_echo,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_10".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_icmpv6_echo".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_10 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_icmpv6_echo,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_11".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_ipv6nd_neigh_sol".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_11 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_ipv6nd_neigh_sol,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_12".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_host".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_12 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_host,
+                        },
                     ),
                 ),
             },
             Timeseries {
-                name: "/smartnic/global/rx_rslt_13".to_string(),
+                name: "/smartnic/global/rx_rslt_ok_lb".to_string(),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: rx_rslt_13 },
+                        FloatTimeseries {
+                            data: rx_rslt_ok_lb,
+                        },
                     ),
                 ),
             },
@@ -491,15 +572,15 @@ impl LoadBalancerDB {
         let since_ms = since.timestamp_millis();
         let rows = sqlx::query!(
             "SELECT sample_ts_ms,
+                drop_bad_udplb_version,
                 drop_blocked_src,
                 drop_epoch_assign_miss,
                 drop_lb_calendar_miss,
                 drop_mbr_info_miss,
                 drop_no_udplb_hdr,
                 drop_not_ip,
-                lb_ctx_rx_bytes,
-                pkt_rx_bytes,
-                pkt_rx_pkts
+                rx_bytes,
+                rx_packets
              FROM stat_lb_sample
              WHERE reservation_id = ? AND sample_ts_ms >= ?
              ORDER BY sample_ts_ms ASC",
@@ -509,18 +590,23 @@ impl LoadBalancerDB {
         .fetch_all(&self.read_pool)
         .await?;
 
+        let mut drop_bad_udplb_version = Vec::new();
         let mut drop_blocked_src = Vec::new();
         let mut drop_epoch_assign_miss = Vec::new();
         let mut drop_lb_calendar_miss = Vec::new();
         let mut drop_mbr_info_miss = Vec::new();
         let mut drop_no_udplb_hdr = Vec::new();
         let mut drop_not_ip = Vec::new();
-        let mut lb_ctx_rx_bytes = Vec::new();
-        let mut pkt_rx_bytes = Vec::new();
-        let mut pkt_rx_pkts = Vec::new();
+        let mut rx_bytes = Vec::new();
+        let mut rx_packets = Vec::new();
 
         for row in rows {
             let ts = row.sample_ts_ms;
+            drop_bad_udplb_version.push(FloatSample {
+                timestamp: ts,
+                value: row.drop_bad_udplb_version as f32,
+                meta: None,
+            });
             drop_blocked_src.push(FloatSample {
                 timestamp: ts,
                 value: row.drop_blocked_src as f32,
@@ -551,24 +637,30 @@ impl LoadBalancerDB {
                 value: row.drop_not_ip as f32,
                 meta: None,
             });
-            lb_ctx_rx_bytes.push(FloatSample {
+            rx_bytes.push(FloatSample {
                 timestamp: ts,
-                value: row.lb_ctx_rx_bytes as f32,
+                value: row.rx_bytes as f32,
                 meta: None,
             });
-            pkt_rx_bytes.push(FloatSample {
+            rx_packets.push(FloatSample {
                 timestamp: ts,
-                value: row.pkt_rx_bytes as f32,
-                meta: None,
-            });
-            pkt_rx_pkts.push(FloatSample {
-                timestamp: ts,
-                value: row.pkt_rx_pkts as f32,
+                value: row.rx_packets as f32,
                 meta: None,
             });
         }
 
         Ok(vec![
+            Timeseries {
+                name: format!("/lb/{}/drop_bad_udplb_version", reservation_id),
+                unit: "".to_string(),
+                timeseries: Some(
+                    crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
+                        FloatTimeseries {
+                            data: drop_bad_udplb_version,
+                        },
+                    ),
+                ),
+            },
             Timeseries {
                 name: format!("/lb/{}/drop_blocked_src", reservation_id),
                 unit: "".to_string(),
@@ -634,31 +726,20 @@ impl LoadBalancerDB {
                 ),
             },
             Timeseries {
-                name: format!("/lb/{}/lb_ctx_rx_bytes", reservation_id),
+                name: format!("/lb/{}/rx_bytes", reservation_id),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries {
-                            data: lb_ctx_rx_bytes,
-                        },
+                        FloatTimeseries { data: rx_bytes },
                     ),
                 ),
             },
             Timeseries {
-                name: format!("/lb/{}/pkt_rx_bytes", reservation_id),
+                name: format!("/lb/{}/rx_packets", reservation_id),
                 unit: "".to_string(),
                 timeseries: Some(
                     crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: pkt_rx_bytes },
-                    ),
-                ),
-            },
-            Timeseries {
-                name: format!("/lb/{}/pkt_rx_pkts", reservation_id),
-                unit: "".to_string(),
-                timeseries: Some(
-                    crate::proto::loadbalancer::v1::timeseries::Timeseries::FloatSamples(
-                        FloatTimeseries { data: pkt_rx_pkts },
+                        FloatTimeseries { data: rx_packets },
                     ),
                 ),
             },
@@ -1123,15 +1204,15 @@ impl LoadBalancerDB {
                         for metric in [
                             "event_number",
                             "avg_event_rate_hz",
+                            "drop_bad_udplb_version",
                             "drop_blocked_src",
                             "drop_epoch_assign_miss",
                             "drop_lb_calendar_miss",
                             "drop_mbr_info_miss",
                             "drop_no_udplb_hdr",
                             "drop_not_ip",
-                            "lb_ctx_rx_bytes",
-                            "pkt_rx_bytes",
-                            "pkt_rx_pkts",
+                            "rx_bytes",
+                            "rx_packets",
                         ]
                         .iter()
                         {

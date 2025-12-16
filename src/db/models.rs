@@ -188,15 +188,26 @@ pub struct StatGlobalSample {
 pub struct StatLbSample {
     pub reservation_id: i64,
     pub sample_ts_ms: i64,
+    pub drop_bad_udplb_version: i64,
     pub drop_blocked_src: i64,
     pub drop_epoch_assign_miss: i64,
     pub drop_lb_calendar_miss: i64,
     pub drop_mbr_info_miss: i64,
     pub drop_no_udplb_hdr: i64,
     pub drop_not_ip: i64,
-    pub lb_ctx_rx_bytes: i64,
-    pub pkt_rx_bytes: i64,
-    pub pkt_rx_pkts: i64,
+    pub rx_bytes: i64,
+    pub rx_packets: i64,
+    pub rx_v2: i64,
+    pub rx_v3: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatLbScopedSample {
+    pub reservation_id: i64,
+    pub stat_scope_id: i64,
+    pub sample_ts_ms: i64,
+    pub rx_bytes: i64,
+    pub rx_packets: i64,
 }
 
 #[derive(Debug, Clone, Default)]
