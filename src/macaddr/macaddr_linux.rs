@@ -101,9 +101,9 @@ pub async fn next_hop(ip: IpAddr, interface: Option<&str>) -> Result<Option<IpAd
     for route in routes {
         // If an interface index was specified, filter routes by that interface
         if let Some(required_ifindex) = ifindex {
-            if route.ifindex != required_ifindex {
+            if route.ifindex != Some(required_ifindex) {
                 trace!(
-                    "next_hop: skipping route on ifindex={}, required={}",
+                    "next_hop: skipping route on ifindex={:?}, required={}",
                     route.ifindex,
                     required_ifindex
                 );
@@ -113,7 +113,7 @@ pub async fn next_hop(ip: IpAddr, interface: Option<&str>) -> Result<Option<IpAd
 
         let dest_net = IpNetwork::new(route.destination, route.prefix)?;
         trace!(
-            "next_hop: checking route with dest_net={:?}, prefix={}, gateway={:?}, ifindex={}",
+            "next_hop: checking route with dest_net={:?}, prefix={}, gateway={:?}, ifindex={:?}",
             dest_net,
             route.prefix,
             route.gateway,
