@@ -21,7 +21,8 @@ pub mod service {
             &self,
             ip: std::net::IpAddr,
         ) -> crate::errors::Result<macaddr::MacAddr6> {
-            crate::macaddr::get_mac_addr(ip).await
+            let interface = self.config.lb.data_plane_interface.as_deref();
+            crate::macaddr::get_mac_addr(ip, interface).await
         }
     }
 

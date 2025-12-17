@@ -57,6 +57,9 @@ pub struct LoadBalancerConfig {
     pub instances: Vec<LoadBalancerInstanceConfig>,
     #[serde(rename = "mac_unicast")]
     pub mac_unicast: Option<String>,
+    /// Network interface name to use for MAC address lookups (must be on same LAN as FPGA)
+    #[serde(default)]
+    pub data_plane_interface: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -242,6 +245,7 @@ impl Config {
                     event_number_port: 19524,
                 }],
                 mac_unicast: Some("00:00:00:00:00:01".to_string()),
+                data_plane_interface: None,
             },
             database: DatabaseConfig {
                 file: PathBuf::from("/tmp/udplbd-sim.db"),

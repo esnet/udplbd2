@@ -7,7 +7,9 @@ use std::str::FromStr;
 use std::time::Duration;
 
 /// Finds the next hop for a given destination IP by checking system routing tables
-pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
+/// If interface is provided, only routes on that interface are considered
+/// Uses Longest Prefix Match (LPM) to select the most specific route
+pub async fn next_hop(ip: IpAddr, interface: Option<&str>) -> Result<Option<IpAddr>> {
     // Use netstat to get routing information on macOS
     let output = Command::new("netstat")
         .args(["-rn", "-f", "inet"])
@@ -28,36 +30,87 @@ pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
         .lines()
         .skip_while(|line| !line.contains("Destination"));
     if let Some(header) = lines.next() {
-        // Find the gateway column index
+        // Find the gateway, netmask, and interface column indices
         let headers: Vec<&str> = header.split_whitespace().collect();
         let gateway_idx = headers.iter().position(|&h| h == "Gateway").unwrap_or(1);
+        let netmask_idx = headers.iter().position(|&h| h == "Netmask").unwrap_or(2);
+        let interface_idx = headers
+            .iter()
+            .position(|&h| h == "Netif" || h == "Interface")
+            .unwrap_or(headers.len().saturating_sub(1));
 
-        // Parse the routing table output
+        // Find the best matching route using Longest Prefix Match
+        let mut best_match: Option<(u8, IpAddr)> = None;
+
         for line in lines {
             let fields: Vec<&str> = line.split_whitespace().collect();
-            if fields.len() > gateway_idx {
-                if fields[0] == "default" {
-                    // Found default route
-                    return IpAddr::from_str(fields[gateway_idx])
-                        .map(Some)
-                        .map_err(|e| {
-                            Error::InvalidAddress(format!("Invalid default gateway address: {}", e))
-                        });
+            if fields.len() > gateway_idx.max(netmask_idx).max(interface_idx) {
+                // If an interface was specified, filter routes by that interface
+                if let Some(required_iface) = interface {
+                    if fields.len() > interface_idx && fields[interface_idx] != required_iface {
+                        continue;
+                    }
+                }
+
+                let (dest_ip, prefix_len) = if fields[0] == "default" {
+                    (
+                        match ip {
+                            IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
+                            IpAddr::V6(_) => IpAddr::V6(Ipv6Addr::UNSPECIFIED),
+                        },
+                        0u8,
+                    )
                 } else if let Ok(dest) = IpAddr::from_str(fields[0]) {
-                    if dest == ip {
-                        // Found specific route
-                        return IpAddr::from_str(fields[gateway_idx])
-                            .map(Some)
-                            .map_err(|e| {
-                                Error::InvalidAddress(format!("Invalid gateway address: {}", e))
-                            });
+                    let prefix = if fields.len() > netmask_idx {
+                        parse_netmask_to_prefix(fields[netmask_idx], &dest).unwrap_or(32)
+                    } else {
+                        32 // Host route if no netmask specified
+                    };
+                    (dest, prefix)
+                } else {
+                    continue;
+                };
+
+                if let Ok(route_network) = ipnetwork::IpNetwork::new(dest_ip, prefix_len) {
+                    if route_network.contains(ip)
+                        && (best_match.is_none() || prefix_len > best_match.as_ref().unwrap().0)
+                    {
+                        if let Ok(gateway) = IpAddr::from_str(fields[gateway_idx]) {
+                            best_match = Some((prefix_len, gateway));
+                        }
                     }
                 }
             }
         }
+
+        if let Some((_, gateway)) = best_match {
+            return Ok(Some(gateway));
+        }
     }
 
     Ok(None)
+}
+
+/// Parse a netmask string to prefix length
+fn parse_netmask_to_prefix(netmask: &str, dest: &IpAddr) -> Option<u8> {
+    // Try parsing as hex (e.g., 0xffffff00)
+    if let Some(hex_str) = netmask.strip_prefix("0x") {
+        if let Ok(mask_val) = u32::from_str_radix(hex_str, 16) {
+            return Some(mask_val.count_ones() as u8);
+        }
+    }
+
+    // Try parsing as dotted decimal (e.g., 255.255.255.0)
+    if let Ok(mask_ip) = Ipv4Addr::from_str(netmask) {
+        let mask_val = u32::from(mask_ip);
+        return Some(mask_val.count_ones() as u8);
+    }
+
+    // Default to /32 for IPv4 or /128 for IPv6 if we can't parse
+    match dest {
+        IpAddr::V4(_) => Some(32),
+        IpAddr::V6(_) => Some(128),
+    }
 }
 
 /// Sends a UDP ping to the specified IP address
@@ -188,7 +241,8 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 }
 
 /// Gets the MAC address for a given IP address by checking local interfaces and neighbors
-pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
+/// If interface is provided, only routes on that interface are considered
+pub async fn get_mac_addr(ip: IpAddr, interface: Option<&str>) -> Result<MacAddr6> {
     if ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
         || ip == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
         || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
@@ -198,7 +252,7 @@ pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
     }
     for _ in 0..2 {
         // First try to find the next hop
-        if let Ok(Some(next_hop)) = next_hop(ip).await {
+        if let Ok(Some(next_hop)) = next_hop(ip, interface).await {
             // Ping the next hop to populate ARP cache
             let _ = ping(next_hop).await;
 

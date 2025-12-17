@@ -339,9 +339,10 @@ impl DataplaneCli {
                 });
             }
             DataplaneCommand::MacAddr(args) => {
+                let interface = config.lb.data_plane_interface.as_deref();
                 for ip_str in &args.ips {
                     match ip_str.parse::<IpAddr>() {
-                        Ok(ip) => match get_mac_addr(ip).await {
+                        Ok(ip) => match get_mac_addr(ip, interface).await {
                             Ok(mac) => println!("{ip} -> {mac}"),
                             Err(e) => eprintln!("{ip} -> error: {e}"),
                         },

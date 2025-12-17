@@ -160,7 +160,8 @@ impl StaticReservation {
         // Add sessions
         for (i, session) in self.sessions.iter().enumerate() {
             // Get MAC address for the IP
-            let mac_address = macaddr::get_mac_addr(session.ip_address)
+            let interface = config.lb.data_plane_interface.as_deref();
+            let mac_address = macaddr::get_mac_addr(session.ip_address, interface)
                 .await
                 .map_err(|e| Error::Config(format!("Failed to get MAC address: {e}")))?;
 
