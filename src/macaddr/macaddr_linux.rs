@@ -12,9 +12,81 @@ use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
 use std::time::Duration;
 use tracing::trace;
 
+/// Looks up the interface index for a given interface name
+async fn get_ifindex(interface_name: &str) -> Result<Option<u32>> {
+    trace!(
+        "get_ifindex: called with interface_name={:?}",
+        interface_name
+    );
+    let (connection, handle, _) = new_connection().map_err(|e| {
+        trace!("get_ifindex: failed to initialize rtnetlink: {}", e);
+        Error::CommandExecution(format!("Failed to initialize rtnetlink: {e}"))
+    })?;
+    tokio::spawn(connection);
+
+    let mut links = handle.link().get().execute();
+
+    while let Some(link) = links.try_next().await.map_err(|e| {
+        trace!("get_ifindex: failed to fetch links: {}", e);
+        Error::CommandExecution(format!("Failed to fetch links: {e}"))
+    })? {
+        let link_name = link.attributes.iter().find_map(|attr| match attr {
+            LinkAttribute::IfName(name) => Some(name.clone()),
+            _ => None,
+        });
+
+        if let Some(name) = link_name {
+            trace!(
+                "get_ifindex: checking link name={:?}, index={}",
+                name,
+                link.header.index
+            );
+            if name == interface_name {
+                trace!(
+                    "get_ifindex: found matching interface, index={}",
+                    link.header.index
+                );
+                return Ok(Some(link.header.index));
+            }
+        }
+    }
+
+    trace!(
+        "get_ifindex: no matching interface found for name={:?}",
+        interface_name
+    );
+    Ok(None)
+}
+
 /// Finds the next hop for a given destination IP by checking system routing tables
-pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
-    trace!("next_hop: called with ip={:?}", ip);
+/// If interface is provided, only routes on that interface are considered
+/// Uses Longest Prefix Match (LPM) to select the most specific route
+pub async fn next_hop(ip: IpAddr, interface: Option<&str>) -> Result<Option<IpAddr>> {
+    trace!(
+        "next_hop: called with ip={:?}, interface={:?}",
+        ip,
+        interface
+    );
+
+    // Get the interface index if an interface name was provided
+    let ifindex = if let Some(iface) = interface {
+        match get_ifindex(iface).await? {
+            Some(idx) => {
+                trace!("next_hop: using interface {} with index {}", iface, idx);
+                Some(idx)
+            }
+            None => {
+                trace!("next_hop: interface {} not found", iface);
+                return Err(Error::CommandExecution(format!(
+                    "Interface '{}' not found",
+                    iface
+                )));
+            }
+        }
+    } else {
+        None
+    };
+
     let handle = Handle::new().map_err(|e| {
         Error::CommandExecution(format!("Failed to initialize net_route handle: {e}"))
     })?;
@@ -23,24 +95,58 @@ pub async fn next_hop(ip: IpAddr) -> Result<Option<IpAddr>> {
         .await
         .map_err(|e| Error::CommandExecution(format!("Failed to fetch routes: {e}")))?;
 
+    // Find the best matching route using Longest Prefix Match
+    let mut best_match: Option<(u8, Option<IpAddr>)> = None;
+
     for route in routes {
+        // If an interface index was specified, filter routes by that interface
+        if let Some(required_ifindex) = ifindex {
+            if route.ifindex != required_ifindex {
+                trace!(
+                    "next_hop: skipping route on ifindex={}, required={}",
+                    route.ifindex,
+                    required_ifindex
+                );
+                continue;
+            }
+        }
+
         let dest_net = IpNetwork::new(route.destination, route.prefix)?;
         trace!(
-            "next_hop: checking route with dest_net={:?}, gateway={:?}",
+            "next_hop: checking route with dest_net={:?}, prefix={}, gateway={:?}, ifindex={}",
             dest_net,
-            route.gateway
+            route.prefix,
+            route.gateway,
+            route.ifindex
         );
         if dest_net.contains(ip) {
             trace!(
-                "next_hop: matched route, returning gateway={:?}",
-                route.gateway
+                "next_hop: route matches ip={:?}, prefix={}",
+                ip,
+                route.prefix
             );
-            return Ok(route.gateway);
+            if best_match.is_none() || route.prefix > best_match.as_ref().unwrap().0 {
+                trace!(
+                    "next_hop: updating best match to prefix={}, gateway={:?}",
+                    route.prefix,
+                    route.gateway
+                );
+                best_match = Some((route.prefix, route.gateway));
+            }
         }
     }
 
-    trace!("next_hop: no matching route found for ip={:?}", ip);
-    Ok(None)
+    if let Some((prefix, gateway)) = best_match {
+        trace!(
+            "next_hop: returning best match with prefix={}, gateway={:?}",
+            prefix,
+            gateway
+        );
+        Ok(gateway)
+    } else {
+        trace!("next_hop: no matching route found for ip={:?}", ip);
+        Ok(None)
+    }
 }
 
 /// Sends a UDP ping to the specified IP address
@@ -188,8 +294,13 @@ pub async fn neighbor_mac(ip: IpAddr) -> Result<Option<MacAddr6>> {
 }
 
 /// Gets the MAC address for a given IP address by checking local interfaces and neighbors
-pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
-    trace!("get_mac_addr: called with ip={:?}", ip);
+/// If interface is provided, only routes on that interface are considered
+pub async fn get_mac_addr(ip: IpAddr, interface: Option<&str>) -> Result<MacAddr6> {
+    trace!(
+        "get_mac_addr: called with ip={:?}, interface={:?}",
+        ip,
+        interface
+    );
     if ip == IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1))
         || ip == IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0))
         || ip == IpAddr::V6(Ipv6Addr::LOCALHOST)
@@ -200,7 +311,7 @@ pub async fn get_mac_addr(ip: IpAddr) -> Result<MacAddr6> {
     }
     for attempt in 0..2 {
         trace!("get_mac_addr: attempt {}", attempt + 1);
-        if let Ok(Some(next_hop)) = next_hop(ip).await {
+        if let Ok(Some(next_hop)) = next_hop(ip, interface).await {
             trace!("get_mac_addr: found next_hop={:?}", next_hop);
             let _ = ping(next_hop).await;
 
