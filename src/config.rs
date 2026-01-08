@@ -40,7 +40,7 @@ pub struct Config {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MetricsCollectorConfigFile {
     #[serde(default = "default_metrics_collector_enabled")]
-    pub enabled: bool,
+    pub enable: bool,
     #[serde(default = "default_metrics_collector_interval")]
     pub interval: String,
 }
@@ -295,7 +295,7 @@ impl Config {
                 cfg_auth_token: None,
             }],
             metrics_collector: Some(MetricsCollectorConfigFile {
-                enabled: default_metrics_collector_enabled(),
+                enable: default_metrics_collector_enabled(),
                 interval: default_metrics_collector_interval(),
             }),
         }
@@ -459,8 +459,10 @@ impl Config {
         use crate::snp4::metrics_collector::MetricsCollectorConfig;
         let (enabled, interval) = if let Some(mc) = &self.metrics_collector {
             (
-                mc.enabled,
-                parse_duration(&mc.interval).unwrap_or_else(|_| Duration::from_secs(30)),
+                mc.enable,
+                parse_duration(&mc.interval).unwrap_or_else(|e| {
+                    panic!("metrics_collector.interval '{}' invalid: {e}", &mc.interval)
+                }),
             )
         } else {
             (true, Duration::from_secs(30))

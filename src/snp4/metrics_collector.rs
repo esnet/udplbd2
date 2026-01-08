@@ -4,7 +4,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::time::sleep;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 use crate::db::models::{StatGlobalSample, StatLbSample, StatLbScopedSample, StatMemberSample};
 use crate::db::LoadBalancerDB;
@@ -390,11 +390,17 @@ pub fn start_metrics_collector(
                         }
                     }
 
+                    let mut total_samples =
+                        lb_samples.len() + lb_scoped_samples.len() + member_samples.len();
+                    let total_lb_samplezs = lb_samples.len() + lb_scoped_samples.len();
+                    let total_member_samples = member_samples.len();
+
                     // Insert global sample if timestamp is set
                     if global_sample.sample_ts_ms != 0 {
                         if let Err(e) = db.insert_stat_global_sample(&global_sample).await {
                             error!("failed to insert stat_global_sample: {:?}", e);
                         }
+                        total_samples += 1;
                     }
 
                     // Insert all lb_samples
@@ -417,6 +423,8 @@ pub fn start_metrics_collector(
                             error!("failed to insert stat_member_sample: {:?}", e);
                         }
                     }
+
+                    debug!("metrics_collector: collected {total_samples} total samples ({total_lb_samplezs} by lb, {total_member_samples} by member)");
                 }
                 Err(_) => {
                     error!("failed to fetch SmartNIC P4 pipeline metrics");
