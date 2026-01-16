@@ -469,6 +469,25 @@ impl Config {
         };
         MetricsCollectorConfig { enabled, interval }
     }
+
+    /// Get the health check config. Health checks are enabled if metrics_collector is enabled.
+    pub fn get_healthcheck_config(&self) -> crate::healthcheck::HealthCheckConfig {
+        use crate::healthcheck::HealthCheckConfig;
+        let enabled = if let Some(mc) = &self.metrics_collector {
+            mc.enable
+        } else {
+            true
+        };
+        // Health checks run at the same interval as metrics collection
+        let interval = if let Some(mc) = &self.metrics_collector {
+            parse_duration(&mc.interval).unwrap_or_else(|e| {
+                panic!("metrics_collector.interval '{}' invalid: {e}", &mc.interval)
+            })
+        } else {
+            Duration::from_secs(30)
+        };
+        HealthCheckConfig { enabled, interval }
+    }
 }
 
 pub fn parse_duration(duration_str: &str) -> Result<Duration, ConfigError> {

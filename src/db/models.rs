@@ -180,14 +180,14 @@ impl std::str::FromStr for PermissionType {
 
 #[derive(Debug, Clone, Default)]
 pub struct StatGlobalSample {
-    pub sample_ts_ms: i64,
+    pub sampled_at: i64,
     pub rx_rslt: [i64; 14],
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct StatLbSample {
     pub reservation_id: i64,
-    pub sample_ts_ms: i64,
+    pub sampled_at: i64,
     pub drop_bad_udplb_version: i64,
     pub drop_blocked_src: i64,
     pub drop_epoch_assign_miss: i64,
@@ -205,7 +205,7 @@ pub struct StatLbSample {
 pub struct StatLbScopedSample {
     pub reservation_id: i64,
     pub stat_scope_id: i64,
-    pub sample_ts_ms: i64,
+    pub sampled_at: i64,
     pub rx_bytes: i64,
     pub rx_packets: i64,
 }
@@ -213,7 +213,7 @@ pub struct StatLbScopedSample {
 #[derive(Debug, Clone, Default)]
 pub struct StatMemberSample {
     pub session_id: i64,
-    pub sample_ts_ms: i64,
+    pub sampled_at: i64,
     pub mbr_tx_pkts: i64,
     pub mbr_tx_bytes: i64,
 }

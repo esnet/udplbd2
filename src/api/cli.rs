@@ -477,6 +477,28 @@ async fn overview_to_string(url: String) -> Result<String> {
                     status.sender_addresses.join("\n    - ")
                 ));
             }
+            if !status.health_issues.is_empty() {
+                output.push_str("  health_issues:\n");
+                for issue in &status.health_issues {
+                    let detected_at = issue
+                        .detected_at
+                        .as_ref()
+                        .map(|t| {
+                            Utc.timestamp_opt(t.seconds, t.nanos as u32)
+                                .unwrap()
+                                .format("%Y-%m-%d %H:%M:%S UTC")
+                                .to_string()
+                        })
+                        .unwrap_or_else(|| "unknown".to_string());
+                    output.push_str(&format!(
+                        "    - [{}] {} ({}): {}\n",
+                        issue.severity.to_uppercase(),
+                        issue.r#type,
+                        detected_at,
+                        issue.message
+                    ));
+                }
+            }
             if !status.workers.is_empty() {
                 output.push_str("  workers:\n");
             }
@@ -516,6 +538,28 @@ async fn overview_to_string(url: String) -> Result<String> {
                     worker.total_bytes_recv,
                     worker.total_packets_recv
                 ));
+                if !worker.health_issues.is_empty() {
+                    output.push_str("    health_issues:\n");
+                    for issue in &worker.health_issues {
+                        let detected_at = issue
+                            .detected_at
+                            .as_ref()
+                            .map(|t| {
+                                Utc.timestamp_opt(t.seconds, t.nanos as u32)
+                                    .unwrap()
+                                    .format("%Y-%m-%d %H:%M:%S UTC")
+                                    .to_string()
+                            })
+                            .unwrap_or_else(|| "unknown".to_string());
+                        output.push_str(&format!(
+                            "      - [{}] {} ({}): {}\n",
+                            issue.severity.to_uppercase(),
+                            issue.r#type,
+                            detected_at,
+                            issue.message
+                        ));
+                    }
+                }
             }
         }
         output.push('\n');

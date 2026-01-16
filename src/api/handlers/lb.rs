@@ -390,6 +390,32 @@ impl LoadBalancerService {
 
             let slots_assigned = slot_counts.get(&(session.id as u16)).unwrap_or(&0);
 
+            // Fetch health issues for this session (all active issues)
+            let session_health_issues = self
+                .db
+                .list_session_healthcheck_events(session.id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to get health issues: {e}")))?;
+
+            let health_issues = session_health_issues
+                .into_iter()
+                .map(|event| {
+                    use crate::proto::loadbalancer::v1::HealthIssue;
+                    HealthIssue {
+                        r#type: event.event_type,
+                        severity: event.severity.as_str().to_string(),
+                        message: event.message,
+                        details: event
+                            .details
+                            .as_ref()
+                            .and_then(|d| serde_json::from_str(d).ok()),
+                        detected_at: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
+                            event.detected_at,
+                        ))),
+                    }
+                })
+                .collect();
+
             workers.push(WorkerStatus {
                 name: session.name,
                 fill_percent: state.as_ref().map_or(0.0, |s| s.fill_percent) as f32,
@@ -418,8 +444,35 @@ impl LoadBalancerService {
                 total_packets_recv: state.as_ref().map_or(0, |s| s.total_packets_recv) as i64,
                 slot_demands: Vec::new(), // TODO: fetch from database
                 slots: Vec::new(),        // TODO: use latest epoch data
+                health_issues,
             });
         }
+
+        // Fetch health issues for the loadbalancer (all active issues)
+        let lb_health_issues = self
+            .db
+            .list_loadbalancer_healthcheck_events(reservation.loadbalancer_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get LB health issues: {e}")))?;
+
+        let health_issues = lb_health_issues
+            .into_iter()
+            .map(|event| {
+                use crate::proto::loadbalancer::v1::HealthIssue;
+                HealthIssue {
+                    r#type: event.event_type,
+                    severity: event.severity.as_str().to_string(),
+                    message: event.message,
+                    details: event
+                        .details
+                        .as_ref()
+                        .and_then(|d| serde_json::from_str(d).ok()),
+                    detected_at: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
+                        event.detected_at,
+                    ))),
+                }
+            })
+            .collect();
 
         Ok(Response::new(LoadBalancerStatusReply {
             timestamp: Some(prost_wkt_types::Timestamp::from(SystemTime::now())),
@@ -431,6 +484,7 @@ impl LoadBalancerService {
                 reservation.reserved_until,
             ))),
             slot_resolution: 512,
+            health_issues,
         }))
     }
 

@@ -26,7 +26,7 @@ use crate::errors::{Error, Result};
 use crate::dataplane::meta_events::MetaEventType;
 use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
 use crate::dataplane::protocol::LBHeader;
-use crate::dataplane::receiver::Receiver;
+use crate::dataplane::receiver::{Receiver, ZeroMockReceiver};
 
 use crate::macaddr::get_mac_addr;
 use std::net::IpAddr;
@@ -81,6 +81,8 @@ pub enum DataplaneCommand {
     MacAddr(MacAddrArgs),
     /// Display all available metrics from the smartnic P4 dataplane.
     Stats(StatsArgs),
+    /// Start a zero mock receiver that registers and sends zero control signals without opening a port.
+    ZeroMockRecv(ZeroMockArgs),
 }
 
 #[derive(Args, Debug)]
@@ -209,6 +211,31 @@ pub struct MacAddrArgs {
 
 #[derive(Args, Debug)]
 pub struct StatsArgs {}
+
+#[derive(Args, Debug)]
+pub struct ZeroMockArgs {
+    /// IP address to register with.
+    #[arg(short, long)]
+    pub address: String,
+    /// UDP port to register with.
+    #[arg(short, long)]
+    pub port: u16,
+    /// Name of the backend.
+    #[arg(long, default_value = "zero-mock")]
+    pub name: String,
+    /// Weight for load balancing.
+    #[arg(long, default_value = "1.0")]
+    pub weight: f32,
+    /// Minimum scaling factor for slot assignments.
+    #[arg(long, default_value = "1.0")]
+    pub minf: f32,
+    /// Maximum scaling factor for slot assignments.
+    #[arg(long, default_value = "1.0")]
+    pub maxf: f32,
+    /// Slot demands for receiver, e.g. --slots 0-128 --slots auto:128
+    #[arg(long = "slots", value_name = "SLOT_DEMAND", num_args = 0.., value_delimiter = ' ', required = false)]
+    pub slots: Vec<String>,
+}
 
 impl DataplaneCli {
     /// Run the dataplane command. If no URL is provided, a default is built from the server config.
@@ -354,6 +381,20 @@ impl DataplaneCli {
             }
             DataplaneCommand::Stats(_args) => {
                 stats_command(config).await?;
+            }
+            DataplaneCommand::ZeroMockRecv(args) => {
+                let slot_demands = parse_slot_demands(&args.slots)?;
+                start_zero_mock_receiver(
+                    url.to_string(),
+                    args.name.clone(),
+                    args.address.clone(),
+                    args.port,
+                    args.weight,
+                    args.minf,
+                    args.maxf,
+                    slot_demands,
+                )
+                .await?;
             }
         }
         Ok(())
@@ -644,6 +685,45 @@ async fn stats_command(config: &Config) -> Result<()> {
     let json = serde_json::to_string_pretty(&all_metrics)
         .map_err(|e| Error::Runtime(format!("failed to serialize to JSON: {}", e)))?;
     println!("{}", json);
+
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn start_zero_mock_receiver(
+    url: String,
+    name: String,
+    ip_address: String,
+    port: u16,
+    weight: f32,
+    min_factor: f32,
+    max_factor: f32,
+    slot_demands: Vec<crate::proto::loadbalancer::v1::SlotRange>,
+) -> Result<()> {
+    let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
+
+    let _receiver = ZeroMockReceiver::new(
+        &name,
+        ip_address.clone(),
+        port,
+        weight,
+        min_factor,
+        max_factor,
+        &mut client,
+        None,
+        slot_demands,
+    )
+    .await?;
+
+    println!(
+        "zero mock receiver '{}' registered at {}:{} - sending zero control signals",
+        name, ip_address, port
+    );
+    println!("press Ctrl+C to stop");
+
+    // Wait indefinitely (until Ctrl+C)
+    tokio::signal::ctrl_c().await.ok();
+    println!("\nstopping zero mock receiver...");
 
     Ok(())
 }

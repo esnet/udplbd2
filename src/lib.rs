@@ -5,6 +5,7 @@ pub mod constants;
 pub mod dataplane;
 pub mod db;
 pub mod errors;
+pub mod healthcheck;
 pub mod macaddr;
 pub mod metrics;
 pub mod proto;
@@ -306,6 +307,9 @@ pub async fn start_mocked_server(
         ipv6: Some("::1".parse().unwrap()),
         event_number_port: config.lb.instances[0].event_number_port,
     }];
+    if sim_config.lb.mac_unicast.is_none() {
+        sim_config.lb.mac_unicast = Some("02:00:DE:CA:FB:AD".to_string());
+    }
 
     if let Some(path) = db_path {
         sim_config.database.file = path;

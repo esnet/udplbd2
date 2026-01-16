@@ -11,6 +11,25 @@ pub struct SlotRange {
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
+pub struct HealthIssue {
+    /// event_type, e.g. "receiver_packet_stall"
+    #[prost(string, tag = "1")]
+    pub r#type: ::prost::alloc::string::String,
+    /// "warning", "error", or "critical"
+    #[prost(string, tag = "2")]
+    pub severity: ::prost::alloc::string::String,
+    /// human-readable message
+    #[prost(string, tag = "3")]
+    pub message: ::prost::alloc::string::String,
+    /// machine-readable details
+    #[prost(message, optional, tag = "4")]
+    pub details: ::core::option::Option<::prost_wkt_types::Struct>,
+    /// when the issue was first detected
+    #[prost(message, optional, tag = "5")]
+    pub detected_at: ::core::option::Option<::prost_wkt_types::Timestamp>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
 pub struct SessionSlotRanges {
     #[prost(string, tag = "1")]
     pub session_id: ::prost::alloc::string::String,
@@ -161,6 +180,9 @@ pub struct WorkerStatus {
     /// the slots that are explicitly demanded by this worker
     #[prost(message, repeated, tag = "20")]
     pub slot_demands: ::prost::alloc::vec::Vec<SlotRange>,
+    /// active health check issues for this worker
+    #[prost(message, repeated, tag = "21")]
+    pub health_issues: ::prost::alloc::vec::Vec<HealthIssue>,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -184,6 +206,9 @@ pub struct LoadBalancerStatusReply {
     /// total number of slots used for this LB, a power of two
     #[prost(uint32, tag = "11")]
     pub slot_resolution: u32,
+    /// active health check issues for this load balancer
+    #[prost(message, repeated, tag = "12")]
+    pub health_issues: ::prost::alloc::vec::Vec<HealthIssue>,
 }
 /// AddSenders
 #[derive(serde::Serialize, serde::Deserialize)]

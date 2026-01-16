@@ -11,7 +11,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let uPlotCharts = {};
     let currentPath = window.location.pathname; // Store current path for comparison
     let chartMetrics = {}; // Store available metrics for chart generation
-let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/highlighting
+    let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/highlighting
+    let filteredSessionIds = new Set(); // Set of session IDs to filter (empty = show all)
+    let allSessionIds = new Set(); // Set of all available session IDs
 
     // Mapping for rendering permissions
     const ResourceTypeMap = { 0: 'All', 1: 'Load Balancer', 2: 'Reservation', 3: 'Session', default: 'Unknown Resource' };
@@ -30,6 +32,8 @@ let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/
     const senderListUl = document.querySelector('#sender-list ul');
     const dynamicChartsArea = document.getElementById('dynamic-charts-area');
     const newSenderIpInput = document.getElementById('new-sender-ip');
+    const filterAllReceivers = document.getElementById('filter-all-receivers');
+    const clearReceiverFilter = document.getElementById('clear-receiver-filter');
 
     // Tool View Content/Loading Elements
     const tokenViewLoading = document.getElementById('token-view-loading');
@@ -238,6 +242,7 @@ let sessionIdToName = {}; // Map session ID to receiver name for chart labeling/
 const renderSessions = (workers) => {
     receiverList.innerHTML = '';
     sessionIdToName = {}; // Reset mapping each time
+    allSessionIds.clear(); // Reset all session IDs
     if (!workers?.length) {
         receiverList.innerHTML = '<li class="no-receivers">No active receivers.</li>';
         return;
@@ -259,6 +264,7 @@ const renderSessions = (workers) => {
         }
         if (sessionId) {
             sessionIdToName[sessionId] = worker.name;
+            allSessionIds.add(sessionId);
         }
 
         // --- Color mapping functions ---
@@ -310,6 +316,10 @@ const renderSessions = (workers) => {
         const fillPercent = worker.fill_percent ?? 0;
         const controlSignal = worker.control_signal ?? 0;
 
+        // Check if this receiver is currently filtered
+        const isFiltered = filteredSessionIds.size > 0 && filteredSessionIds.has(sessionId);
+        const filterClass = isFiltered ? 'filtered-receiver' : '';
+
         li.innerHTML = `
             <button class="deregister-btn" data-receiver-id="${receiverId}" title="Deregister Session ${receiverId}">
                 <i class="fas fa-times"></i> Deregister
@@ -323,6 +333,10 @@ const renderSessions = (workers) => {
                 <span>Last Update: ${lastUpdated}</span>
             </div>
         `;
+        li.className = filterClass;
+        li.dataset.sessionId = sessionId;
+        li.dataset.receiverName = worker.name;
+
         // Attach direct event listener to the deregister button
         const deregBtn = li.querySelector('.deregister-btn[data-receiver-id]');
         if (deregBtn) {
@@ -331,6 +345,14 @@ const renderSessions = (workers) => {
                 handleDeregisterSession(receiverId);
             });
         }
+
+        // Add click handler for filtering
+        li.addEventListener('click', (e) => {
+            if (!e.target.closest('.deregister-btn')) {
+                handleReceiverFilter(sessionId);
+            }
+        });
+
         receiverList.appendChild(li);
     });
 };
@@ -492,6 +514,73 @@ const renderSessions = (workers) => {
     let timeseriesBuffer = {};
     let lastTimestamp = null;
 
+    // Sampling function to reduce the number of datapoints for performance
+    // Uses LTTB (Largest-Triangle-Three-Buckets) algorithm for intelligent downsampling
+    const sampleDataPoints = (data, targetPoints = 500) => {
+        if (!data || data.length <= targetPoints) {
+            return data;
+        }
+
+        // LTTB algorithm
+        const sampledData = [];
+        const bucketSize = (data.length - 2) / (targetPoints - 2);
+
+        // Always include first point
+        sampledData.push(data[0]);
+
+        for (let i = 1; i < targetPoints - 1; i++) {
+            const avgRangeStart = Math.floor(i * bucketSize) + 1;
+            const avgRangeEnd = Math.floor((i + 1) * bucketSize) + 1;
+            const rangeEnd = Math.min(avgRangeEnd, data.length);
+
+            // Calculate average point for next bucket
+            let avgTimestamp = 0;
+            let avgValue = 0;
+            let avgRangeLength = 0;
+
+            for (let j = avgRangeStart; j < rangeEnd; j++) {
+                avgTimestamp += data[j].timestamp;
+                avgValue += data[j].value;
+                avgRangeLength++;
+            }
+
+            avgTimestamp /= avgRangeLength;
+            avgValue /= avgRangeLength;
+
+            // Get the range for this bucket
+            const rangeStart = Math.floor((i - 1) * bucketSize) + 1;
+            const rangeOffs = Math.floor(i * bucketSize) + 1;
+
+            let maxArea = -1;
+            let maxAreaPoint = null;
+
+            const pointA = sampledData[sampledData.length - 1];
+
+            for (let j = rangeStart; j < rangeOffs && j < data.length; j++) {
+                const pointB = data[j];
+                // Calculate area
+                const area = Math.abs(
+                    (pointA.timestamp - avgTimestamp) * (pointB.value - pointA.value) -
+                    (pointA.timestamp - pointB.timestamp) * (avgValue - pointA.value)
+                ) * 0.5;
+
+                if (area > maxArea) {
+                    maxArea = area;
+                    maxAreaPoint = pointB;
+                }
+            }
+
+            if (maxAreaPoint) {
+                sampledData.push(maxAreaPoint);
+            }
+        }
+
+        // Always include last point
+        sampledData.push(data[data.length - 1]);
+
+        return sampledData;
+    };
+
     // Function to fetch timeseries data with since parameter support
     const fetchTimeseriesData = async (lbId) => {
         if (!AUTH_TOKEN) return null;
@@ -582,6 +671,9 @@ const renderSessions = (workers) => {
         }
         lastTimestamp = null; // Reset lastTimestamp on new LB selection
         timeseriesBuffer = {}; // Reset buffer on new LB selection
+        filteredSessionIds.clear(); // Reset filter on new LB selection
+        if (clearReceiverFilter) clearReceiverFilter.style.display = 'none';
+        if (filterAllReceivers) filterAllReceivers.classList.add('active');
 
         // Initial update
         updateCharts(lbId);
@@ -844,8 +936,10 @@ const renderSessions = (workers) => {
             neededChartIds.add(chartId);
 
             const chartContainer = ensureChartContainer('Prediction Accuracy', chartId);
-            const boundaryEventData = predictionData.boundary_event;
-            const eventNumberData = predictionData.event_number;
+
+            // Apply sampling to both datasets
+            const boundaryEventData = sampleDataPoints(predictionData.boundary_event, 500);
+            const eventNumberData = sampleDataPoints(predictionData.event_number, 500);
 
             // Collect all timestamps from both datasets
             const allTimestamps = new Set();
@@ -924,7 +1018,7 @@ const renderSessions = (workers) => {
             const chartContainer = ensureChartContainer(formattedMetricName, chartId);
             if (!chartContainer) return;
 
-            // Prepare data for uPlot
+            // Prepare data for uPlot with filtering
             const timestamps = [];
             const seriesData = [];
             const seriesLabels = ['Time'];
@@ -932,8 +1026,16 @@ const renderSessions = (workers) => {
             const sessionIds = [];
 
             sessionSeries.forEach((metrics, sessionId) => {
+                // Apply filter: skip if filtered and not in the filter set
+                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
+                    return;
+                }
+
                 if (metrics.has(metricKey)) {
-                    const data = metrics.get(metricKey);
+                    const rawData = metrics.get(metricKey);
+                    // Apply sampling to the data
+                    const data = sampleDataPoints(rawData, 500);
+
                     sessionIds.push(sessionId);
                     // Always use receiver name if available, else fallback to sessionId
                     const label = sessionIdToName[sessionId] ? sessionIdToName[sessionId] : `Session ${sessionId}`;
@@ -950,8 +1052,16 @@ const renderSessions = (workers) => {
             seriesData.push(timestamps);
 
             sessionSeries.forEach((metrics, sessionId) => {
+                // Apply filter again when building values
+                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
+                    return;
+                }
+
                 if (metrics.has(metricKey)) {
-                    const data = metrics.get(metricKey);
+                    const rawData = metrics.get(metricKey);
+                    // Apply sampling to the data
+                    const data = sampleDataPoints(rawData, 500);
+
                     const values = new Array(timestamps.length).fill(null);
                     data.forEach(point => {
                         const idx = timestamps.indexOf(point.timestamp  / 1000);
@@ -1002,13 +1112,16 @@ const renderSessions = (workers) => {
         });
 
         // --- Reservation Metric Charts ---
-        reservationSeries.forEach((data, metricName) => {
+        reservationSeries.forEach((rawData, metricName) => {
             const formattedMetricName = metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
             const chartId = `chart-reservation-${metricName}`;
             neededChartIds.add(chartId);
 
             const chartContainer = ensureChartContainer(`Reservation ${formattedMetricName}`, chartId);
             if (!chartContainer) return;
+
+            // Apply sampling to the data
+            const data = sampleDataPoints(rawData, 500);
 
             const timestamps = data.map(point => point.timestamp / 1000);
             const values = data.map(point => point.value);
@@ -1050,13 +1163,16 @@ const renderSessions = (workers) => {
 
         // --- Global Metric Charts ---
         if (typeof chartMetrics !== "undefined" && chartMetrics.global && chartMetrics.global.size > 0) {
-            chartMetrics.global.forEach((data, metricName) => {
+            chartMetrics.global.forEach((rawData, metricName) => {
                 const formattedMetricName = `Global ${metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
                 const chartId = `chart-global-${metricName}`;
                 neededChartIds.add(chartId);
 
                 const chartContainer = ensureChartContainer(formattedMetricName, chartId);
                 if (!chartContainer) return;
+
+                // Apply sampling to the data
+                const data = sampleDataPoints(rawData, 500);
 
                 const timestamps = data.map(point => point.timestamp / 1000);
                 const values = data.map(point => point.value);
@@ -1116,6 +1232,46 @@ const renderSessions = (workers) => {
 
         // --- Resize charts after rendering ---
         // Removed dynamic resizing to prevent chart growth
+    };
+
+    // Handle receiver filter toggle
+    const handleReceiverFilter = (sessionId) => {
+        if (!sessionId) return;
+
+        // Toggle the filter
+        if (filteredSessionIds.has(sessionId)) {
+            // Remove from filter (show all)
+            filteredSessionIds.clear();
+            clearReceiverFilter.style.display = 'none';
+            filterAllReceivers.classList.add('active');
+        } else {
+            // Add to filter (show only this one)
+            filteredSessionIds.clear();
+            filteredSessionIds.add(sessionId);
+            clearReceiverFilter.style.display = 'inline-block';
+            filterAllReceivers.classList.remove('active');
+        }
+
+        // Update receiver list styling
+        document.querySelectorAll('#receiver-list li').forEach(li => {
+            const liSessionId = li.dataset.sessionId;
+            if (filteredSessionIds.size === 0) {
+                li.classList.remove('filtered-receiver');
+            } else if (filteredSessionIds.has(liSessionId)) {
+                li.classList.add('filtered-receiver');
+            } else {
+                li.classList.remove('filtered-receiver');
+            }
+        });
+
+        // Re-render charts with filter applied
+        const bufferedTimeseriesData = {
+            timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
+                name,
+                timeseries: { FloatSamples: { data } }
+            }))
+        };
+        renderCharts(bufferedTimeseriesData);
     };
 
     // Highlight session in charts when hovering over a session in the sidebar
@@ -1665,6 +1821,51 @@ const renderSessions = (workers) => {
     }
     if (fullResetBtn) {
         fullResetBtn.addEventListener('click', handleFullReset);
+    }
+
+    // Filter button listeners
+    if (filterAllReceivers) {
+        filterAllReceivers.addEventListener('click', () => {
+            filteredSessionIds.clear();
+            clearReceiverFilter.style.display = 'none';
+            filterAllReceivers.classList.add('active');
+
+            // Update receiver list styling
+            document.querySelectorAll('#receiver-list li').forEach(li => {
+                li.classList.remove('filtered-receiver');
+            });
+
+            // Re-render charts
+            const bufferedTimeseriesData = {
+                timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
+                    name,
+                    timeseries: { FloatSamples: { data } }
+                }))
+            };
+            renderCharts(bufferedTimeseriesData);
+        });
+    }
+
+    if (clearReceiverFilter) {
+        clearReceiverFilter.addEventListener('click', () => {
+            filteredSessionIds.clear();
+            clearReceiverFilter.style.display = 'none';
+            filterAllReceivers.classList.add('active');
+
+            // Update receiver list styling
+            document.querySelectorAll('#receiver-list li').forEach(li => {
+                li.classList.remove('filtered-receiver');
+            });
+
+            // Re-render charts
+            const bufferedTimeseriesData = {
+                timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
+                    name,
+                    timeseries: { FloatSamples: { data } }
+                }))
+            };
+            renderCharts(bufferedTimeseriesData);
+        });
     }
 
     // --- SPA Routing ---

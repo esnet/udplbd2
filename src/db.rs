@@ -4,6 +4,7 @@
 
 pub mod csv;
 pub mod epoch;
+pub mod healthcheck;
 pub mod load_balancer;
 pub mod models;
 pub mod reservation;

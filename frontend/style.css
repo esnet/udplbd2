@@ -484,6 +484,54 @@ button:disabled {
     background-color: rgba(255, 59, 48, 0.2);
 }
 
+/* Receiver Filter Controls */
+.receiver-filter-section {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.receiver-filter-section h2 {
+    margin-bottom: 10px;
+}
+
+.filter-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-button {
+    font-size: 0.85em;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary-color);
+}
+
+.filter-button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent-color);
+}
+
+.filter-button.active {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.filtered-receiver {
+    background-color: rgba(0, 122, 255, 0.15);
+    border-left: 3px solid var(--accent-color) !important;
+}
+
+#receiver-list li {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+#receiver-list li:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
 /* Token/System Info Views */
 #token-management-view .card,
 #system-info-view .card {

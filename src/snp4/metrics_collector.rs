@@ -1,8 +1,11 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Background task for collecting SmartNIC P4 pipeline metrics and inserting them into the database.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
+
+use chrono::Utc;
 use tokio::time::sleep;
 use tracing::{debug, error, info, warn};
 
@@ -10,7 +13,6 @@ use crate::db::models::{StatGlobalSample, StatLbSample, StatLbScopedSample, Stat
 use crate::db::LoadBalancerDB;
 use crate::proto::smartnic::p4_v2::{StatsMetric, StatsMetricScope};
 use crate::snp4::client::MultiSNP4Client;
-use std::collections::HashMap;
 
 /// Configuration for the SmartNIC P4 pipeline metrics collector.
 #[derive(Clone, Debug)]
@@ -139,6 +141,7 @@ async fn get_or_create_scope_id(
 /// Starts the SmartNIC P4 pipeline metrics collector background task.
 /// This should be called from start_server in lib.rs.
 /// If config.enabled is false, the collector is not started.
+/// Also starts the health check task with the same interval.
 pub fn start_metrics_collector(
     db: Arc<LoadBalancerDB>,
     mut snp4: MultiSNP4Client,
@@ -149,6 +152,14 @@ pub fn start_metrics_collector(
         return;
     }
     let interval = metrics_collector_config.interval;
+
+    // Start health check task with the same configuration
+    let healthcheck_config = crate::healthcheck::HealthCheckConfig {
+        enabled: true,
+        interval,
+    };
+    crate::healthcheck::start_healthcheck(db.clone(), healthcheck_config);
+
     tokio::spawn(async move {
         info!(
             "starting ESnet SmartNIC P4 pipeline metrics collector (interval: {:?})",
@@ -225,14 +236,11 @@ pub fn start_metrics_collector(
                     let mut lb_scoped_samples: Vec<StatLbScopedSample> = Vec::new();
                     let mut member_samples: HashMap<i64, StatMemberSample> = HashMap::new();
 
+                    let now = Utc::now();
+                    let ts_ms = now.timestamp_millis();
+
                     for metrics in all_metrics {
                         for metric in metrics {
-                            let ts_ms = metric
-                                .last_update
-                                .as_ref()
-                                .map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
-                                .unwrap_or(0);
-
                             match metric.name.as_str() {
                                 // RX result classification buckets (global)
                                 "rx_rslt_counter" => {
@@ -242,7 +250,7 @@ pub fn start_metrics_collector(
                                             global_sample.rx_rslt[idx] += v.u64 as i64;
                                         }
                                     }
-                                    global_sample.sample_ts_ms = ts_ms;
+                                    global_sample.sampled_at = ts_ms;
                                 }
                                 // Drop counters and V2/V3 counters (per LB)
                                 "lb_ctx_drop_bad_udplb_version_pkt_counter"
@@ -261,10 +269,10 @@ pub fn start_metrics_collector(
                                                 .entry(reservation_id)
                                                 .or_insert_with(|| StatLbSample {
                                                     reservation_id,
-                                                    sample_ts_ms: ts_ms,
+                                                    sampled_at: ts_ms,
                                                     ..Default::default()
                                                 });
-                                            entry.sample_ts_ms = ts_ms;
+                                            entry.sampled_at = ts_ms;
                                             match metric.name.as_str() {
                                                 "lb_ctx_drop_bad_udplb_version_pkt_counter" => {
                                                     entry.drop_bad_udplb_version += v.u64 as i64
@@ -321,10 +329,10 @@ pub fn start_metrics_collector(
                                                 .entry(reservation_id)
                                                 .or_insert_with(|| StatLbSample {
                                                     reservation_id,
-                                                    sample_ts_ms: ts_ms,
+                                                    sampled_at: ts_ms,
                                                     ..Default::default()
                                                 });
-                                            entry.sample_ts_ms = ts_ms;
+                                            entry.sampled_at = ts_ms;
                                             match metric.name.as_str() {
                                                 "lb_ctx_rx_byte_counter" => {
                                                     entry.rx_bytes += v.u64 as i64
@@ -340,7 +348,7 @@ pub fn start_metrics_collector(
                                                 lb_scoped_samples.push(StatLbScopedSample {
                                                     reservation_id,
                                                     stat_scope_id: scope_id,
-                                                    sample_ts_ms: ts_ms,
+                                                    sampled_at: ts_ms,
                                                     rx_bytes: if metric.name
                                                         == "lb_ctx_rx_byte_counter"
                                                     {
@@ -369,10 +377,10 @@ pub fn start_metrics_collector(
                                                 .entry(session_id)
                                                 .or_insert_with(|| StatMemberSample {
                                                     session_id,
-                                                    sample_ts_ms: ts_ms,
+                                                    sampled_at: ts_ms,
                                                     ..Default::default()
                                                 });
-                                            entry.sample_ts_ms = ts_ms;
+                                            entry.sampled_at = ts_ms;
                                             match metric.name.as_str() {
                                                 "lb_mbr_tx_pkt_counter" => {
                                                     entry.mbr_tx_pkts += v.u64 as i64
@@ -396,7 +404,7 @@ pub fn start_metrics_collector(
                     let total_member_samples = member_samples.len();
 
                     // Insert global sample if timestamp is set
-                    if global_sample.sample_ts_ms != 0 {
+                    if global_sample.sampled_at != 0 {
                         if let Err(e) = db.insert_stat_global_sample(&global_sample).await {
                             error!("failed to insert stat_global_sample: {:?}", e);
                         }

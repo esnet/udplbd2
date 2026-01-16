@@ -129,7 +129,17 @@
         </main>
 
         <aside class="sidebar right-sidebar">
-            <h2>Receivers</h2>
+            <div class="receiver-filter-section">
+                <h2>Receivers</h2>
+                <div class="filter-controls">
+                    <button id="filter-all-receivers" class="filter-button active" title="Show all receivers">
+                        All
+                    </button>
+                    <button id="clear-receiver-filter" class="filter-button" title="Clear filter" style="display: none;">
+                        Clear Filter
+                    </button>
+                </div>
+            </div>
             <ul id="receiver-list">
                 <li class="no-receivers">Select an LB to see receivers.</li>
             </ul>
