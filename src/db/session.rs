@@ -45,6 +45,7 @@ impl LoadBalancerDB {
     }
 
     /// Inserts a new session_state and updates session.latest_session_state_id
+    /// If a session_state row already exists since the most recent epoch, it updates that row instead
     #[allow(clippy::too_many_arguments)]
     pub async fn add_session_state_and_update_latest(
         &self,
@@ -61,39 +62,104 @@ impl LoadBalancerDB {
         total_bytes_recv: i64,
         total_packets_recv: i64,
     ) -> Result<i64> {
-        let mut tx = self.write_pool.begin().await?;
-
-        // Insert session_state
-        let state_record = sqlx::query!(
+        // Get the reservation_id for this session and the most recent epoch's created_at
+        let session_info = sqlx::query!(
             r#"
-            INSERT INTO session_state (
-                session_id, timestamp, is_ready, fill_percent, control_signal,
-                total_events_recv, total_events_reassembled, total_events_reassembly_err,
-                total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
-                total_packets_recv
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
-            RETURNING id
+            SELECT s.reservation_id, e.created_at as epoch_created_at
+            FROM session s
+            LEFT JOIN epoch e ON e.reservation_id = s.reservation_id AND e.deleted_at IS NULL
+            WHERE s.id = ?1
+            ORDER BY e.created_at DESC
+            LIMIT 1
+            "#,
+            session_id
+        )
+        .fetch_one(&self.read_pool)
+        .await?;
+
+        let epoch_created_at = session_info.epoch_created_at.unwrap_or(0);
+
+        // Check if there's already a session_state row created since the most recent epoch
+        let existing_state = sqlx::query!(
+            r#"
+            SELECT id
+            FROM session_state
+            WHERE session_id = ?1 AND created_at >= ?2
+            ORDER BY created_at DESC
+            LIMIT 1
             "#,
             session_id,
-            timestamp,
-            is_ready,
-            fill_percent,
-            control_signal,
-            total_events_recv,
-            total_events_reassembled,
-            total_events_reassembly_err,
-            total_events_dequeued,
-            total_event_enqueue_err,
-            total_bytes_recv,
-            total_packets_recv
+            epoch_created_at
         )
-        .fetch_one(&mut *tx)
+        .fetch_optional(&self.read_pool)
         .await?;
+
+        let mut tx = self.write_pool.begin().await?;
+
+        let state_id = if let Some(existing) = existing_state {
+            // Update the existing session_state row, including created_at
+            let now = chrono::Utc::now().timestamp_millis();
+            sqlx::query!(
+                r#"
+                UPDATE session_state
+                SET timestamp = ?1, is_ready = ?2, fill_percent = ?3, control_signal = ?4,
+                    total_events_recv = ?5, total_events_reassembled = ?6,
+                    total_events_reassembly_err = ?7, total_events_dequeued = ?8,
+                    total_event_enqueue_err = ?9, total_bytes_recv = ?10,
+                    total_packets_recv = ?11, created_at = ?12
+                WHERE id = ?13
+                "#,
+                timestamp,
+                is_ready,
+                fill_percent,
+                control_signal,
+                total_events_recv,
+                total_events_reassembled,
+                total_events_reassembly_err,
+                total_events_dequeued,
+                total_event_enqueue_err,
+                total_bytes_recv,
+                total_packets_recv,
+                now,
+                existing.id
+            )
+            .execute(&mut *tx)
+            .await?;
+            existing.id
+        } else {
+            // Insert a new session_state row
+            let state_record = sqlx::query!(
+                r#"
+                INSERT INTO session_state (
+                    session_id, timestamp, is_ready, fill_percent, control_signal,
+                    total_events_recv, total_events_reassembled, total_events_reassembly_err,
+                    total_events_dequeued, total_event_enqueue_err, total_bytes_recv,
+                    total_packets_recv
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+                RETURNING id
+                "#,
+                session_id,
+                timestamp,
+                is_ready,
+                fill_percent,
+                control_signal,
+                total_events_recv,
+                total_events_reassembled,
+                total_events_reassembly_err,
+                total_events_dequeued,
+                total_event_enqueue_err,
+                total_bytes_recv,
+                total_packets_recv
+            )
+            .fetch_one(&mut *tx)
+            .await?;
+            state_record.id
+        };
 
         // Update session.latest_session_state_id and is_ready in one query
         sqlx::query!(
             "UPDATE session SET latest_session_state_id = ?1, is_ready = ?2, control_signal = ?3 WHERE id = ?4",
-            state_record.id,
+            state_id,
             is_ready,
             control_signal,
             session_id
@@ -103,7 +169,7 @@ impl LoadBalancerDB {
 
         tx.commit().await?;
 
-        Ok(state_record.id)
+        Ok(state_id)
     }
 
     /// Marks sessions as not ready if their latest state update is older than 2 seconds,
