@@ -445,6 +445,7 @@ impl LoadBalancerService {
                 slot_demands: Vec::new(), // TODO: fetch from database
                 slots: Vec::new(),        // TODO: use latest epoch data
                 health_issues,
+                session_id: session.id,
             });
         }
 

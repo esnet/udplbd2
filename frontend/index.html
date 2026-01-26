@@ -70,9 +70,19 @@
 
                 <!-- Charts Container - Full Width -->
                 <div class="charts-container">
+                    <!-- Tab Navigation -->
+                    <div class="chart-tabs">
+                        <button class="chart-tab active" data-tab="workflow">Workflow</button>
+                        <button class="chart-tab" data-tab="network">Network</button>
+                    </div>
                     <!-- Dynamic charts will be generated here -->
                     <div id="dynamic-charts-area">
-                        <!-- Charts will be added dynamically -->
+                        <div id="workflow-charts" class="chart-tab-content active">
+                            <!-- Workflow charts: control_signal, fill_percent, events -->
+                        </div>
+                        <div id="network-charts" class="chart-tab-content">
+                            <!-- Network charts: packet counters, drops -->
+                        </div>
                     </div>
                 </div>
             </div>

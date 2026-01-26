@@ -162,6 +162,7 @@ message WorkerStatus {
 	repeated SlotRange slots = 19; // the slots that were assigned in the latest epoch
 	repeated SlotRange slotDemands = 20; // the slots that are explicitly demanded by this worker
 	repeated HealthIssue health_issues = 21; // active health check issues for this worker
+	int64 sessionId = 22; // session ID from database
 }
 message LoadBalancerStatusReply {
 	google.protobuf.Timestamp timestamp = 1; // time that this message was generated

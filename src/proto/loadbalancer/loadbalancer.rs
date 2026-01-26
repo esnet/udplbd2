@@ -183,6 +183,9 @@ pub struct WorkerStatus {
     /// active health check issues for this worker
     #[prost(message, repeated, tag = "21")]
     pub health_issues: ::prost::alloc::vec::Vec<HealthIssue>,
+    /// session ID from database
+    #[prost(int64, tag = "22")]
+    pub session_id: i64,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]

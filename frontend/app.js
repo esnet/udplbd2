@@ -35,6 +35,11 @@ document.addEventListener('DOMContentLoaded', () => {
     const filterAllReceivers = document.getElementById('filter-all-receivers');
     const clearReceiverFilter = document.getElementById('clear-receiver-filter');
 
+    // Chart tab elements
+    const workflowChartsArea = document.getElementById('workflow-charts');
+    const networkChartsArea = document.getElementById('network-charts');
+    let activeChartTab = 'workflow'; // Track active tab
+
     // Tool View Content/Loading Elements
     const tokenViewLoading = document.getElementById('token-view-loading');
     const tokenViewContent = document.getElementById('token-view-content');
@@ -847,28 +852,47 @@ const renderSessions = (workers) => {
         return colors[parseInt(sessionId) % colors.length];
     };
 
+    // Metric categorization for tabs
+    // Session metrics for workflow tab: control signal, fill percent, and event-related
+    const WORKFLOW_SESSION_METRICS = ['control_signal', 'fill_percent', 'total_events_recv',
+        'total_events_reassembled', 'total_events_reassembly_err', 'total_events_dequeued', 'total_event_enqueue_err'];
+    // Session metrics for network tab: packet/byte counters
+    const NETWORK_SESSION_METRICS = ['total_bytes_recv', 'total_packets_recv', 'mbr_tx_pkts', 'mbr_tx_bytes'];
+    // Metrics to exclude entirely
+    const EXCLUDED_METRICS = ['is_ready'];
+    // LB-level workflow metrics
+    const WORKFLOW_LB_METRICS = ['event_number', 'avg_event_rate_hz'];
+    // LB-level network metrics (not drops)
+    const NETWORK_LB_METRICS = ['rx_bytes', 'rx_packets'];
+
     // Function to render charts with timeseries data
-    // --- In-place Chart Updating ---
+    // --- In-place Chart Updating with Tabs ---
     const renderCharts = (timeseriesData) => {
         // Track which chart IDs are still needed this render
         const neededChartIds = new Set();
 
+        // Get tab content areas
+        const workflowArea = workflowChartsArea || document.getElementById('workflow-charts');
+        const networkArea = networkChartsArea || document.getElementById('network-charts');
+
         if (!timeseriesData || !timeseriesData.timeseries || !timeseriesData.timeseries.length) {
             // If no data, show message and remove all charts
-            dynamicChartsArea.innerHTML = '<div class="no-data-message">No timeseries data available</div>';
+            if (workflowArea) workflowArea.innerHTML = '<div class="no-data-message">No timeseries data available</div>';
+            if (networkArea) networkArea.innerHTML = '';
             destroyAllCharts();
             return;
         }
 
         // Group timeseries by type
         const sessionSeries = new Map(); // Map of session ID -> Map of metric name -> data
-        const reservationSeries = new Map(); // Map of metric name -> data
+        const lbSeries = new Map(); // Map of metric name -> data (LB-level metrics)
+        const dropSeries = new Map(); // Map of drop metric name -> data (to consolidate)
         const predictionData = {
             boundary_event: null,
             event_number: null
         };
 
-        // Process all timeseries (updated for new metric path format)
+        // Process all timeseries
         timeseriesData.timeseries.forEach(series => {
             const name = series.name;
             const data = series.timeseries?.FloatSamples?.data || [];
@@ -876,78 +900,245 @@ const renderSessions = (workers) => {
             // Skip empty series
             if (!data.length) return;
 
-            // /smartnic/global/{metric}
-            const globalMatch = name.match(/^\/smartnic\/global\/([^\/]+)$/);
-            if (globalMatch) {
-                // Optionally render global metrics as charts
-                // Not currently rendered, but could be added here
+            // /lb/{lb_id}/epoch/boundary_event
+            const epochMatch = name.match(/^\/lb\/(\d+)\/epoch\/([^\/]+)$/);
+            if (epochMatch) {
+                const metricName = epochMatch[2];
+                if (metricName === 'boundary_event') {
+                    predictionData.boundary_event = data;
+                }
                 return;
             }
 
-            // /lb/{reservation_id}/{metric}
+            // /lb/{lb_id}/{metric} - LB-level metrics (including drops)
             const lbMatch = name.match(/^\/lb\/(\d+)\/([^\/]+)$/);
             if (lbMatch) {
                 const metricName = lbMatch[2];
-                reservationSeries.set(metricName, data);
+                // Check if it's a drop metric
+                if (metricName.startsWith('drop_')) {
+                    dropSeries.set(metricName, data);
+                } else if (metricName === 'event_number') {
+                    predictionData.event_number = data;
+                    lbSeries.set(metricName, data);
+                } else {
+                    lbSeries.set(metricName, data);
+                }
                 return;
             }
 
-            // /lb/{reservation_id}/session/{session_id}/{metric}
+            // /lb/{lb_id}/session/{session_id}/{metric}
             const sessionMatch = name.match(/^\/lb\/(\d+)\/session\/(\d+)\/([^\/]+)$/);
             if (sessionMatch) {
                 const sessionId = sessionMatch[2];
                 const metricName = sessionMatch[3];
+
+                // Skip excluded metrics like is_ready
+                if (EXCLUDED_METRICS.includes(metricName)) {
+                    return;
+                }
+
                 if (!sessionSeries.has(sessionId)) {
                     sessionSeries.set(sessionId, new Map());
                 }
                 sessionSeries.get(sessionId).set(metricName, data);
                 return;
             }
-
-            // /lb/{reservation_id}/epoch/boundary_event
-            if (name.includes('/epoch/boundary_event')) {
-                predictionData.boundary_event = data;
-                return;
-            }
-            // /lb/{reservation_id}/event_number
-            if (name.includes('/event_number')) {
-                predictionData.event_number = data;
-                return;
-            }
         });
 
-        // Helper to update or create a chart container
-        function ensureChartContainer(title, id) {
+        // Helper to update or create a chart container in a specific area
+        function ensureChartContainer(title, id, targetArea) {
+            if (!targetArea) {
+                console.warn(`Target area not found for chart ${id}`);
+                return null;
+            }
             let container = document.getElementById(id);
             if (!container) {
                 // Create new container only if it doesn't exist
                 const wrapper = document.createElement('div');
                 wrapper.className = 'chart-container';
                 wrapper.innerHTML = `<h3>${title}</h3><div id="${id}"></div>`;
-                dynamicChartsArea.appendChild(wrapper);
+                targetArea.appendChild(wrapper);
                 container = document.getElementById(id);
+            } else {
+                // Move to correct area if needed
+                const currentParent = container.parentElement?.parentElement;
+                if (currentParent !== targetArea) {
+                    targetArea.appendChild(container.parentElement);
+                }
             }
             return container;
         }
+
+        // Helper to create chart options
+        function createChartOptions(container, seriesLabels, seriesColors, yLabel, specialOptions = {}) {
+            // Use a minimum width if container is hidden (e.g., on inactive tab)
+            const width = container.clientWidth > 0 ? container.clientWidth : 800;
+            const defaultOptions = {
+                width: width,
+                height: 350,
+                series: seriesLabels.map((label, i) => ({
+                    label,
+                    stroke: seriesColors[i],
+                    width: i > 0 ? 2.5 : 0,
+                    points: { show: false },
+                    spanGaps: true
+                })),
+                axes: [
+                    { stroke: "white", grid: { stroke: "#444444" }, ticks: { count: 6 } },
+                    {
+                        label: yLabel,
+                        labelSize: 20,
+                        stroke: "white",
+                        grid: { stroke: "#444444" },
+                        font: "14px Arial",
+                        color: "white"
+                    }
+                ],
+                scales: { x: { time: true } },
+                legend: { show: true }
+            };
+            return { ...defaultOptions, ...specialOptions };
+        }
+
+        // Helper to render a session metric chart
+        function renderSessionMetricChart(metricKey, targetArea) {
+            const formattedMetricName = metricKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const chartId = `chart-${metricKey}`;
+            neededChartIds.add(chartId);
+
+            const chartContainer = ensureChartContainer(formattedMetricName, chartId, targetArea);
+            if (!chartContainer) return;
+
+            const timestamps = [];
+            const seriesData = [];
+            const seriesLabels = ['Time'];
+            const seriesColors = ['transparent'];
+            const sessionIds = [];
+
+            sessionSeries.forEach((metrics, sessionId) => {
+                // Apply filter: skip if filtered and not in the filter set
+                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
+                    return;
+                }
+
+                if (metrics.has(metricKey)) {
+                    const rawData = metrics.get(metricKey);
+                    const data = sampleDataPoints(rawData, 500);
+
+                    sessionIds.push(sessionId);
+                    // Use receiver name from sidebar if available
+                    const label = sessionIdToName[sessionId] || `Session ${sessionId}`;
+                    seriesLabels.push(label);
+                    seriesColors.push(getSessionColor(sessionId));
+                    data.forEach((point) => {
+                        const ts = point.timestamp / 1000;
+                        if (!timestamps.includes(ts)) {
+                            timestamps.push(ts);
+                        }
+                    });
+                }
+            });
+            timestamps.sort((a, b) => a - b);
+            seriesData.push(timestamps);
+
+            sessionSeries.forEach((metrics, sessionId) => {
+                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
+                    return;
+                }
+
+                if (metrics.has(metricKey)) {
+                    const rawData = metrics.get(metricKey);
+                    const data = sampleDataPoints(rawData, 500);
+
+                    const values = new Array(timestamps.length).fill(null);
+                    data.forEach(point => {
+                        const idx = timestamps.indexOf(point.timestamp / 1000);
+                        if (idx !== -1) values[idx] = point.value;
+                    });
+                    seriesData.push(values);
+                }
+            });
+
+            // Skip if no data after filtering
+            if (seriesLabels.length <= 1) return;
+
+            const specialOptions = metricKey === 'fill_percent' ? { scales: { y: { range: [0, 1] } } } : {};
+            const chartOptions = createChartOptions(chartContainer, seriesLabels, seriesColors, formattedMetricName, specialOptions);
+
+            // Check if we need to recreate the chart (labels changed or session count changed)
+            const existingChart = uPlotCharts[chartId];
+            const labelsChanged = existingChart && (
+                existingChart.series.length !== seriesLabels.length ||
+                existingChart.series.some((s, i) => s.label !== seriesLabels[i])
+            );
+
+            if (existingChart && !labelsChanged) {
+                existingChart.setData(seriesData);
+                existingChart.sessionIds = sessionIds;
+            } else {
+                // Destroy existing chart if labels changed
+                if (existingChart) {
+                    existingChart.destroy();
+                    chartContainer.innerHTML = '';
+                }
+                const chart = new uPlot(chartOptions, seriesData, chartContainer);
+                chart.sessionIds = sessionIds;
+                uPlotCharts[chartId] = chart;
+            }
+        }
+
+        // Helper to render an LB-level metric chart
+        function renderLbMetricChart(metricName, rawData, targetArea) {
+            const formattedMetricName = metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            const chartId = `chart-lb-${metricName}`;
+            neededChartIds.add(chartId);
+
+            const chartContainer = ensureChartContainer(formattedMetricName, chartId, targetArea);
+            if (!chartContainer) return;
+
+            const data = sampleDataPoints(rawData, 500);
+            const timestamps = data.map(point => point.timestamp / 1000);
+            const values = data.map(point => point.value);
+            const seriesData = [timestamps, values];
+            const seriesLabels = ['Time', formattedMetricName];
+            const seriesColors = ['transparent', '#4285F4'];
+
+            const chartOptions = createChartOptions(chartContainer, seriesLabels, seriesColors, formattedMetricName);
+
+            if (uPlotCharts[chartId]) {
+                uPlotCharts[chartId].setData(seriesData);
+            } else {
+                uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
+            }
+        }
+
+        // --- Collect all session metrics ---
+        const sessionMetrics = new Set();
+        sessionSeries.forEach(metrics => {
+            metrics.forEach((_, metricName) => {
+                if (!EXCLUDED_METRICS.includes(metricName)) {
+                    sessionMetrics.add(metricName);
+                }
+            });
+        });
+
+        // ==================== WORKFLOW TAB ====================
 
         // --- Prediction Accuracy Chart ---
         if (predictionData.boundary_event && predictionData.event_number) {
             const chartId = 'chart-prediction-accuracy';
             neededChartIds.add(chartId);
 
-            const chartContainer = ensureChartContainer('Prediction Accuracy', chartId);
+            const chartContainer = ensureChartContainer('Prediction Accuracy', chartId, workflowArea);
 
-            // Apply sampling to both datasets
             const boundaryEventData = sampleDataPoints(predictionData.boundary_event, 500);
             const eventNumberData = sampleDataPoints(predictionData.event_number, 500);
 
-            // Collect all timestamps from both datasets
             const allTimestamps = new Set();
             boundaryEventData.forEach(point => allTimestamps.add(point.timestamp));
             eventNumberData.forEach(point => allTimestamps.add(point.timestamp));
             const timestamps = Array.from(allTimestamps).sort((a, b) => a - b);
 
-            // Create value arrays for both datasets
             const boundaryValues = new Array(timestamps.length).fill(null);
             const eventNumberValues = new Array(timestamps.length).fill(null);
             const differenceValues = new Array(timestamps.length).fill(null);
@@ -970,30 +1161,7 @@ const renderSessions = (workers) => {
             const seriesLabels = ['Time', 'Boundary Event', 'Event Number', 'Difference'];
             const seriesColors = ['transparent', '#4285F4', '#34A853', '#EA4335'];
 
-            const chartOptions = {
-                width: chartContainer.clientWidth,
-                height: 350,
-                series: seriesLabels.map((label, i) => ({
-                    label,
-                    stroke: seriesColors[i],
-                    width: i > 0 ? 2.5 : 0,
-                    points: { show: false },
-                    spanGaps: true
-                })),
-                axes: [
-                    { stroke: "white", grid: { stroke: "#444444" } },
-                    {
-                        label: "Event Number",
-                        labelSize: 20,
-                        stroke: "white",
-                        grid: { stroke: "#444444" },
-                        font: "14px Arial",
-                        color: "white"
-                    }
-                ],
-                scales: { x: { time: true } },
-                legend: { show: true }
-            };
+            const chartOptions = createChartOptions(chartContainer, seriesLabels, seriesColors, 'Event Number');
 
             if (uPlotCharts[chartId]) {
                 uPlotCharts[chartId].setData(seriesData);
@@ -1002,252 +1170,113 @@ const renderSessions = (workers) => {
             }
         }
 
-        // --- Session Metric Charts ---
-        const sessionMetrics = new Set();
-        sessionSeries.forEach(metrics => {
-            metrics.forEach((_, metricName) => {
-                sessionMetrics.add(metricName);
-            });
+        // --- Workflow Session Metrics (control_signal, fill_percent, event metrics) ---
+        WORKFLOW_SESSION_METRICS.forEach(metricKey => {
+            if (sessionMetrics.has(metricKey)) {
+                renderSessionMetricChart(metricKey, workflowArea);
+            }
         });
 
-        sessionMetrics.forEach(metricKey => {
-            const formattedMetricName = metricKey.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const chartId = `chart-${metricKey}`;
+        // --- Workflow LB Metrics (event_number, avg_event_rate_hz) ---
+        WORKFLOW_LB_METRICS.forEach(metricName => {
+            if (lbSeries.has(metricName)) {
+                renderLbMetricChart(metricName, lbSeries.get(metricName), workflowArea);
+            }
+        });
+
+        // ==================== NETWORK TAB ====================
+
+        // --- Network Session Metrics (packet/byte counters) ---
+        NETWORK_SESSION_METRICS.forEach(metricKey => {
+            if (sessionMetrics.has(metricKey)) {
+                renderSessionMetricChart(metricKey, networkArea);
+            }
+        });
+
+        // --- Network LB Metrics (rx_bytes, rx_packets) ---
+        NETWORK_LB_METRICS.forEach(metricName => {
+            if (lbSeries.has(metricName)) {
+                renderLbMetricChart(metricName, lbSeries.get(metricName), networkArea);
+            }
+        });
+
+        // --- Consolidated Drops Chart ---
+        if (dropSeries.size > 0) {
+            const chartId = 'chart-drops-consolidated';
             neededChartIds.add(chartId);
 
-            const chartContainer = ensureChartContainer(formattedMetricName, chartId);
-            if (!chartContainer) return;
+            const chartContainer = ensureChartContainer('Drops', chartId, networkArea);
+            if (chartContainer) {
+                // Collect all timestamps from all drop series
+                const allTimestamps = new Set();
+                dropSeries.forEach((data) => {
+                    data.forEach(point => allTimestamps.add(point.timestamp));
+                });
+                const timestamps = Array.from(allTimestamps).sort((a, b) => a - b).map(t => t / 1000);
 
-            // Prepare data for uPlot with filtering
-            const timestamps = [];
-            const seriesData = [];
-            const seriesLabels = ['Time'];
-            const seriesColors = ['transparent'];
-            const sessionIds = [];
+                const seriesData = [timestamps];
+                const seriesLabels = ['Time'];
+                const seriesColors = ['transparent'];
+                const dropColors = ['#EA4335', '#FF6D01', '#FBBC05', '#34A853', '#4285F4', '#46BDC6', '#7BAAF7', '#F07B72'];
+                let colorIdx = 0;
 
-            sessionSeries.forEach((metrics, sessionId) => {
-                // Apply filter: skip if filtered and not in the filter set
-                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
-                    return;
-                }
-
-                if (metrics.has(metricKey)) {
-                    const rawData = metrics.get(metricKey);
-                    // Apply sampling to the data
+                dropSeries.forEach((rawData, metricName) => {
                     const data = sampleDataPoints(rawData, 500);
-
-                    sessionIds.push(sessionId);
-                    // Always use receiver name if available, else fallback to sessionId
-                    const label = sessionIdToName[sessionId] ? sessionIdToName[sessionId] : `Session ${sessionId}`;
-                    seriesLabels.push(label);
-                    seriesColors.push(getSessionColor(sessionId));
-                    data.forEach((point, idx) => {
-                        if (idx === 0 || !timestamps.includes(point.timestamp  / 1000)) {
-                            timestamps.push(point.timestamp  / 1000);
-                        }
-                    });
-                }
-            });
-            timestamps.sort((a, b) => a - b);
-            seriesData.push(timestamps);
-
-            sessionSeries.forEach((metrics, sessionId) => {
-                // Apply filter again when building values
-                if (filteredSessionIds.size > 0 && !filteredSessionIds.has(sessionId)) {
-                    return;
-                }
-
-                if (metrics.has(metricKey)) {
-                    const rawData = metrics.get(metricKey);
-                    // Apply sampling to the data
-                    const data = sampleDataPoints(rawData, 500);
+                    // Format drop name: "drop_bad_udplb_version" -> "Bad Udplb Version"
+                    const formattedName = metricName.replace('drop_', '').replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+                    seriesLabels.push(formattedName);
+                    seriesColors.push(dropColors[colorIdx % dropColors.length]);
+                    colorIdx++;
 
                     const values = new Array(timestamps.length).fill(null);
                     data.forEach(point => {
-                        const idx = timestamps.indexOf(point.timestamp  / 1000);
+                        const idx = timestamps.indexOf(point.timestamp / 1000);
                         if (idx !== -1) values[idx] = point.value;
                     });
                     seriesData.push(values);
-                }
-            });
+                });
 
-            const defaultOptions = {
-                width: chartContainer.clientWidth,
-                height: 350,
-                series: seriesLabels.map((label, i) => ({
-                    label,
-                    stroke: seriesColors[i],
-                    width: i > 0 ? 2.5 : 0,
-                    points: { show: false },
-                    spanGaps: true
-                })),
-                axes: [
-                    { stroke: "white", grid: { stroke: "#444444" }, ticks: { count: 6 } },
-                    {
-                        label: formattedMetricName,
-                        labelSize: 20,
-                        stroke: "white",
-                        grid: { stroke: "#444444" },
-                        font: "14px Arial",
-                        color: "white"
-                    }
-                ],
-                scales: { x: { time: true } },
-                legend: { show: true }
-            };
-            const specialOptions = {};
-            if (metricKey === 'fill_percent') {
-                specialOptions.scales = { y: { range: [0, 1] } };
-            }
-            const chartOptions = { ...defaultOptions, ...specialOptions };
-
-            if (uPlotCharts[chartId]) {
-                uPlotCharts[chartId].setData(seriesData);
-                uPlotCharts[chartId].sessionIds = sessionIds;
-            } else {
-                const chart = new uPlot(chartOptions, seriesData, chartContainer);
-                chart.sessionIds = sessionIds;
-                uPlotCharts[chartId] = chart;
-            }
-        });
-
-        // --- Reservation Metric Charts ---
-        reservationSeries.forEach((rawData, metricName) => {
-            const formattedMetricName = metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
-            const chartId = `chart-reservation-${metricName}`;
-            neededChartIds.add(chartId);
-
-            const chartContainer = ensureChartContainer(`Reservation ${formattedMetricName}`, chartId);
-            if (!chartContainer) return;
-
-            // Apply sampling to the data
-            const data = sampleDataPoints(rawData, 500);
-
-            const timestamps = data.map(point => point.timestamp / 1000);
-            const values = data.map(point => point.value);
-            const seriesData = [timestamps, values];
-            const seriesLabels = ['Time', formattedMetricName];
-            const seriesColors = ['transparent', '#4285F4'];
-
-            const chartOptions = {
-                width: chartContainer.clientWidth,
-                height: 350,
-                series: seriesLabels.map((label, i) => ({
-                    label,
-                    stroke: seriesColors[i],
-                    width: i > 0 ? 2.5 : 0,
-                    points: { show: false },
-                    spanGaps: true
-                })),
-                axes: [
-                    { stroke: "white", grid: { stroke: "#444444" } },
-                    {
-                        label: formattedMetricName,
-                        labelSize: 20,
-                        stroke: "white",
-                        grid: { stroke: "#444444" },
-                        font: "14px Arial",
-                        color: "white"
-                    }
-                ],
-                scales: { x: { time: true } },
-                legend: { show: true }
-            };
-
-            if (uPlotCharts[chartId]) {
-                uPlotCharts[chartId].setData(seriesData);
-            } else {
-                uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
-            }
-        });
-
-        // --- Global Metric Charts ---
-        if (typeof chartMetrics !== "undefined" && chartMetrics.global && chartMetrics.global.size > 0) {
-            chartMetrics.global.forEach((rawData, metricName) => {
-                const formattedMetricName = `Global ${metricName.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}`;
-                const chartId = `chart-global-${metricName}`;
-                neededChartIds.add(chartId);
-
-                const chartContainer = ensureChartContainer(formattedMetricName, chartId);
-                if (!chartContainer) return;
-
-                // Apply sampling to the data
-                const data = sampleDataPoints(rawData, 500);
-
-                const timestamps = data.map(point => point.timestamp / 1000);
-                const values = data.map(point => point.value);
-                const seriesData = [timestamps, values];
-                const seriesLabels = ['Time', formattedMetricName];
-                const seriesColors = ['transparent', '#EA4335'];
-
-                const chartOptions = {
-                    width: chartContainer.clientWidth,
-                    height: 350,
-                    series: seriesLabels.map((label, i) => ({
-                        label,
-                        stroke: seriesColors[i],
-                        width: i > 0 ? 2.5 : 0,
-                        points: { show: false },
-                        spanGaps: true
-                    })),
-                    axes: [
-                        { stroke: "white", grid: { stroke: "#444444" } },
-                        {
-                            label: formattedMetricName,
-                            labelSize: 20,
-                            stroke: "white",
-                            grid: { stroke: "#444444" },
-                            font: "14px Arial",
-                            color: "white"
-                        }
-                    ],
-                    scales: { x: { time: true } },
-                    legend: { show: true }
-                };
+                const chartOptions = createChartOptions(chartContainer, seriesLabels, seriesColors, 'Drop Count');
 
                 if (uPlotCharts[chartId]) {
                     uPlotCharts[chartId].setData(seriesData);
                 } else {
                     uPlotCharts[chartId] = new uPlot(chartOptions, seriesData, chartContainer);
                 }
-            });
+            }
         }
 
         // --- Remove unused charts and DOM nodes ---
         Object.keys(uPlotCharts).forEach(chartId => {
             if (!neededChartIds.has(chartId)) {
-                // Remove chart DOM
                 const chartDiv = document.getElementById(chartId);
                 if (chartDiv && chartDiv.parentElement) {
                     chartDiv.parentElement.remove();
                 }
-                // Destroy uPlot instance
                 uPlotCharts[chartId].destroy();
                 delete uPlotCharts[chartId];
             }
         });
-
-        // --- Reorder chart containers to match needed order ---
-        // (Optional: could be added for strict order, but not strictly necessary)
-
-        // --- Resize charts after rendering ---
-        // Removed dynamic resizing to prevent chart growth
     };
 
-    // Handle receiver filter toggle
+    // Handle receiver filter toggle (multi-select support)
     const handleReceiverFilter = (sessionId) => {
         if (!sessionId) return;
 
-        // Toggle the filter
+        // Toggle the session in the filter set (multi-select)
         if (filteredSessionIds.has(sessionId)) {
-            // Remove from filter (show all)
-            filteredSessionIds.clear();
+            // Remove from filter
+            filteredSessionIds.delete(sessionId);
+        } else {
+            // Add to filter
+            filteredSessionIds.add(sessionId);
+        }
+
+        // Update UI based on filter state
+        if (filteredSessionIds.size === 0) {
             clearReceiverFilter.style.display = 'none';
             filterAllReceivers.classList.add('active');
         } else {
-            // Add to filter (show only this one)
-            filteredSessionIds.clear();
-            filteredSessionIds.add(sessionId);
             clearReceiverFilter.style.display = 'inline-block';
             filterAllReceivers.classList.remove('active');
         }
@@ -1286,33 +1315,46 @@ const renderSessions = (workers) => {
         }
         if (!sessionId) return;
 
-        // Find all charts
+        // Find all charts and use setSeries to highlight
         Object.values(uPlotCharts).forEach(chart => {
             if (!chart || !chart.sessionIds) return;
 
             // Get the series index for this session
             const seriesIdx = chart.sessionIds.indexOf(sessionId) + 1; // +1 because first series is time
 
-            if (seriesIdx > 0) {
-                // Highlight this series
-                const allSeries = chart.series;
-
-                // Reset all series to normal width
-                allSeries.forEach((s, i) => {
-                    if (i > 0) { // Skip time series
-                        s.width = 2.5;
-                        s.stroke = getSessionColor(chart.sessionIds[i-1]);
-                    }
-                });
-
-                // Highlight the selected series
-                if (allSeries[seriesIdx]) {
-                    allSeries[seriesIdx].width = 4;
-                }
-
-                // Redraw the chart
-                chart.redraw();
+            if (seriesIdx > 0 && seriesIdx < chart.series.length) {
+                // Use uPlot's setSeries API to focus on the selected series
+                chart.setSeries(seriesIdx, { focus: true });
             }
+        });
+    };
+
+    // Helper to reset the chart tab structure
+    const resetChartTabs = () => {
+        // Ensure the tab content areas exist
+        let workflowCharts = document.getElementById('workflow-charts');
+        let networkCharts = document.getElementById('network-charts');
+
+        if (!workflowCharts || !networkCharts) {
+            dynamicChartsArea.innerHTML = `
+                <div id="workflow-charts" class="chart-tab-content active">
+                    <div class="loading">Loading charts...</div>
+                </div>
+                <div id="network-charts" class="chart-tab-content">
+                </div>
+            `;
+        } else {
+            workflowCharts.innerHTML = '<div class="loading">Loading charts...</div>';
+            networkCharts.innerHTML = '';
+        }
+
+        // Reset active tab
+        activeChartTab = 'workflow';
+        document.querySelectorAll('.chart-tab').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.tab === 'workflow');
+        });
+        document.querySelectorAll('.chart-tab-content').forEach(content => {
+            content.classList.toggle('active', content.id === 'workflow-charts');
         });
     };
 
@@ -1328,7 +1370,7 @@ const renderSessions = (workers) => {
         receiverList.innerHTML = '<li class="loading">Loading receivers...</li>';
         senderListUl.innerHTML = '<li class="loading">Loading senders...</li>';
         destroyAllCharts();
-        dynamicChartsArea.innerHTML = '<div class="loading">Loading charts...</div>';
+        resetChartTabs();
 
         try {
             const statusData = await apiFetch(`/lb/${lbId}/status`);
@@ -1629,6 +1671,19 @@ const renderSessions = (workers) => {
         }
     });
 
+    // Clear highlight when mouse leaves receiver list
+    document.addEventListener('mouseout', (event) => {
+        const receiverItem = event.target.closest('#receiver-list li');
+        if (receiverItem && !receiverItem.contains(event.relatedTarget)) {
+            // Reset focus on all charts
+            Object.values(uPlotCharts).forEach(chart => {
+                if (chart) {
+                    chart.setSeries(null, { focus: false });
+                }
+            });
+        }
+    });
+
     const handleDeregisterSession = async (receiverId) => {
         if (!receiverId) return alert("Error: Session ID missing.");
         if (!confirm(`Deregister receiver "${receiverId}"?`)) return;
@@ -1867,6 +1922,40 @@ const renderSessions = (workers) => {
             renderCharts(bufferedTimeseriesData);
         });
     }
+
+    // Chart tab switching (using event delegation)
+    document.addEventListener('click', (event) => {
+        const tabBtn = event.target.closest('.chart-tab');
+        if (tabBtn) {
+            const targetTab = tabBtn.dataset.tab;
+
+            // Update button states
+            document.querySelectorAll('.chart-tab').forEach(btn => btn.classList.remove('active'));
+            tabBtn.classList.add('active');
+
+            // Update content visibility
+            document.querySelectorAll('.chart-tab-content').forEach(content => content.classList.remove('active'));
+            const targetContent = document.getElementById(`${targetTab}-charts`);
+            if (targetContent) {
+                targetContent.classList.add('active');
+
+                // Resize charts on the newly visible tab
+                setTimeout(() => {
+                    Object.entries(uPlotCharts).forEach(([chartId, chart]) => {
+                        const chartEl = document.getElementById(chartId);
+                        if (chartEl && targetContent.contains(chartEl)) {
+                            const container = chartEl.parentElement;
+                            if (container && container.clientWidth > 0) {
+                                chart.setSize({ width: container.clientWidth, height: 350 });
+                            }
+                        }
+                    });
+                }, 10);
+            }
+
+            activeChartTab = targetTab;
+        }
+    });
 
     // --- SPA Routing ---
     const navigateTo = (path, replace = false) => {
