@@ -377,6 +377,93 @@ button:disabled {
     flex-wrap: wrap;
 }
 
+/* Health Issues Panel */
+.health-issues-panel {
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 25px;
+}
+
+.health-issues-panel h3 {
+    margin-bottom: 15px;
+    color: var(--text-color);
+}
+
+.health-issue {
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    border-left: 4px solid;
+}
+
+.health-issue:last-child {
+    margin-bottom: 0;
+}
+
+.health-issue-warning {
+    background-color: rgba(255, 204, 0, 0.1);
+    border-left-color: var(--warning-color);
+}
+
+.health-issue-error {
+    background-color: rgba(255, 59, 48, 0.1);
+    border-left-color: var(--danger-color);
+}
+
+.health-issue-critical {
+    background-color: rgba(255, 0, 0, 0.15);
+    border-left-color: #ff0000;
+}
+
+.health-issue-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.health-issue-type {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.health-issue-severity {
+    font-size: 0.85em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.3);
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+.health-issue-message {
+    color: var(--text-secondary-color);
+    font-size: 0.95em;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.health-issue-time {
+    font-size: 0.85em;
+    color: var(--text-secondary-color);
+    font-style: italic;
+}
+
+/* Receiver Health Warning */
+.receiver-health-warning {
+    display: block;
+    color: var(--warning-color);
+    font-size: 0.85em;
+    margin-top: 5px;
+    padding: 4px 0;
+}
+
+.receiver-health-warning i {
+    margin-right: 4px;
+}
+
 /* Charts Container */
 .charts-container {
     width: 100%;

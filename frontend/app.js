@@ -244,6 +244,40 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+// Render health issues panel
+const renderHealthIssues = (healthIssues) => {
+    const healthPanel = document.getElementById('health-issues-panel');
+    const healthList = document.getElementById('health-issues-list');
+
+    if (!healthIssues || healthIssues.length === 0) {
+        healthPanel.style.display = 'none';
+        return;
+    }
+
+    healthPanel.style.display = 'block';
+    healthList.innerHTML = '';
+
+    healthIssues.forEach(issue => {
+        const issueDiv = document.createElement('div');
+        issueDiv.className = `health-issue health-issue-${issue.severity || 'warning'}`;
+
+        const detectedAt = issue.detected_at
+            ? new Date(issue.detected_at.seconds * 1000).toLocaleString()
+            : 'N/A';
+
+        issueDiv.innerHTML = `
+            <div class="health-issue-header">
+                <span class="health-issue-type">${issue.type || 'Unknown Issue'}</span>
+                <span class="health-issue-severity">${issue.severity || 'warning'}</span>
+            </div>
+            <div class="health-issue-message">${issue.message || 'No message provided'}</div>
+            <div class="health-issue-time">Detected: ${detectedAt}</div>
+        `;
+
+        healthList.appendChild(issueDiv);
+    });
+};
+
 const renderSessions = (workers) => {
     receiverList.innerHTML = '';
     sessionIdToName = {}; // Reset mapping each time
@@ -325,6 +359,15 @@ const renderSessions = (workers) => {
         const isFiltered = filteredSessionIds.size > 0 && filteredSessionIds.has(sessionId);
         const filterClass = isFiltered ? 'filtered-receiver' : '';
 
+        // Build health issues display for this receiver
+        let healthIssuesHtml = '';
+        if (worker.health_issues && worker.health_issues.length > 0) {
+            const issuesText = worker.health_issues.map(issue =>
+                `${issue.severity || 'warning'}: ${issue.type || 'issue'}`
+            ).join(', ');
+            healthIssuesHtml = `<span class="receiver-health-warning"><i class="fas fa-exclamation-triangle"></i> ${issuesText}</span>`;
+        }
+
         li.innerHTML = `
             <button class="deregister-btn" data-receiver-id="${receiverId}" title="Deregister Session ${receiverId}">
                 <i class="fas fa-times"></i> Deregister
@@ -336,6 +379,7 @@ const renderSessions = (workers) => {
                 <span>Control Signal: <strong style="color: ${getControlSignalColor(controlSignal)}">${worker.control_signal?.toFixed(4) ?? 'N/A'}</strong></span>
                 <span>Slots: <strong>${worker.slots_assigned ?? 'N/A'}</strong></span>
                 <span>Last Update: ${lastUpdated}</span>
+                ${healthIssuesHtml}
             </div>
         `;
         li.className = filterClass;
@@ -903,6 +947,10 @@ const renderSessions = (workers) => {
             // /lb/{lb_id}/epoch/boundary_event
             const epochMatch = name.match(/^\/lb\/(\d+)\/epoch\/([^\/]+)$/);
             if (epochMatch) {
+                const lbIdFromMetric = epochMatch[1];
+                // Only process if it matches the current LB
+                if (lbIdFromMetric !== currentSelectedLbId) return;
+
                 const metricName = epochMatch[2];
                 if (metricName === 'boundary_event') {
                     predictionData.boundary_event = data;
@@ -913,6 +961,10 @@ const renderSessions = (workers) => {
             // /lb/{lb_id}/{metric} - LB-level metrics (including drops)
             const lbMatch = name.match(/^\/lb\/(\d+)\/([^\/]+)$/);
             if (lbMatch) {
+                const lbIdFromMetric = lbMatch[1];
+                // Only process if it matches the current LB
+                if (lbIdFromMetric !== currentSelectedLbId) return;
+
                 const metricName = lbMatch[2];
                 // Check if it's a drop metric
                 if (metricName.startsWith('drop_')) {
@@ -929,6 +981,10 @@ const renderSessions = (workers) => {
             // /lb/{lb_id}/session/{session_id}/{metric}
             const sessionMatch = name.match(/^\/lb\/(\d+)\/session\/(\d+)\/([^\/]+)$/);
             if (sessionMatch) {
+                const lbIdFromMetric = sessionMatch[1];
+                // Only process sessions that belong to the current LB
+                if (lbIdFromMetric !== currentSelectedLbId) return;
+
                 const sessionId = sessionMatch[2];
                 const metricName = sessionMatch[3];
 
@@ -1375,6 +1431,7 @@ const renderSessions = (workers) => {
         try {
             const statusData = await apiFetch(`/lb/${lbId}/status`);
             dashboardTitle.textContent = `Dashboard: ${lbId}`;
+            renderHealthIssues(statusData.health_issues);
             renderSessions(statusData.workers);
             renderSenders(statusData.senderAddresses);
 

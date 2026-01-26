@@ -12,68 +12,89 @@ pub async fn run_checks(db: &LoadBalancerDB) -> Result<(), sqlx::Error> {
     Ok(())
 }
 
-/// Health check: Detect if the number of packets to a receiver has increased for >3s
-/// (via stat_member_sample table) but that receiver has not reported any received packets
-/// (via session_state table) in that same time period.
+/// Health check: Detect if the number of packets to a receiver has increased between
+/// consecutive samples (via stat_member_sample table) but that receiver has not reported
+/// any corresponding increase in received packets (via session_state table) within a 2s
+/// latency window.
 ///
 /// This indicates a potential issue where the FPGA is sending packets to a receiver
 /// but the receiver is not reporting them, suggesting packet loss, misconfiguration,
 /// or receiver failure.
 async fn check_receiver_packet_stall(db: &LoadBalancerDB) -> Result<(), sqlx::Error> {
     let now_ms = Utc::now().timestamp_millis();
-    let three_seconds_ago_ms = now_ms - 3000;
+    let lookback_window_ms = now_ms - 30000; // Look back 30 seconds for member samples
+    let latency_allowance_ms = 2000; // Allow 2 seconds for session_state reporting
 
     // Query to find sessions where:
-    // 1. stat_member_sample shows increasing tx_pkts in the last 3 seconds
-    // 2. session_state shows no increase in total_packets_recv in the last 3 seconds
+    // 1. stat_member_sample shows mbr_tx_pkts increasing between consecutive samples
+    // 2. session_state shows no corresponding increase in total_packets_recv within 2s of the sample
     let problematic_sessions = sqlx::query!(
         r#"
-        WITH member_stats AS (
+        WITH consecutive_samples AS (
             SELECT
                 session_id,
-                MIN(sampled_at) as first_sample_ts,
-                MAX(sampled_at) as last_sample_ts,
-                MIN(mbr_tx_pkts) as first_tx_pkts,
-                MAX(mbr_tx_pkts) as last_tx_pkts
+                sampled_at,
+                mbr_tx_pkts,
+                LAG(sampled_at) OVER (PARTITION BY session_id ORDER BY sampled_at) as prev_sampled_at,
+                LAG(mbr_tx_pkts) OVER (PARTITION BY session_id ORDER BY sampled_at) as prev_mbr_tx_pkts
             FROM stat_member_sample
             WHERE sampled_at >= ?1
               AND session_id IS NOT NULL
-            GROUP BY session_id
-            HAVING COUNT(*) >= 2
-               AND MAX(mbr_tx_pkts) > MIN(mbr_tx_pkts)
         ),
-        session_stats AS (
+        tx_increases AS (
             SELECT
                 session_id,
-                MIN(timestamp) as first_timestamp,
-                MAX(timestamp) as last_timestamp,
-                MIN(total_packets_recv) as first_recv_pkts,
-                MAX(total_packets_recv) as last_recv_pkts
-            FROM session_state
-            WHERE timestamp >= ?1
-            GROUP BY session_id
-            HAVING COUNT(*) >= 1
+                prev_sampled_at as first_sample_ts,
+                sampled_at as last_sample_ts,
+                prev_mbr_tx_pkts as first_tx_pkts,
+                mbr_tx_pkts as last_tx_pkts
+            FROM consecutive_samples
+            WHERE prev_mbr_tx_pkts IS NOT NULL
+              AND mbr_tx_pkts > prev_mbr_tx_pkts
+        ),
+        receiver_responses AS (
+            SELECT
+                ti.session_id,
+                ti.first_sample_ts,
+                ti.last_sample_ts,
+                ti.first_tx_pkts,
+                ti.last_tx_pkts,
+                COALESCE((
+                    SELECT MIN(total_packets_recv)
+                    FROM session_state ss
+                    WHERE ss.session_id = ti.session_id
+                      AND ss.timestamp >= ti.first_sample_ts
+                      AND ss.timestamp <= ti.last_sample_ts + ?2
+                ), 0) as first_recv_pkts,
+                COALESCE((
+                    SELECT MAX(total_packets_recv)
+                    FROM session_state ss
+                    WHERE ss.session_id = ti.session_id
+                      AND ss.timestamp >= ti.first_sample_ts
+                      AND ss.timestamp <= ti.last_sample_ts + ?2
+                ), 0) as last_recv_pkts
+            FROM tx_increases ti
         )
-        SELECT
-            ms.session_id,
-            ms.first_sample_ts,
-            ms.last_sample_ts,
-            ms.first_tx_pkts,
-            ms.last_tx_pkts,
-            COALESCE(ss.first_recv_pkts, 0) as first_recv_pkts,
-            COALESCE(ss.last_recv_pkts, 0) as last_recv_pkts,
+        SELECT DISTINCT
+            rr.session_id,
+            rr.first_sample_ts as "first_sample_ts!: i64",
+            rr.last_sample_ts as "last_sample_ts!: i64",
+            rr.first_tx_pkts as "first_tx_pkts!: i64",
+            rr.last_tx_pkts as "last_tx_pkts!: i64",
+            rr.first_recv_pkts as "first_recv_pkts!: i64",
+            rr.last_recv_pkts as "last_recv_pkts!: i64",
             s.name as session_name,
             s.reservation_id,
             r.loadbalancer_id
-        FROM member_stats ms
-        LEFT JOIN session_stats ss ON ms.session_id = ss.session_id
-        JOIN session s ON ms.session_id = s.id
+        FROM receiver_responses rr
+        JOIN session s ON rr.session_id = s.id
         JOIN reservation r ON s.reservation_id = r.id
         WHERE s.deleted_at IS NULL
           AND r.deleted_at IS NULL
-          AND (ss.session_id IS NULL OR ss.last_recv_pkts = ss.first_recv_pkts)
+          AND rr.last_recv_pkts = rr.first_recv_pkts
         "#,
-        three_seconds_ago_ms
+        lookback_window_ms,
+        latency_allowance_ms
     )
     .fetch_all(&db.read_pool)
     .await?;
@@ -86,12 +107,8 @@ async fn check_receiver_packet_stall(db: &LoadBalancerDB) -> Result<(), sqlx::Er
         let session_name = row.session_name;
         let reservation_id = row.reservation_id;
         let loadbalancer_id = row.loadbalancer_id;
-        let Some(last_tx_pkts) = row.last_tx_pkts else {
-            continue;
-        };
-        let Some(first_tx_pkts) = row.first_tx_pkts else {
-            continue;
-        };
+        let last_tx_pkts = row.last_tx_pkts;
+        let first_tx_pkts = row.first_tx_pkts;
         let tx_pkts_delta = last_tx_pkts - first_tx_pkts;
         let recv_pkts_delta = row.last_recv_pkts - row.first_recv_pkts;
 
@@ -112,7 +129,7 @@ async fn check_receiver_packet_stall(db: &LoadBalancerDB) -> Result<(), sqlx::Er
         if existing_event.is_none() {
             // Create a new event
             let message = format!(
-                "Receiver '{}' (session_id={}) is not reporting received packets despite FPGA sending {} packets in the last 3 seconds",
+                "Receiver '{}' (session_id={}) is not reporting received packets despite FPGA sending {} packets",
                 session_name, session_id, tx_pkts_delta
             );
             let details = serde_json::json!({
