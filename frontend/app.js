@@ -1400,7 +1400,7 @@ const renderSessions = (workers) => {
                 </div>
             `;
         } else {
-            workflowCharts.innerHTML = '<div class="loading">Loading charts...</div>';
+            workflowCharts.innerHTML = '';
             networkCharts.innerHTML = '';
         }
 
