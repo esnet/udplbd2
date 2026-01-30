@@ -168,7 +168,7 @@ button:disabled {
 
 .left-sidebar li.disabled-lb {
     opacity: 0.5;
-    cursor: not-allowed;
+    cursor: pointer;
 }
 
 .left-sidebar .lb-details {
@@ -299,9 +299,25 @@ button:disabled {
     margin-bottom: 25px;
 }
 
-/* Sender Management Panel */
-.sender-management-panel {
+/* Combined Management Panel */
+.combined-management-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
     margin-bottom: 25px;
+}
+
+.sender-management-panel,
+.management-tools {
+    min-width: 0;
+    /* Prevent grid overflow */
+}
+
+.sender-management-panel h3,
+.management-tools h3 {
+    margin-bottom: 15px;
+    font-size: 1.1em;
+    color: var(--text-secondary-color);
 }
 
 .sender-add-form {
@@ -365,14 +381,75 @@ button:disabled {
     color: #ff6b6b;
 }
 
-/* Management Tools */
-.management-tools {
-    margin-bottom: 25px;
+/* Management Actions Section */
+.tool-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
 }
 
-.management-tools .tool-actions {
+.tool-actions button {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+/* Reservation Form */
+#reservation-view .form-group {
+    margin-bottom: 18px;
     display: flex;
-    flex-wrap: wrap;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#reservation-view label {
+    font-size: 0.98em;
+    color: var(--text-secondary-color);
+    margin-bottom: 2px;
+    font-weight: 500;
+}
+
+#reservation-view input[type="text"],
+#reservation-view textarea,
+#reservation-view select {
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    font-size: 0.95em;
+    font-family: inherit;
+    transition: border-color 0.2s ease;
+}
+
+#reservation-view input[type="text"]:focus,
+#reservation-view textarea:focus,
+#reservation-view select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+#reservation-view textarea {
+    resize: vertical;
+    min-height: 100px;
+    line-height: 1.5;
+}
+
+#reservation-view small {
+    font-size: 0.85em;
+    color: var(--text-secondary-color);
+    font-style: italic;
+    margin-top: -2px;
+}
+
+#reservation-view .form-actions {
+    margin-top: 24px;
+    display: flex;
+    gap: 10px;
+}
+
+#reservation-view .form-actions button {
+    padding: 10px 20px;
 }
 
 /* Health Issues Panel */

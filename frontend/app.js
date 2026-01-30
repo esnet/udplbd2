@@ -32,7 +32,6 @@ document.addEventListener('DOMContentLoaded', () => {
     const senderListUl = document.querySelector('#sender-list ul');
     const dynamicChartsArea = document.getElementById('dynamic-charts-area');
     const newSenderIpInput = document.getElementById('new-sender-ip');
-    const filterAllReceivers = document.getElementById('filter-all-receivers');
     const clearReceiverFilter = document.getElementById('clear-receiver-filter');
 
     // Chart tab elements
@@ -55,7 +54,17 @@ document.addEventListener('DOMContentLoaded', () => {
     const logoutBtn = document.getElementById('logout-btn');
     const addSenderBtn = document.getElementById('add-sender-btn');
     const generateChildTokenBtn = document.getElementById('generate-child-token-btn');
-    const fullResetBtn = document.getElementById('full-reset-btn');
+    const freeLbBtn = document.getElementById('free-lb-btn');
+
+    // Reservation Form Elements
+    const reservationView = document.getElementById('reservation-view');
+    const reservationForm = document.getElementById('reservation-form');
+    const reservationNameInput = document.getElementById('reservation-name');
+    const reservationSendersInput = document.getElementById('reservation-senders');
+    const reservationIpFamilySelect = document.getElementById('reservation-ip-family');
+    const reservationStrategySelect = document.getElementById('reservation-strategy');
+    const submitReservationBtn = document.getElementById('submit-reservation-btn');
+    const cancelReservationBtn = document.getElementById('cancel-reservation-btn');
 
     // --- Token Creation UI Elements ---
     const createTokenCard = document.getElementById('create-token-card');
@@ -181,7 +190,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Render all 8 load balancers
-        for (let i = 0; i < totalLoadBalancers; i++) {
+        for (let i = 1; i <= totalLoadBalancers; i++) {
             const fpgaLbId = i.toString();
             const li = document.createElement('li');
             // Check if this LB has an active reservation
@@ -205,7 +214,7 @@ document.addEventListener('DOMContentLoaded', () => {
                     statusTitle = expiresDate ?
                         `Idle (Expires: ${new Date(expiresDate.seconds * 1000).toLocaleString()})` :
                         'Idle (No expiry info)';
-                    disabledClass = 'disabled-lb'; // Add disabled class
+                    // Idle LBs are now selectable, don't add disabled class
                 }
 
                 li.innerHTML = `
@@ -236,8 +245,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     </div>
                 `;
                 li.classList.add('disabled-lb'); // Add disabled class
-                li.dataset.lbId = null;
-                li.dataset.targetPath = `/`; // For SPA navigation
+                // Don't set lbId at all for unreserved LBs (setting to null creates string "null")
+                li.dataset.targetPath = `/lb/reserve`; // Navigate to new LB reservation
             }
 
             lbList.appendChild(li);
@@ -369,7 +378,7 @@ const renderSessions = (workers) => {
         }
 
         li.innerHTML = `
-            <button class="deregister-btn" data-receiver-id="${receiverId}" title="Deregister Session ${receiverId}">
+            <button class="deregister-btn" data-receiver-id="${sessionId}" title="Deregister ${receiverId}">
                 <i class="fas fa-times"></i> Deregister
             </button>
             <div class="receiver-name">${worker.name}</div>
@@ -391,7 +400,7 @@ const renderSessions = (workers) => {
         if (deregBtn) {
             deregBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                handleDeregisterSession(receiverId);
+                handleDeregisterSession(sessionId);
             });
         }
 
@@ -722,7 +731,6 @@ const renderSessions = (workers) => {
         timeseriesBuffer = {}; // Reset buffer on new LB selection
         filteredSessionIds.clear(); // Reset filter on new LB selection
         if (clearReceiverFilter) clearReceiverFilter.style.display = 'none';
-        if (filterAllReceivers) filterAllReceivers.classList.add('active');
 
         // Initial update
         updateCharts(lbId);
@@ -1331,10 +1339,8 @@ const renderSessions = (workers) => {
         // Update UI based on filter state
         if (filteredSessionIds.size === 0) {
             clearReceiverFilter.style.display = 'none';
-            filterAllReceivers.classList.add('active');
         } else {
             clearReceiverFilter.style.display = 'inline-block';
-            filterAllReceivers.classList.remove('active');
         }
 
         // Update receiver list styling
@@ -1698,14 +1704,14 @@ const renderSessions = (workers) => {
         });
     }
 
-    // Event delegation only for sidebar navigation
+    // Event delegation for sidebar navigation
     document.addEventListener('click', (event) => {
         // Left Sidebar LB items
         const lbItem = event.target.closest('.left-sidebar li[data-target-path]');
         if (lbItem && lbItem.dataset.targetPath) {
             event.preventDefault();
             navigateTo(lbItem.dataset.targetPath);
-            return; // Handled
+            return;
         }
 
         // Left Sidebar Tool buttons
@@ -1746,8 +1752,8 @@ const renderSessions = (workers) => {
         if (!confirm(`Deregister receiver "${receiverId}"?`)) return;
         console.log(`Attempting to deregister receiver: ${receiverId}`);
         try {
-            await apiFetch(`/receivers/${receiverId}`, { method: 'DELETE' });
-            alert(`Session ${receiverId} deregistered successfully.`);
+            await apiFetch(`/sessions/${receiverId}`, { method: 'DELETE' });
+            showToast(`session ${receiverId} deregistered`);
             if (currentSelectedLbId) { // Refresh if dashboard is visible
                 const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
                 renderSessions(statusData.workers);
@@ -1880,49 +1886,212 @@ const renderSessions = (workers) => {
         }
     };
 
-    const handleFullReset = async () => {
-        if (!currentSelectedLbId) return alert("Select a Load Balancer to reset.");
+    const handleReservationSubmit = async (e) => {
+        e.preventDefault();
 
-        if (!confirm(`FULL RESET: Deregister ALL receivers and remove ALL senders for LB ${currentSelectedLbId}? IRREVERSIBLE.`)) return;
+        const name = reservationNameInput.value.trim();
+        if (!name) {
+            showToast('Reservation name is required', 'error');
+            return;
+        }
 
-        console.warn(`Performing FULL RESET on LB: ${currentSelectedLbId}`);
-        alert('Starting FULL RESET...');
+        // Parse sender addresses from textarea (one per line)
+        const sendersText = reservationSendersInput.value.trim();
+        const senderAddresses = sendersText
+            .split('\n')
+            .map(line => line.trim())
+            .filter(line => line.length > 0);
+
+        if (senderAddresses.length === 0) {
+            showToast('At least one sender address is required', 'error');
+            return;
+        }
+
+        // Get IP family and strategy from selects
+        const ipFamily = reservationIpFamilySelect.value;
+        const strategy = reservationStrategySelect.value;
+
+        const reservationResultDiv = document.getElementById('reservation-result');
 
         try {
-            const statusData = await apiFetch(`/lb/${currentSelectedLbId}/status`);
-            const workers = statusData.workers || [];
-            const senders = statusData.senderAddresses || [];
+            submitReservationBtn.disabled = true;
+            submitReservationBtn.textContent = 'Reserving...';
+            reservationResultDiv.textContent = '';
+            reservationResultDiv.className = 'reservation-result';
 
-            // Deregister workers
-            console.log(`Deregistering ${workers.length} workers...`);
-            const deregPromises = workers.map(w =>
-                apiFetch(`/receivers/${w.name}`, { method: 'DELETE' })
-                    .catch(err => console.error(`Failed deregister ${w.name}:`, err))
-            );
-            await Promise.allSettled(deregPromises);
-            console.log("Finished worker deregistration attempt.");
+            const response = await apiFetch('/lb', {
+                method: 'POST',
+                body: JSON.stringify({
+                    name: name,
+                    sender_addresses: senderAddresses,
+                    ip_family: ipFamily,
+                    strategy: strategy
+                })
+            });
 
-            // Remove senders
-            if (senders.length > 0) {
-                console.log(`Removing ${senders.length} senders...`);
-                await apiFetch(`/lb/${currentSelectedLbId}/senders`, {
-                    method: 'DELETE',
-                    body: JSON.stringify({ sender_addresses: senders })
-                });
-                console.log("Finished removing senders.");
+            // Construct EJFAT_URI from response to match backend implementation
+            const token = response.token;
+            const lbId = response.lb_id;
+            const syncAddrV4 = response.sync_ipv4_address;
+            const syncAddrV6 = response.sync_ipv6_address;
+            const syncPort = response.sync_udp_port;
+            const dataAddrV4 = response.data_ipv4_address;
+            const dataAddrV6 = response.data_ipv6_address;
+            const dataMinPort = response.data_min_port;
+            const dataMaxPort = response.data_max_port;
+
+            // Construct the EJFAT URI matching the backend format in src/api/client.rs
+            // Format: ejfats://token@host:port/lb/{lb_id}?sync={ip}:{port}&data={ip}:{min}-{max}
+            const currentHost = window.location.host; // hostname only, not including port
+
+            // Build query parameters
+            const queryParams = [];
+
+            // Add sync parameters (both IPv4 and IPv6 if available)
+            if (syncAddrV4) {
+                queryParams.push(`sync=${syncAddrV4}:${syncPort}`);
+            }
+            if (syncAddrV6) {
+                queryParams.push(`sync=[${syncAddrV6}]:${syncPort}`);
             }
 
-            alert(`FULL RESET complete for LB ${currentSelectedLbId}.`);
+            // Add data parameters (both IPv4 and IPv6 if available)
+            if (dataAddrV4) {
+                queryParams.push(`data=${dataAddrV4}:${dataMinPort}-${dataMaxPort}`);
+            }
+            if (dataAddrV6) {
+                queryParams.push(`data=[${dataAddrV6}]:${dataMinPort}-${dataMaxPort}`);
+            }
 
-            // Refresh UI
-            const finalStatus = await apiFetch(`/lb/${currentSelectedLbId}/status`);
-            renderSessions(finalStatus.workers);
-            renderSenders(finalStatus.senderAddresses);
+            const ejfatUri = `ejfats://${token}@${currentHost}/lb/${lbId}?${queryParams.join('&')}`;
+
+            // Display the EJFAT_URI with a warning
+            reservationResultDiv.innerHTML = `
+                <div style="margin-top: 20px; padding: 20px; background-color: var(--card-bg); border: 2px solid var(--success-color); border-radius: 8px;">
+                    <h4 style="color: var(--success-color); margin-top: 0;">
+                        <i class="fas fa-check-circle"></i> Reservation Successful
+                    </h4>
+                    <p style="margin-bottom: 15px;"><strong>EJFAT_URI</strong></p>
+                    <div style="background-color: #1a1a1a; padding: 12px; border-radius: 4px; margin-bottom: 15px; overflow-x: auto;">
+                        <code style="color: #00ff00; font-size: 14px; word-break: break-all;">${ejfatUri}</code>
+                    </div>
+                    <div style="background-color: #3a2a00; border-left: 4px solid #ffcc00; padding: 12px; margin-bottom: 15px;">
+                        <p style="margin: 0; color: #ffcc00;">
+                            <i class="fas fa-exclamation-triangle"></i> <strong>IMPORTANT:</strong>
+                            This EJFAT URI contains your authentication token and will only be shown once.
+                            Store it securely before navigating away from this page.
+                        </p>
+                    </div>
+                    <button id="copy-ejfat-uri-btn" class="action-button" style="margin-right: 10px;">
+                        <i class="fas fa-copy"></i> Copy to Clipboard
+                    </button>
+                    <button id="view-lb-dashboard-btn" class="action-button">
+                        <i class="fas fa-chart-line"></i> View Dashboard
+                    </button>
+                </div>
+            `;
+
+            // Add copy functionality
+            const copyBtn = document.getElementById('copy-ejfat-uri-btn');
+            if (copyBtn) {
+                copyBtn.addEventListener('click', async () => {
+                    try {
+                        await navigator.clipboard.writeText(ejfatUri);
+                        copyBtn.innerHTML = '<i class="fas fa-check"></i> Copied!';
+                        showToast('EJFAT URI copied to clipboard', 'success');
+                        setTimeout(() => {
+                            copyBtn.innerHTML = '<i class="fas fa-copy"></i> Copy to Clipboard';
+                        }, 2000);
+                    } catch (err) {
+                        showToast('Failed to copy to clipboard', 'error');
+                    }
+                });
+            }
+
+            // Add dashboard navigation
+            const viewDashboardBtn = document.getElementById('view-lb-dashboard-btn');
+            if (viewDashboardBtn) {
+                viewDashboardBtn.addEventListener('click', async () => {
+                    // Refresh the overview to update the sidebar
+                    const overviewData = await apiFetch('/overview');
+                    renderLoadBalancers(overviewData);
+                    // Navigate to the newly reserved LB
+                    navigateTo(`/lb/${response.lb_id}`);
+                });
+            }
+
+            showToast(`Load Balancer reserved successfully!`, 'success');
+
+            // Disable the form to prevent re-submission
+            submitReservationBtn.style.display = 'none';
+            reservationNameInput.disabled = true;
+            reservationSendersInput.disabled = true;
+            reservationIpFamilySelect.disabled = true;
+            reservationStrategySelect.disabled = true;
+
         } catch (error) {
-            console.error("Error during FULL RESET:", error);
-            alert(`Error during FULL RESET: ${error.message}.`);
+            console.error('Failed to reserve load balancer:', error);
+            reservationResultDiv.textContent = '';
+            // Error already shown by apiFetch
+        } finally {
+            if (!reservationResultDiv.innerHTML) {
+                submitReservationBtn.disabled = false;
+                submitReservationBtn.textContent = 'Reserve';
+            }
         }
     };
+
+    const handleFreeLb = async () => {
+        if (!currentSelectedLbId) {
+            showToast('No load balancer selected', 'error');
+            return;
+        }
+
+        if (!confirm(`Free Load Balancer ${currentSelectedLbId}? This will remove the reservation and all sessions.`)) {
+            return;
+        }
+
+        try {
+            freeLbBtn.disabled = true;
+            freeLbBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Freeing...';
+
+            await apiFetch(`/lb/${currentSelectedLbId}`, {
+                method: 'DELETE'
+            });
+
+            showToast(`Load Balancer ${currentSelectedLbId} freed successfully!`, 'success');
+
+            // Refresh the overview to update the sidebar
+            const overviewData = await apiFetch('/overview');
+            renderLoadBalancers(overviewData);
+
+            // Navigate back to home
+            navigateTo('/');
+
+        } catch (error) {
+            console.error('Failed to free load balancer:', error);
+            // Error already shown by apiFetch
+        } finally {
+            freeLbBtn.disabled = false;
+            freeLbBtn.innerHTML = '<i class="fas fa-unlock"></i> Free Load Balancer';
+        }
+    };
+
+    // Attach event listeners for reservation form
+    if (reservationForm) {
+        reservationForm.addEventListener('submit', handleReservationSubmit);
+    }
+    if (cancelReservationBtn) {
+        cancelReservationBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            navigateTo('/'); // Navigate back to home
+        });
+    }
+
+    // Attach free LB button listener
+    if (freeLbBtn) {
+        freeLbBtn.addEventListener('click', handleFreeLb);
+    }
 
     // Attach direct event listeners to static buttons (moved after function definitions)
     if (addSenderBtn) {
@@ -1930,32 +2099,6 @@ const renderSessions = (workers) => {
     }
     if (generateChildTokenBtn) {
         generateChildTokenBtn.addEventListener('click', handleGenerateChildToken);
-    }
-    if (fullResetBtn) {
-        fullResetBtn.addEventListener('click', handleFullReset);
-    }
-
-    // Filter button listeners
-    if (filterAllReceivers) {
-        filterAllReceivers.addEventListener('click', () => {
-            filteredSessionIds.clear();
-            clearReceiverFilter.style.display = 'none';
-            filterAllReceivers.classList.add('active');
-
-            // Update receiver list styling
-            document.querySelectorAll('#receiver-list li').forEach(li => {
-                li.classList.remove('filtered-receiver');
-            });
-
-            // Re-render charts
-            const bufferedTimeseriesData = {
-                timeseries: Object.entries(timeseriesBuffer).map(([name, data]) => ({
-                    name,
-                    timeseries: { FloatSamples: { data } }
-                }))
-            };
-            renderCharts(bufferedTimeseriesData);
-        });
     }
 
     if (clearReceiverFilter) {
@@ -2018,13 +2161,6 @@ const renderSessions = (workers) => {
     const navigateTo = (path, replace = false) => {
         if (!AUTH_TOKEN) return showAuthModal("Please authenticate first."); // Don't navigate if not logged in
 
-        // Check if the target is a disabled LB
-        const targetElement = document.querySelector(`.left-sidebar li[data-target-path="${path}"]`);
-        if (targetElement && targetElement.classList.contains('disabled-lb')) {
-            console.log("Navigation prevented: Target LB is disabled.");
-            return; // Do not navigate
-        }
-
         // Prevent pushing the same path multiple times consecutively
         if (path === currentPath && !replace) return;
 
@@ -2058,9 +2194,37 @@ const renderSessions = (workers) => {
             switchView('placeholder-view');
             currentSelectedLbId = null;
         } else if (segments[0] === 'lb' && segments[1]) {
-            // Load Balancer Detail View
-            const lbId = segments[1];
-            showDashboardView(lbId);
+            if (segments[1] === 'reserve') {
+                // New LB Reservation View
+                stopChartPolling();
+                currentSelectedLbId = null;
+                switchView('reservation-view');
+
+                // Reset the form completely to allow reuse
+                reservationForm.reset();
+
+                // Re-enable all form elements
+                submitReservationBtn.style.display = 'inline-block';
+                submitReservationBtn.disabled = false;
+                submitReservationBtn.textContent = 'Reserve';
+                reservationNameInput.disabled = false;
+                reservationSendersInput.disabled = false;
+                reservationIpFamilySelect.disabled = false;
+                reservationStrategySelect.disabled = false;
+
+                // Clear the result area
+                const reservationResultDiv = document.getElementById('reservation-result');
+                if (reservationResultDiv) {
+                    reservationResultDiv.innerHTML = '';
+                    reservationResultDiv.className = 'reservation-result';
+                }
+
+                reservationNameInput.focus();
+            } else {
+                // Load Balancer Detail View
+                const lbId = segments[1];
+                showDashboardView(lbId);
+            }
         } else if (segments[0] === 'tools') {
             if (segments[1] === 'tokens') {
                 // Token Management View

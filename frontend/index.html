@@ -39,6 +39,53 @@
                 <p class="loading" id="initial-load-indicator" style="display: none;">Loading requested view...</p>
             </div>
 
+            <div id="reservation-view" class="content-view">
+                <h2>Reserve Load Balancer</h2>
+                <div class="card">
+                    <h3>New Load Balancer Reservation</h3>
+                    <form id="reservation-form">
+                        <div class="form-group">
+                            <label for="reservation-name">Name: *</label>
+                            <input type="text" id="reservation-name" name="name" placeholder="Enter reservation name"
+                                required>
+                        </div>
+                        <div class="form-group">
+                            <label for="reservation-senders">Sender Addresses: *</label>
+                            <textarea id="reservation-senders" name="senders"
+                                placeholder="Enter sender IP addresses (one per line)&#10;e.g.,&#10;192.168.1.100&#10;2001:db8::1"
+                                rows="4" required></textarea>
+                            <small>Enter one or more IPv4 or IPv6 addresses, one per line</small>
+                        </div>
+                        <div class="form-group">
+                            <label for="reservation-ip-family">IP Family:</label>
+                            <select id="reservation-ip-family" name="ip_family">
+                                <option value="dual_stack">Dual Stack (IPv4 + IPv6)</option>
+                                <option value="ipv4">IPv4 Only</option>
+                                <option value="ipv6">IPv6 Only</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="reservation-strategy">Slot Assignment Strategy:</label>
+                            <select id="reservation-strategy" name="strategy">
+                                <option value="dynamic">Dynamic (recommended)</option>
+                                <option value="static">Static</option>
+                                <option value="explicit">Explicit</option>
+                            </select>
+                            <small>Dynamic: balance slots according to control signals (recommended)</small>
+                        </div>
+                        <div class="form-actions">
+                            <button type="submit" id="submit-reservation-btn" class="action-button">
+                                <i class="fas fa-check"></i> Reserve Load Balancer
+                            </button>
+                            <button type="button" id="cancel-reservation-btn" class="action-button">
+                                <i class="fas fa-times"></i> Cancel
+                            </button>
+                        </div>
+                        <div id="reservation-result" class="reservation-result"></div>
+                    </form>
+                </div>
+            </div>
+
             <div id="dashboard-view" class="content-view">
                 <h2 id="dashboard-lb-title">Load Balancer Dashboard</h2>
 
@@ -48,29 +95,34 @@
                     <div id="health-issues-list"></div>
                 </div>
 
-                <!-- Sender Management Panel -->
-                <div class="sender-management-panel card">
-                    <h3>Sender Management</h3>
-                    <div class="sender-add-form">
-                        <input type="text" id="new-sender-ip" placeholder="Enter Sender IP Address">
-                        <button id="add-sender-btn" class="action-button"><i class="fas fa-plus"></i> Add</button>
+                <!-- Combined Management Panel -->
+                <div class="combined-management-panel">
+                    <!-- Sender Management -->
+                    <div class="sender-management-panel card">
+                        <h3>Sender Management</h3>
+                        <div class="sender-add-form">
+                            <input type="text" id="new-sender-ip" placeholder="Enter Sender IP Address">
+                            <button id="add-sender-btn" class="action-button"><i class="fas fa-plus"></i> Add</button>
+                        </div>
+                        <div id="sender-list" class="sender-list">
+                            <h4>Allowed Senders:</h4>
+                            <ul>
+                                <!-- Senders will be populated here -->
+                            </ul>
+                        </div>
                     </div>
-                    <div id="sender-list" class="sender-list">
-                        <h4>Allowed Senders:</h4>
-                        <ul>
-                            <!-- Senders will be populated here -->
-                        </ul>
-                    </div>
-                </div>
 
-                <!-- Management Tools -->
-                <div class="management-tools card">
-                    <h3>Management Actions</h3>
-                    <div class="tool-actions">
-                        <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
-                            Generate Child Token</button>
-                        <button id="full-reset-btn" class="action-button danger-button"><i
-                                class="fas fa-exclamation-triangle"></i> FULL RESET</button>
+                    <!-- Management Actions -->
+                    <div class="management-tools card">
+                        <h3>Management Actions</h3>
+                        <div class="tool-actions">
+                            <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
+                                Generate Child Token</button>
+                            <!-- <button id="full-reset-btn" class="action-button danger-button"><i
+                                    class="fas fa-exclamation-triangle"></i> Clear Senders and Receivers</button> -->
+                            <button id="free-lb-btn" class="action-button danger-button"><i class="fas fa-trash"></i>
+                                Free Load Balancer Reservation</button>
+                        </div>
                     </div>
                 </div>
 
@@ -146,10 +198,8 @@
         <aside class="sidebar right-sidebar">
             <div class="receiver-filter-section">
                 <h2>Receivers</h2>
+                <br>
                 <div class="filter-controls">
-                    <button id="filter-all-receivers" class="filter-button active" title="Show all receivers">
-                        All
-                    </button>
                     <button id="clear-receiver-filter" class="filter-button" title="Clear filter"
                         style="display: none;">
                         Clear Filter
