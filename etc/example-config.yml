@@ -1,6 +1,6 @@
 # Load balancer configuration
 lb:
-  # [MAC address, string] Unicast MAC address for L2 rules, leave unset to fetch from sn-cfg
+  # [MAC address, string] Unicast MAC address for L2 rules, set to null or delete to fetch from sn-cfg
   mac_unicast: null # "02:00:DE:CA:FB:AD"
   # [String, optional] Network interface name to use for MAC address lookups (must be on same LAN as FPGA)
   # If not specified, all interfaces will be searched

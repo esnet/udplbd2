@@ -62,6 +62,19 @@ impl std::fmt::Display for HealthCheckSeverity {
     }
 }
 
+impl std::str::FromStr for HealthCheckSeverity {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s {
+            "warning" => Ok(HealthCheckSeverity::Warning),
+            "error" => Ok(HealthCheckSeverity::Error),
+            "critical" => Ok(HealthCheckSeverity::Critical),
+            _ => Err(format!("unknown severity: {}", s)),
+        }
+    }
+}
+
 /// Represents a health check event that has been detected.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HealthCheckEvent {
@@ -168,11 +181,12 @@ mod tests {
 
     #[test]
     fn test_event_builder() {
-        let event = HealthCheckEvent::new("test_event", HealthCheckSeverity::Warning, "Test message")
-            .with_session(1)
-            .with_reservation(2)
-            .with_loadbalancer(3)
-            .with_details("test details");
+        let event =
+            HealthCheckEvent::new("test_event", HealthCheckSeverity::Warning, "Test message")
+                .with_session(1)
+                .with_reservation(2)
+                .with_loadbalancer(3)
+                .with_details("test details");
 
         assert_eq!(event.event_type, "test_event");
         assert_eq!(event.severity, HealthCheckSeverity::Warning);

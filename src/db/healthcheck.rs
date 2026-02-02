@@ -5,6 +5,7 @@ use crate::db::LoadBalancerDB;
 use crate::errors::Result;
 use crate::healthcheck::{HealthCheckEvent, HealthCheckSeverity};
 use chrono::{DateTime, Utc};
+use std::str::FromStr;
 
 impl LoadBalancerDB {
     /// Insert a new healthcheck event into the database.
@@ -52,29 +53,21 @@ impl LoadBalancerDB {
         .fetch_optional(&self.read_pool)
         .await?;
 
-        Ok(record.map(|r| {
-            let severity = match r.severity.as_str() {
-                "warning" => HealthCheckSeverity::Warning,
-                "error" => HealthCheckSeverity::Error,
-                "critical" => HealthCheckSeverity::Critical,
-                _ => HealthCheckSeverity::Error,
-            };
-
-            HealthCheckEvent {
-                id: Some(r.id),
-                event_type: r.event_type,
-                severity,
-                loadbalancer_id: r.loadbalancer_id,
-                reservation_id: r.reservation_id,
-                session_id: r.session_id,
-                message: r.message,
-                details: r.details,
-                detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
-                    .unwrap_or_else(Utc::now),
-                resolved_at: r
-                    .resolved_at
-                    .and_then(DateTime::<Utc>::from_timestamp_millis),
-            }
+        Ok(record.map(|r| HealthCheckEvent {
+            id: Some(r.id),
+            event_type: r.event_type,
+            severity: HealthCheckSeverity::from_str(&r.severity)
+                .unwrap_or(HealthCheckSeverity::Error),
+            loadbalancer_id: r.loadbalancer_id,
+            reservation_id: r.reservation_id,
+            session_id: r.session_id,
+            message: r.message,
+            details: r.details,
+            detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
+                .unwrap_or_else(Utc::now),
+            resolved_at: r
+                .resolved_at
+                .and_then(DateTime::<Utc>::from_timestamp_millis),
         }))
     }
 
@@ -99,29 +92,21 @@ impl LoadBalancerDB {
 
         Ok(records
             .into_iter()
-            .map(|r| {
-                let severity = match r.severity.as_str() {
-                    "warning" => HealthCheckSeverity::Warning,
-                    "error" => HealthCheckSeverity::Error,
-                    "critical" => HealthCheckSeverity::Critical,
-                    _ => HealthCheckSeverity::Error,
-                };
-
-                HealthCheckEvent {
-                    id: Some(r.id),
-                    event_type: r.event_type,
-                    severity,
-                    loadbalancer_id: r.loadbalancer_id,
-                    reservation_id: r.reservation_id,
-                    session_id: r.session_id,
-                    message: r.message,
-                    details: r.details,
-                    detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
-                        .unwrap_or_else(Utc::now),
-                    resolved_at: r
-                        .resolved_at
-                        .and_then(DateTime::<Utc>::from_timestamp_millis),
-                }
+            .map(|r| HealthCheckEvent {
+                id: Some(r.id),
+                event_type: r.event_type,
+                severity: HealthCheckSeverity::from_str(&r.severity)
+                    .unwrap_or(HealthCheckSeverity::Error),
+                loadbalancer_id: r.loadbalancer_id,
+                reservation_id: r.reservation_id,
+                session_id: r.session_id,
+                message: r.message,
+                details: r.details,
+                detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
+                    .unwrap_or_else(Utc::now),
+                resolved_at: r
+                    .resolved_at
+                    .and_then(DateTime::<Utc>::from_timestamp_millis),
             })
             .collect())
     }
@@ -147,29 +132,21 @@ impl LoadBalancerDB {
 
         Ok(records
             .into_iter()
-            .map(|r| {
-                let severity = match r.severity.as_str() {
-                    "warning" => HealthCheckSeverity::Warning,
-                    "error" => HealthCheckSeverity::Error,
-                    "critical" => HealthCheckSeverity::Critical,
-                    _ => HealthCheckSeverity::Error,
-                };
-
-                HealthCheckEvent {
-                    id: Some(r.id),
-                    event_type: r.event_type,
-                    severity,
-                    loadbalancer_id: r.loadbalancer_id,
-                    reservation_id: r.reservation_id,
-                    session_id: r.session_id,
-                    message: r.message,
-                    details: r.details,
-                    detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
-                        .unwrap_or_else(Utc::now),
-                    resolved_at: r
-                        .resolved_at
-                        .and_then(DateTime::<Utc>::from_timestamp_millis),
-                }
+            .map(|r| HealthCheckEvent {
+                id: Some(r.id),
+                event_type: r.event_type,
+                severity: HealthCheckSeverity::from_str(&r.severity)
+                    .unwrap_or(HealthCheckSeverity::Error),
+                loadbalancer_id: r.loadbalancer_id,
+                reservation_id: r.reservation_id,
+                session_id: r.session_id,
+                message: r.message,
+                details: r.details,
+                detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
+                    .unwrap_or_else(Utc::now),
+                resolved_at: r
+                    .resolved_at
+                    .and_then(DateTime::<Utc>::from_timestamp_millis),
             })
             .collect())
     }
@@ -195,29 +172,21 @@ impl LoadBalancerDB {
 
         Ok(records
             .into_iter()
-            .map(|r| {
-                let severity = match r.severity.as_str() {
-                    "warning" => HealthCheckSeverity::Warning,
-                    "error" => HealthCheckSeverity::Error,
-                    "critical" => HealthCheckSeverity::Critical,
-                    _ => HealthCheckSeverity::Error,
-                };
-
-                HealthCheckEvent {
-                    id: Some(r.id),
-                    event_type: r.event_type,
-                    severity,
-                    loadbalancer_id: r.loadbalancer_id,
-                    reservation_id: r.reservation_id,
-                    session_id: r.session_id,
-                    message: r.message,
-                    details: r.details,
-                    detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
-                        .unwrap_or_else(Utc::now),
-                    resolved_at: r
-                        .resolved_at
-                        .and_then(DateTime::<Utc>::from_timestamp_millis),
-                }
+            .map(|r| HealthCheckEvent {
+                id: Some(r.id),
+                event_type: r.event_type,
+                severity: HealthCheckSeverity::from_str(&r.severity)
+                    .unwrap_or(HealthCheckSeverity::Error),
+                loadbalancer_id: r.loadbalancer_id,
+                reservation_id: r.reservation_id,
+                session_id: r.session_id,
+                message: r.message,
+                details: r.details,
+                detected_at: DateTime::<Utc>::from_timestamp_millis(r.detected_at)
+                    .unwrap_or_else(Utc::now),
+                resolved_at: r
+                    .resolved_at
+                    .and_then(DateTime::<Utc>::from_timestamp_millis),
             })
             .collect())
     }

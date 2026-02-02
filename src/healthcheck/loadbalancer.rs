@@ -7,8 +7,6 @@ use crate::db::LoadBalancerDB;
 pub async fn run_checks(_db: &LoadBalancerDB) -> Result<(), sqlx::Error> {
     // TODO: Add load balancer health checks here
     // Examples:
-    // - LB configuration validation
-    // - Port conflicts
-    // - MAC address conflicts
+    // - High drop rates
     Ok(())
 }

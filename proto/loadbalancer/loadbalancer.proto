@@ -161,7 +161,7 @@ message WorkerStatus {
     int64 totalPacketsRecv = 18;  // from latest SendState
 	repeated SlotRange slots = 19; // the slots that were assigned in the latest epoch
 	repeated SlotRange slotDemands = 20; // the slots that are explicitly demanded by this worker
-	repeated HealthIssue health_issues = 21; // active health check issues for this worker
+	repeated HealthIssue healthIssues = 21; // active health check issues for this worker
 	int64 sessionId = 22; // session ID from database
 }
 message LoadBalancerStatusReply {
@@ -172,7 +172,7 @@ message LoadBalancerStatusReply {
 	repeated string senderAddresses = 5;
 	google.protobuf.Timestamp expiresAt = 6; // When this LB expires
 	uint32 slotResolution = 11; // total number of slots used for this LB, a power of two
-	repeated HealthIssue health_issues = 12; // active health check issues for this load balancer
+	repeated HealthIssue healthIssues = 12; // active health check issues for this load balancer
 }
 
 

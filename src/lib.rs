@@ -307,7 +307,7 @@ pub async fn start_mocked_server(
         ipv6: Some("::1".parse().unwrap()),
         event_number_port: config.lb.instances[0].event_number_port,
     }];
-    if sim_config.lb.mac_unicast.is_none() {
+    if sim_config.lb.mac_unicast.is_none() || sim_config.lb.mac_unicast.as_deref() == Some("") {
         sim_config.lb.mac_unicast = Some("02:00:DE:CA:FB:AD".to_string());
     }
 
