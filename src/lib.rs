@@ -364,7 +364,7 @@ pub async fn start_mocked_server(
             .lb
             .mac_unicast
             .as_ref()
-            .expect("no unicast mac address configured")
+            .unwrap_or(&"02:00:DE:CA:FB:AD".to_string())
             .parse()?,
         sync_addr_v4,
         sync_addr_v6,
