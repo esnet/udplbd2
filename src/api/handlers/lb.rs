@@ -11,9 +11,11 @@ use tracing::{info, warn};
 use super::super::service::LoadBalancerService;
 use crate::db::models::{Permission, PermissionType, Resource};
 use crate::proto::loadbalancer::v1::{
-    AddSendersReply, AddSendersRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
-    GetLoadBalancerRequest, LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply,
-    RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, WorkerStatus,
+    AddSendersReply, AddSendersRequest, ExtendReservationReply, ExtendReservationRequest,
+    FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest,
+    LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply, RemoveSendersRequest,
+    ReserveLoadBalancerReply, ReserveLoadBalancerRequest, ResetLoadBalancerReply,
+    ResetLoadBalancerRequest, WorkerStatus,
 };
 use crate::util::is_valid_name;
 
@@ -665,5 +667,140 @@ impl LoadBalancerService {
         );
 
         Ok(Response::new(RemoveSendersReply {}))
+    }
+
+    pub(crate) async fn handle_reset_load_balancer(
+        &self,
+        request: Request<ResetLoadBalancerRequest>,
+    ) -> Result<Response<ResetLoadBalancerReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+
+        let (ok, token_id) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::Update,
+            )
+            .await?;
+        if !ok {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "reset_load_balancer: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
+            );
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        if request.sync {
+            self.db
+                .clear_sync_data(reservation_id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to clear sync data: {e}")))?;
+        }
+
+        if request.epochs {
+            self.db
+                .clear_epochs(reservation_id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to clear epochs: {e}")))?;
+        }
+
+        if request.senders {
+            self.db
+                .clear_senders(reservation_id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to clear senders: {e}")))?;
+        }
+
+        if request.workers {
+            self.db
+                .clear_sessions(reservation_id)
+                .await
+                .map_err(|e| Status::internal(format!("Failed to clear workers: {e}")))?;
+        }
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "reset_load_balancer: reservation_id={}, sync={}, epochs={}, senders={}, workers={}, token_id={:?}, source={}",
+            reservation_id, request.sync, request.epochs, request.senders, request.workers, token_id, src
+        );
+
+        Ok(Response::new(ResetLoadBalancerReply {
+            sync: request.sync,
+            epochs: request.epochs,
+            senders: request.senders,
+            workers: request.workers,
+        }))
+    }
+
+    pub(crate) async fn handle_extend_reservation(
+        &self,
+        request: Request<ExtendReservationRequest>,
+    ) -> Result<Response<ExtendReservationReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+
+        let (ok, token_id) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::Update,
+            )
+            .await?;
+        if !ok {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "extend_reservation: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
+            );
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        let until = request.until.map(|ts| {
+            Utc.timestamp_opt(ts.seconds, ts.nanos as u32)
+                .single()
+                .expect("Invalid timestamp")
+        });
+
+        let new_until = self
+            .db
+            .extend_reservation(reservation_id, until)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to extend reservation: {e}")))?;
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "extend_reservation: reservation_id={}, new_until={}, token_id={:?}, source={}",
+            reservation_id, new_until, token_id, src
+        );
+
+        Ok(Response::new(ExtendReservationReply {
+            until: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
+                new_until,
+            ))),
+        }))
     }
 }

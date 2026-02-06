@@ -4,11 +4,13 @@ use crate::errors::Error;
 use crate::proto::loadbalancer::v1::{
     load_balancer_client::LoadBalancerClient, token_selector, AddSendersReply, AddSendersRequest,
     CreateTokenReply, CreateTokenRequest, DeregisterReply, DeregisterRequest,
-    FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensReply,
+    ExtendReservationReply, ExtendReservationRequest, FreeLoadBalancerReply,
+    FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensReply,
     ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest, OverviewReply,
     OverviewRequest, PortRange, RegisterReply, RegisterRequest, RemoveSendersReply,
-    RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply,
-    RevokeTokenRequest, SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
+    RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest,
+    ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
+    SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
     SetSlotDemandsRequest, TokenPermission, TokenSelector, VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
@@ -160,6 +162,40 @@ impl ControlPlaneClient {
         let reply = self.client.free_load_balancer(request).await?;
         self.lb_id = None;
         Ok(reply)
+    }
+
+    pub async fn reset_load_balancer(
+        &mut self,
+        sync: bool,
+        epochs: bool,
+        senders: bool,
+        workers: bool,
+    ) -> std::result::Result<tonic::Response<ResetLoadBalancerReply>, tonic::Status> {
+        let request = ResetLoadBalancerRequest {
+            lb_id: self
+                .lb_id
+                .clone()
+                .expect("cannot reset_load_balancer when lb_id is None"),
+            sync,
+            epochs,
+            senders,
+            workers,
+        };
+        self.client.reset_load_balancer(request).await
+    }
+
+    pub async fn extend_reservation(
+        &mut self,
+        until: Option<Timestamp>,
+    ) -> std::result::Result<tonic::Response<ExtendReservationReply>, tonic::Status> {
+        let request = ExtendReservationRequest {
+            lb_id: self
+                .lb_id
+                .clone()
+                .expect("cannot extend_reservation when lb_id is None"),
+            until,
+        };
+        self.client.extend_reservation(request).await
     }
 
     #[allow(clippy::too_many_arguments)]

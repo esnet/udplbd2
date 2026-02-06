@@ -3,14 +3,16 @@ use crate::{
     metrics::INBOUND_GRPC,
     proto::loadbalancer::v1::{
         load_balancer_server, AddSendersReply, AddSendersRequest, CreateTokenReply,
-        CreateTokenRequest, DeregisterReply, DeregisterRequest, FreeLoadBalancerReply,
-        FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensReply,
-        ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest,
-        LoadBalancerStatusReply, LoadBalancerStatusRequest, OverviewReply, OverviewRequest,
-        RegisterReply, RegisterRequest, RemoveSendersReply, RemoveSendersRequest,
-        ReserveLoadBalancerReply, ReserveLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
-        SendStateReply, SendStateRequest, SetSlotDemandsReply, SetSlotDemandsRequest,
-        TimeseriesRequest, TimeseriesResponse, VersionReply, VersionRequest,
+        CreateTokenRequest, DeregisterReply, DeregisterRequest, ExtendReservationReply,
+        ExtendReservationRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
+        GetLoadBalancerRequest, ListChildTokensReply, ListChildTokensRequest,
+        ListTokenPermissionsReply, ListTokenPermissionsRequest, LoadBalancerStatusReply,
+        LoadBalancerStatusRequest, OverviewReply, OverviewRequest, RegisterReply, RegisterRequest,
+        RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
+        ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest,
+        RevokeTokenReply, RevokeTokenRequest, SendStateReply, SendStateRequest,
+        SetSlotDemandsReply, SetSlotDemandsRequest, TimeseriesRequest, TimeseriesResponse,
+        VersionReply, VersionRequest,
     },
 };
 use tonic::{Request, Response, Status};
@@ -47,6 +49,22 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     ) -> Result<Response<FreeLoadBalancerReply>, Status> {
         INBOUND_GRPC.inc();
         self.handle_free_load_balancer(request).await
+    }
+
+    async fn reset_load_balancer(
+        &self,
+        request: Request<ResetLoadBalancerRequest>,
+    ) -> Result<Response<ResetLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_reset_load_balancer(request).await
+    }
+
+    async fn extend_reservation(
+        &self,
+        request: Request<ExtendReservationRequest>,
+    ) -> Result<Response<ExtendReservationReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_extend_reservation(request).await
     }
 
     async fn add_senders(
