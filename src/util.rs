@@ -318,3 +318,96 @@ impl From<u32> for IpFamily {
         }
     }
 }
+
+/// Resolves slot demands, handling index -1 (auto-placement) and conflict checking.
+///
+/// # Arguments
+/// * `existing_ranges` - Already occupied ranges as (start, end) tuples
+/// * `slot_demands` - Vec of (session_id, slot_index, slot_length) where slot_index -1 means auto-place
+///
+/// # Returns
+/// A Result containing Vec of (session_id, resolved_slot_index, slot_length) with no conflicts,
+/// or an error string describing the conflict.
+pub fn resolve_slot_ranges<T: Clone>(
+    existing_ranges: &[(i32, i32)],
+    slot_demands: Vec<(T, i32, u32)>,
+) -> Result<Vec<(T, i32, u32)>, String> {
+    let mut occupied: Vec<(i32, i32)> = existing_ranges.to_vec();
+    occupied.sort_by_key(|&(start, _)| start);
+
+    let mut resolved = Vec::new();
+    for (session_id, mut slot_index, slot_length) in slot_demands {
+        let range_len = slot_length as i32;
+        if slot_index == -1 {
+            // Find first gap between occupied ranges large enough for range_len
+            let mut prev_end = 0;
+            let mut found = false;
+            for &(occ_start, occ_end) in &occupied {
+                if occ_start - prev_end >= range_len {
+                    slot_index = prev_end;
+                    found = true;
+                    break;
+                }
+                prev_end = occ_end;
+            }
+            // If no gap found, place after last occupied range
+            if !found {
+                slot_index = prev_end;
+            }
+        }
+        // Check for overlap with any occupied range
+        let start = slot_index;
+        let end = start + range_len;
+        for &(occ_start, occ_end) in &occupied {
+            if start < occ_end && end > occ_start {
+                return Err(format!("Slot demand conflict at range [{}, {})", start, end));
+            }
+        }
+        // Insert new range into occupied, keep sorted
+        let insert_pos = occupied.partition_point(|&(s, _)| s < start);
+        occupied.insert(insert_pos, (start, end));
+        resolved.push((session_id, slot_index, slot_length));
+    }
+    Ok(resolved)
+}
+
+#[cfg(test)]
+mod slot_range_tests {
+    use super::*;
+
+    #[test]
+    fn test_resolve_empty_existing() {
+        let existing: Vec<(i32, i32)> = vec![];
+        let demands = vec![
+            (1, 0, 128u32),
+            (2, -1, 128u32),
+        ];
+        let result = resolve_slot_ranges(&existing, demands).unwrap();
+        assert_eq!(result, vec![(1, 0, 128), (2, 128, 128)]);
+    }
+
+    #[test]
+    fn test_resolve_with_gap() {
+        let existing = vec![(0, 100), (200, 300)];
+        let demands = vec![(1, -1, 50u32)];
+        let result = resolve_slot_ranges(&existing, demands).unwrap();
+        assert_eq!(result, vec![(1, 100, 50)]);
+    }
+
+    #[test]
+    fn test_resolve_conflict() {
+        let existing = vec![(0, 128)];
+        let demands = vec![(1, 64, 128u32)];
+        let result = resolve_slot_ranges(&existing, demands);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().contains("conflict"));
+    }
+
+    #[test]
+    fn test_resolve_no_conflict_adjacent() {
+        let existing = vec![(0, 128)];
+        let demands = vec![(1, 128, 128u32)];
+        let result = resolve_slot_ranges(&existing, demands).unwrap();
+        assert_eq!(result, vec![(1, 128, 128)]);
+    }
+}
