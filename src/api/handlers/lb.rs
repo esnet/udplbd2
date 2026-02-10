@@ -134,6 +134,15 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to create reservation: {e}")))?;
 
+        // Seed sync with our own UNIX time
+        let now = Utc::now();
+        let unix_time_micros = now.timestamp_micros();
+        let event_rate_hz: i32 = 1_000_000;
+        self.db
+            .create_event_number(reservation.id, unix_time_micros, event_rate_hz, now, now)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to create initial sync data: {e}")))?;
+
         let initial_senders = request.sender_addresses.clone();
         for addr_str in &request.sender_addresses {
             let addr = IpAddr::from_str(addr_str)
@@ -706,6 +715,17 @@ impl LoadBalancerService {
                 .clear_sync_data(reservation_id)
                 .await
                 .map_err(|e| Status::internal(format!("Failed to clear sync data: {e}")))?;
+
+            // Seed sync with our own UNIX time
+            let now = Utc::now();
+            let unix_time_micros = now.timestamp_micros();
+            let event_rate_hz: i32 = 1_000_000;
+            self.db
+                .create_event_number(reservation_id, unix_time_micros, event_rate_hz, now, now)
+                .await
+                .map_err(|e| {
+                    Status::internal(format!("Failed to create initial sync data: {e}"))
+                })?;
         }
 
         if request.epochs {

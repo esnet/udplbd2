@@ -179,7 +179,9 @@ pub struct SyncPayload {
 
 impl SyncPayload {
     pub fn new() -> Self {
-        let ts = Utc::now().timestamp_millis() as u64;
+        let now = Utc::now();
+        let unix_time_nano =
+            (now.timestamp() as u64 * 1_000_000_000) + (now.timestamp_subsec_nanos() as u64);
         SyncPayload {
             magic_l: b'L',
             magic_c: b'C',
@@ -187,8 +189,8 @@ impl SyncPayload {
             reserved: 0,
             src_id: U32::new(0),
             tick: U64::new(0),
-            evt_rate: U32::new(1000),
-            unix_time_nano: U64::new(ts),
+            evt_rate: U32::new(0),
+            unix_time_nano: U64::new(unix_time_nano),
         }
     }
 
@@ -200,8 +202,8 @@ impl SyncPayload {
     }
 
     pub fn set_tick_to_timestamp(&mut self) -> &mut Self {
-        let tick = Utc::now().timestamp_millis() as u64;
-        self.evt_rate.set(1000);
+        let tick = Utc::now().timestamp_micros() as u64;
+        self.evt_rate.set(1_000_000);
         self.tick.set(tick);
         self.unix_time_nano.set(tick);
         self
