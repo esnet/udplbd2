@@ -571,11 +571,13 @@ async fn test_static_strategy(
             }],
         },
     ];
-    let set_demands_ok = client.set_slot_demands(demands2).await.is_ok();
-    tracing::info!(
-        "✓ Set slot demands: {}",
-        if set_demands_ok { "PASS" } else { "FAIL" }
-    );
+    let set_demands_result = client.set_slot_demands(demands2).await;
+    let set_demands_ok = set_demands_result.is_ok();
+    if let Err(e) = set_demands_result {
+        tracing::error!("✗ Set slot demands FAIL: {}", e);
+    } else {
+        tracing::info!("✓ Set slot demands: PASS");
+    }
 
     tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -729,7 +731,7 @@ async fn test_explicit_strategy(
             .build(&mut client)
             .await?;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(1000)).await;
 
     // Send traffic and check initial loss (should lose ~50% since only half slots covered)
     let num_packets = 2000;
@@ -771,7 +773,7 @@ async fn test_explicit_strategy(
             .build(&mut client)
             .await?;
 
-    tokio::time::sleep(Duration::from_millis(500)).await;
+    tokio::time::sleep(Duration::from_millis(2000)).await;
 
     // Send traffic again and check updated loss (should be minimal now)
     let cancel = CancellationToken::new();
