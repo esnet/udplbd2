@@ -139,6 +139,10 @@ pub struct SendArgs {
     /// Address and port to send packets to directly (e.g., 127.0.0.1:8080).  If provided, bypasses gRPC.
     #[arg(long, value_name = "address:port")]
     pub to: Option<String>,
+
+    /// Slot index to use in the LB header for slot-based routing.
+    #[arg(long, short)]
+    pub slot: Option<u16>,
 }
 
 #[derive(Args, Debug)]
@@ -273,7 +277,7 @@ impl DataplaneCli {
                     .to
                     .as_ref()
                     .map(|addr| addr.parse().expect("Invalid address:port format"));
-                send_file(args.file.clone(), target_addr, url.to_string(), 0).await?;
+                send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot).await?;
             }
             DataplaneCommand::Doctor(args) => {
                 let results =
@@ -359,20 +363,31 @@ pub async fn send_file(
     target: Option<SocketAddr>,
     url: String,
     data_id: u16,
+    slot: Option<u16>,
 ) -> Result<()> {
-    let mut file = tokio::fs::File::open(file_path).await?;
     let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer).await?;
+    if file_path == "-" {
+        tokio::io::stdin().read_to_end(&mut buffer).await?;
+    } else {
+        let mut file = tokio::fs::File::open(file_path).await?;
+        file.read_to_end(&mut buffer).await?;
+    }
 
     let packets_sent = match target {
         Some(addr) => {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
             let mut sender = Sender::from_data_socket(socket, addr, None).await?;
-            sender.send_ts(&buffer, data_id).await
+            match slot {
+                Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
+                None => sender.send_ts(&buffer, data_id).await,
+            }
         }
         None => {
             let mut sender = Sender::from_url(&url.parse().expect("bad URL"), None, false).await?;
-            sender.send_ts(&buffer, data_id).await
+            match slot {
+                Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
+                None => sender.send_ts(&buffer, data_id).await,
+            }
         }
     };
 
