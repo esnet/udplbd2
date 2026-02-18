@@ -184,7 +184,7 @@ explain ""
 explain "The receivers run 'cat' to output received event data."
 echo ""
 
-show_cmd "udplbd dataplane recv -a 127.0.0.1 -p 20001 --name recv1 --lb --slots '1-2' -- cat &"
+show_cmd "udplbd dataplane recv -a 127.0.0.1 -p 20001 --name recv1 --slots '1-2' -- cat &"
 "$UDPLBD" dataplane recv \
     --address 127.0.0.1 \
     --port 20001 \
@@ -194,7 +194,7 @@ show_cmd "udplbd dataplane recv -a 127.0.0.1 -p 20001 --name recv1 --lb --slots 
 RECV1_PID=$!
 echo "Receiver 1 started (PID $RECV1_PID) - listening for slot 1"
 
-show_cmd "udplbd dataplane recv -a 127.0.0.1 -p 20002 --name recv2 --lb --slots '2-3' -- cat &"
+show_cmd "udplbd dataplane recv -a 127.0.0.1 -p 20002 --name recv2 --slots '2-3' -- cat &"
 "$UDPLBD" dataplane recv \
     --address 127.0.0.1 \
     --port 20002 \

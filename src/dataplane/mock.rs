@@ -24,7 +24,10 @@ use tonic::{Request, Response, Status};
 
 const EC_OK: i32 = 1;
 
-/// Represents a load balancer instance listening on a specific IP.
+/// Default port for MockLoadBalancer instances.
+const DEFAULT_LB_PORT: u16 = 0x4c42;
+
+/// Represents a load balancer instance listening on a specific IP and port.
 ///
 /// In this Tokio-based version, instead of spawning a blocking thread,
 /// we spawn an asynchronous task that uses `tokio::net::UdpSocket`.
@@ -32,6 +35,7 @@ const EC_OK: i32 = 1;
 struct MockLoadBalancer {
     lb_id: u8,
     src_ip: IpAddr,
+    port: u16,
     // Shared dataplane state.
     state: Arc<Mutex<MockDataplaneState>>,
     /// Shutdown flag (set by dataplane rule changes, for example)
@@ -42,24 +46,26 @@ impl MockLoadBalancer {
     fn new(
         lb_id: u8,
         src_ip: IpAddr,
+        port: u16,
         state: Arc<Mutex<MockDataplaneState>>,
     ) -> std::io::Result<Self> {
         Ok(Self {
             lb_id,
             src_ip,
+            port,
             state,
             shutdown: Arc::new(AtomicBool::new(false)),
         })
     }
 
-    /// Spawns a Tokio task that binds a UDP socket on port 0x4c42
+    /// Spawns a Tokio task that binds a UDP socket on the configured port
     /// and then continuously processes incoming UDP packets.
     ///
     /// Returns a JoinHandle for the spawned task.
     fn start(self) -> tokio::task::JoinHandle<()> {
         tokio::spawn(async move {
-            // Bind a UDP socket to our LB source IP at port 0x4c42.
-            let addr = SocketAddr::new(self.src_ip, 0x4c42);
+            // Bind a UDP socket to our LB source IP at the configured port.
+            let addr = SocketAddr::new(self.src_ip, self.port);
             let socket = match UdpSocket::bind(addr).await {
                 Ok(s) => s,
                 Err(e) => {
@@ -70,7 +76,7 @@ impl MockLoadBalancer {
 
             // Pre-allocate a buffer.
             let mut buf = vec![0u8; 65536];
-            info!("spawned new mock LB on {}:{}", self.src_ip, 0x4c42);
+            info!("spawned new mock LB on {}:{}", self.src_ip, self.port);
 
             loop {
                 // Use a timeout so that we periodically check the shutdown flag.
@@ -261,6 +267,10 @@ impl MockLoadBalancer {
 /// as tokio::task::JoinHandle rather than thread join handles.
 #[derive(Debug, Default)]
 struct MockDataplaneState {
+    /// Maps LB instance IP addresses to local socket addresses for binding.
+    /// When an LB instance is created, if its IP is in this map, it will bind
+    /// to the mapped local address instead of the original IP.
+    address_map: HashMap<IpAddr, SocketAddr>,
     /// Maps LB source IP addresses to their LB instances.
     lb_instances: HashMap<IpAddr, MockLoadBalancer>,
     /// Maps lb_id to epoch assignment rules (sorted by prefix length, longest first).
@@ -372,9 +382,22 @@ impl MockDataplaneState {
                     }
                     self.lb_tasks.remove(&r.set_src_ip_addr);
                 }
+
+                // Determine bind address and port from address map, or use defaults.
+                let (bind_ip, bind_port) =
+                    if let Some(mapped_addr) = self.address_map.get(&r.set_src_ip_addr) {
+                        info!(
+                            "mapping LB address {} to local address {}",
+                            r.set_src_ip_addr, mapped_addr
+                        );
+                        (mapped_addr.ip(), mapped_addr.port())
+                    } else {
+                        (r.set_src_ip_addr, DEFAULT_LB_PORT)
+                    };
+
                 // Create a new LB instance.
                 let lb =
-                    MockLoadBalancer::new(r.set_lb_instance_id, r.set_src_ip_addr, shared.clone())
+                    MockLoadBalancer::new(r.set_lb_instance_id, bind_ip, bind_port, shared.clone())
                         .map_err(|e| Error::Config(format!("Failed to create LB: {e}")))?;
                 let join_handle = lb.clone().start();
                 self.lb_instances.insert(r.set_src_ip_addr, lb);
@@ -446,9 +469,22 @@ pub struct MockDataplane {
 }
 
 impl MockDataplane {
+    /// Creates a new MockDataplane without any address mappings.
+    /// LB instances will bind to their configured IP addresses on the default port (0x4c42).
     pub fn new() -> Self {
         Self {
             state: Arc::new(Mutex::new(MockDataplaneState::default())),
+        }
+    }
+
+    /// Creates a new MockDataplane with address mappings from configuration.
+    /// LB instance addresses will be mapped to the specified local addresses and ports.
+    pub fn with_address_map(address_map: std::collections::HashMap<IpAddr, SocketAddr>) -> Self {
+        Self {
+            state: Arc::new(Mutex::new(MockDataplaneState {
+                address_map,
+                ..Default::default()
+            })),
         }
     }
 

@@ -31,6 +31,9 @@ pub struct Config {
     pub rest: RestServerConfig,
     pub log: LogConfig,
     pub smartnic: Vec<SmartNICConfig>,
+    /// Optional mock dataplane configuration for testing
+    #[serde(default)]
+    pub mock: Option<MockDataplaneConfig>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -216,15 +219,75 @@ fn default_clear_table_repeats() -> usize {
     1
 }
 
+/// Configuration for the mock dataplane, allowing LB addresses to be mapped to local addresses/ports.
+///
+/// Example YAML:
+/// ```yaml
+/// mock:
+///   address_map:
+///     "192.168.1.100": "127.0.0.1:19522"
+///     "192.168.1.101": "127.0.0.1:19523"
+///     "2001:db8::1": "[::1]:19522"
+/// ```
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MockDataplaneConfig {
+    /// Maps LB instance IP addresses to local socket addresses (ip:port)
+    #[serde(deserialize_with = "deserialize_address_map")]
+    pub address_map: std::collections::HashMap<std::net::IpAddr, SocketAddr>,
+}
+
+fn deserialize_address_map<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::HashMap<std::net::IpAddr, SocketAddr>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use std::collections::HashMap;
+    use std::net::IpAddr;
+
+    let raw: HashMap<String, String> = HashMap::deserialize(deserializer)?;
+    let mut result = HashMap::with_capacity(raw.len());
+
+    for (lb_addr_str, local_addr_str) in raw {
+        let lb_addr: IpAddr = lb_addr_str.parse().map_err(|e| {
+            serde::de::Error::custom(format!("Invalid LB IP address '{lb_addr_str}': {e}"))
+        })?;
+        let local_addr: SocketAddr = local_addr_str.parse().map_err(|e| {
+            serde::de::Error::custom(format!("Invalid local socket address '{local_addr_str}': {e}"))
+        })?;
+        result.insert(lb_addr, local_addr);
+    }
+
+    Ok(result)
+}
+
 impl Config {
     pub fn turmoil() -> Self {
+        use std::collections::HashMap;
+        use std::net::IpAddr;
+
+        // Create 8 LB instances in the TEST-NET-1 range (192.0.2.0/24, RFC 5737)
+        let instances: Vec<LoadBalancerInstanceConfig> = (1..=8)
+            .map(|i| LoadBalancerInstanceConfig {
+                ipv4: Some(format!("192.0.2.{}", i).parse().unwrap()),
+                ipv6: Some(format!("2001:db8::{}", i).parse().unwrap()),
+                event_number_port: 19524,
+            })
+            .collect();
+
+        // Map each LB address to localhost with consecutive ports starting at 19522
+        let mut address_map: HashMap<IpAddr, SocketAddr> = HashMap::new();
+        for i in 1..=8u16 {
+            let ipv4: IpAddr = format!("192.0.2.{}", i).parse().unwrap();
+            let ipv6: IpAddr = format!("2001:db8::{}", i).parse().unwrap();
+            let port = 19521 + i;
+            address_map.insert(ipv4, format!("127.0.0.1:{}", port).parse().unwrap());
+            address_map.insert(ipv6, format!("[::1]:{}", port).parse().unwrap());
+        }
+
         Self {
             lb: LoadBalancerConfig {
-                instances: vec![LoadBalancerInstanceConfig {
-                    ipv4: Some("127.0.0.1".parse().unwrap()),
-                    ipv6: Some("::1".parse().unwrap()),
-                    event_number_port: 19524,
-                }],
+                instances,
                 mac_unicast: Some("00:00:00:00:00:01".to_string()),
                 data_plane_interface: None,
             },
@@ -275,6 +338,7 @@ impl Config {
                 cfg_port: None,
                 cfg_auth_token: None,
             }],
+            mock: Some(MockDataplaneConfig { address_map }),
         }
     }
 

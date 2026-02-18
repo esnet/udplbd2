@@ -13,6 +13,7 @@ pub struct LoadBalancerService {
     pub(crate) db: Arc<LoadBalancerDB>,
     pub(crate) manager: Arc<Mutex<ReservationManager>>,
     pub(crate) config: Arc<Config>,
+    pub(crate) mock_mode: bool,
 }
 
 impl LoadBalancerService {
@@ -21,11 +22,13 @@ impl LoadBalancerService {
         db: Arc<LoadBalancerDB>,
         manager: Arc<Mutex<ReservationManager>>,
         config: Arc<Config>,
+        mock_mode: bool,
     ) -> Self {
         Self {
             db,
             manager,
             config,
+            mock_mode,
         }
     }
 

@@ -175,18 +175,32 @@ impl LoadBalancerService {
                 ))
             })?;
 
-        // Determine if this is a mock LB (127.0.0.1 or ::1)
-        let is_mock = lb
-            .unicast_ipv4_address
-            .map(|ip| ip == std::net::Ipv4Addr::LOCALHOST)
-            .unwrap_or(false)
-            || lb
-                .unicast_ipv6_address
-                .map(|ip| ip == std::net::Ipv6Addr::LOCALHOST)
-                .unwrap_or(false);
+        // Resolve data addresses: in mock mode, use address_map mappings if available
+        let address_map = self.config.mock.as_ref().map(|m| &m.address_map);
 
-        let (data_min_port, data_max_port) = if is_mock {
-            (19522, 19522)
+        let (data_ipv4_address, mapped_v4_port) = match lb.unicast_ipv4_address {
+            Some(ip) if self.mock_mode => match address_map.and_then(|m| m.get(&IpAddr::V4(ip))) {
+                Some(mapped) => (mapped.ip().to_string(), Some(mapped.port())),
+                None => (ip.to_string(), None),
+            },
+            Some(ip) => (ip.to_string(), None),
+            None => (String::new(), None),
+        };
+
+        let (data_ipv6_address, mapped_v6_port) = match lb.unicast_ipv6_address {
+            Some(ip) if self.mock_mode => match address_map.and_then(|m| m.get(&IpAddr::V6(ip))) {
+                Some(mapped) => (mapped.ip().to_string(), Some(mapped.port())),
+                None => (ip.to_string(), None),
+            },
+            Some(ip) => (ip.to_string(), None),
+            None => (String::new(), None),
+        };
+
+        let (data_min_port, data_max_port) = if self.mock_mode {
+            let port = mapped_v4_port
+                .or(mapped_v6_port)
+                .unwrap_or(19522) as u32;
+            (port, port)
         } else {
             (16384, 32767)
         };
@@ -203,14 +217,8 @@ impl LoadBalancerService {
                 .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
-            data_ipv4_address: lb
-                .unicast_ipv4_address
-                .map(|ip| ip.to_string())
-                .unwrap_or_default(),
-            data_ipv6_address: lb
-                .unicast_ipv6_address
-                .map(|ip| ip.to_string())
-                .unwrap_or_default(),
+            data_ipv4_address,
+            data_ipv6_address,
             fpga_lb_id: lb.fpga_lb_id as u32,
             data_min_port,
             data_max_port,
@@ -262,18 +270,32 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to get load balancer: {e}")))?;
 
-        // Determine if this is a mock LB (127.0.0.1 or ::1)
-        let is_mock = lb
-            .unicast_ipv4_address
-            .map(|ip| ip == std::net::Ipv4Addr::LOCALHOST)
-            .unwrap_or(false)
-            || lb
-                .unicast_ipv6_address
-                .map(|ip| ip == std::net::Ipv6Addr::LOCALHOST)
-                .unwrap_or(false);
+        // Resolve data addresses: in mock mode, use address_map mappings if available
+        let address_map = self.config.mock.as_ref().map(|m| &m.address_map);
 
-        let (data_min_port, data_max_port) = if is_mock {
-            (19522, 19522)
+        let (data_ipv4_address, mapped_v4_port) = match lb.unicast_ipv4_address {
+            Some(ip) if self.mock_mode => match address_map.and_then(|m| m.get(&IpAddr::V4(ip))) {
+                Some(mapped) => (mapped.ip().to_string(), Some(mapped.port())),
+                None => (ip.to_string(), None),
+            },
+            Some(ip) => (ip.to_string(), None),
+            None => (String::new(), None),
+        };
+
+        let (data_ipv6_address, mapped_v6_port) = match lb.unicast_ipv6_address {
+            Some(ip) if self.mock_mode => match address_map.and_then(|m| m.get(&IpAddr::V6(ip))) {
+                Some(mapped) => (mapped.ip().to_string(), Some(mapped.port())),
+                None => (ip.to_string(), None),
+            },
+            Some(ip) => (ip.to_string(), None),
+            None => (String::new(), None),
+        };
+
+        let (data_min_port, data_max_port) = if self.mock_mode {
+            let port = mapped_v4_port
+                .or(mapped_v6_port)
+                .unwrap_or(19522) as u32;
+            (port, port)
         } else {
             (16384, 32767)
         };
@@ -292,14 +314,8 @@ impl LoadBalancerService {
                 .map(|ip| ip.ip().to_string())
                 .unwrap_or_default(),
             sync_udp_port: u32::from(lb.event_number_udp_port),
-            data_ipv4_address: lb
-                .unicast_ipv4_address
-                .map(|ip| ip.to_string())
-                .unwrap_or_default(),
-            data_ipv6_address: lb
-                .unicast_ipv6_address
-                .map(|ip| ip.to_string())
-                .unwrap_or_default(),
+            data_ipv4_address,
+            data_ipv6_address,
             fpga_lb_id: lb.fpga_lb_id as u32,
             data_min_port,
             data_max_port,
