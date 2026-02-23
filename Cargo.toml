@@ -1,6 +1,6 @@
 [package]
 name = "udplbd"
-version = "2.1.1"
+version = "2.2.0"
 edition = "2021"
 description = "ESnet-JLab FPGA Accelerated Transport (EJFAT) Control Plane"
 authors = ["Derek Howard <dhoward@es.net>"]
@@ -16,70 +16,70 @@ path = "src/lib.rs"
 
 [dependencies]
 async-stream = "0.3.6"
-axum = { version = "0.8.6", features = ["macros"] }
-axum-extra = { version = "0.12.1", features = ["form", "query"] }
-axum-server = { version = "0.7.2", features = ["tls-rustls-no-provider"] }
+axum = { version = "0.8.8", features = ["macros"] }
+axum-extra = { version = "0.12.5", features = ["form", "query"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls-no-provider"] }
 byteorder = "1.5.0"
-chrono = { version = "0.4.42", features = ["serde"] }
-clap = { version = "4.5.51", features = ["derive", "env"] }
-futures = "0.3.31"
-futures-util = "0.3.31"
-hex = "0.4"
-hyper = "=1.7.0" # update when axum-server fixed for hyper >1.8.0
-hyper-util = "0.1.17"
+chrono = { version = "0.4.44", features = ["serde"] }
+clap = { version = "4.5.60", features = ["derive", "env"] }
+futures = "0.3.32"
+futures-util = "0.3.32"
+hex = "0.4.3"
+hyper = "=1.8.1"
+hyper-util = "0.1.20"
 ipnetwork = { version = "0.21.1", features = ["serde"] }
-log = "0.4.28"
-macaddr = { version = "1.0", features = ["serde"] }
+log = "0.4.29"
+macaddr = { version = "1.0.1", features = ["serde"] }
 mimalloc = "*"
 prometheus = "0.14.0"
-prost = "0.14.1"
-prost-types = "0.14.1"
-prost-wkt = "0.7.0"
-prost-wkt-types = "0.7.0"
-rand = "0.9.2"
-rustls = { version = "0.23.35", default-features = false, features = [
+prost = "0.14.3"
+prost-types = "0.14.3"
+prost-wkt = "0.7.1"
+prost-wkt-types = "0.7.1"
+rand = "0.10.0"
+rustls = { version = "0.23.36", default-features = false, features = [
     "ring",
     "logging",
     "std",
     "tls12",
 ] }
-serde = { version = "1.0.225", features = ["derive"] }
-serde_json = "1.0.145"
+serde = { version = "1.0.228", features = ["derive"] }
+serde_json = "1.0.149"
 serde_yaml = "0.9.33"
 sha2 = "0.10.9"
 sqlx = { version = "0.8.6", features = ["sqlite", "runtime-tokio", "chrono"] }
-tempfile = "3.23.0"
-thiserror = "2.0.17"
-tokio = { version = "1.48.0", features = ["full"] }
-tokio-stream = "0.1.17"
-tokio-util = "0.7.17"
-tonic = { version = "0.14.2", features = [
+tempfile = "3.25.0"
+thiserror = "2.0.18"
+tokio = { version = "1.49.0", features = ["full"] }
+tokio-stream = "0.1.18"
+tokio-util = "0.7.18"
+tonic = { version = "0.14.5", features = [
     "transport",
     "gzip",
     "router",
     "tls-native-roots",
 ] }
-tonic-prost = "0.14.2"
-tower = "0.5.2"
-tower-http = { version = "0.6.6", features = ["trace"] }
-tracing = "0.1.41"
-tracing-subscriber = { version = "0.3.20", features = ["env-filter"] }
-turmoil = "0.7.0"
-url = { version = "2.5.7", features = ["serde"] }
-uuid = { version = "1.18.1", features = ["v4"] }
-zerocopy = { version = "0.8.27", features = ["zerocopy-derive"] }
-zerocopy-derive = "0.8.27"
+tonic-prost = "0.14.5"
+tower = "0.5.3"
+tower-http = { version = "0.6.8", features = ["trace"] }
+tracing = "0.1.44"
+tracing-subscriber = { version = "0.3.22", features = ["env-filter"] }
+turmoil = "0.7.1"
+url = { version = "2.5.8", features = ["serde"] }
+uuid = { version = "1.21.0", features = ["v4"] }
+zerocopy = { version = "0.8.39", features = ["zerocopy-derive"] }
+zerocopy-derive = "0.8.39"
 
 
 [target.'cfg(target_os = "linux")'.dependencies]
-rtnetlink = "0.18.1"
-netlink-packet-route = "0.25.1" # must be compatible with rtnetlink version
+rtnetlink = "0.20.0"
+netlink-packet-route = "0.29.0"
 net-route = "0.4.6"
 
 [build-dependencies]
-prost-wkt-build = "0.7.0"
-tonic-build = "0.14.2"
-tonic-prost-build = "0.14.2"
+prost-wkt-build = "0.7.1"
+tonic-build = "0.14.5"
+tonic-prost-build = "0.14.5"
 
 [profile.release]
 incremental = true
