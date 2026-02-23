@@ -5,12 +5,6 @@ lb:
   # [String, optional] Network interface name to use for MAC address lookups (must be on same LAN as FPGA)
   # If not specified, all interfaces will be searched
   data_plane_interface: null # "eth0"
-  # [bool] Allow registration from private addresses (RFC 1918 for IPv4, RFC 4193 for IPv6)
-  allow_private: true
-  # [bool] Allow registration from loopback addresses
-  allow_loopback: false
-  # [bool] Require that registered ip addresses match the address of the host making the request
-  require_registration_from_dataplane: false
   # List of load balancer instances. Each instance must specify IPv4, IPv6, and event number port.
   # These are the addresses you are assigning to the FPGA
   instances:
@@ -59,6 +53,12 @@ server:
   listen:
     - "127.0.0.1:19523"
     - "[::1]:19523"
+  # [bool] Allow registration from private addresses (RFC 1918 for IPv4, RFC 4193 for IPv6)
+  allow_private: true
+  # [bool] Allow registration from loopback addresses
+  allow_loopback: false
+  # [bool] Require that registered ip addresses match the address of the host making the request
+  require_registration_from_dataplane: false
   # TLS configuration for the gRPC/REST server
   tls:
     # [bool] Enable TLS for gRPC/REST server (default: false)
@@ -108,10 +108,19 @@ log:
 
 # Empty list disables SmartNIC integration
 smartnic: []
-# -----------------------------------------------------------------------------
-# Notes:
-# - All durations are strings with units: e.g., "1s", "800ms", "4h", "1d"
-# - MAC addresses must be valid 6-byte hex strings (e.g., "AB:CD:DE:F1:23:45")
-# - If TLS is enabled for the server, cert_file and key_file must be provided.
-# - The database section controls SQLite performance and cleanup.
-# - The smartnic section can be omitted or left empty for software-only mode.
+
+# Mock dataplane configuration (optional, for testing only)
+# Maps LB instance addresses to local addresses for mock dataplane binding.
+# When running with `udplbd mock`, LB instances will bind to these local addresses
+# instead of their configured addresses, allowing testing on localhost.
+#
+mock:
+  address_map:
+    "192.0.2.1": "127.0.0.1:19522"
+    "192.0.2.2": "127.0.0.1:19523"
+    "192.0.2.3": "127.0.0.1:19524"
+    "192.0.2.4": "127.0.0.1:19525"
+    "2001:DB8::1": "[::1]:19522"
+    "2001:DB8::2": "[::1]:19523"
+    "2001:DB8::3": "[::1]:19524"
+    "2001:DB8::4": "[::1]:19525"

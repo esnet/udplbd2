@@ -4,6 +4,7 @@
 use crate::db::models::LoadBalancer;
 use crate::db::{LoadBalancerDB, Result};
 use crate::errors::Error;
+use crate::util::resolve_slot_ranges;
 use chrono::{DateTime, Utc};
 use macaddr::MacAddr6;
 use std::net::{Ipv4Addr, Ipv6Addr};
@@ -296,7 +297,7 @@ impl LoadBalancerDB {
         .fetch_all(&self.read_pool)
         .await?;
 
-        let mut occupied: Vec<(i32, i32)> = existing
+        let existing_ranges: Vec<(i32, i32)> = existing
             .iter()
             .map(|row| {
                 let start = row.slot_index as i32;
@@ -305,43 +306,7 @@ impl LoadBalancerDB {
             })
             .collect();
 
-        let mut resolved = Vec::new();
-        for (session_id, mut slot_index, slot_length) in slot_demands {
-            let range_len = slot_length as i32;
-            if slot_index == -1 {
-                // Find first gap between occupied ranges large enough for range_len
-                let mut prev_end = 0;
-                let mut found = false;
-                for &(occ_start, occ_end) in &occupied {
-                    if occ_start - prev_end >= range_len {
-                        slot_index = prev_end;
-                        found = true;
-                        break;
-                    }
-                    prev_end = occ_end;
-                }
-                // If no gap found, place after last occupied range
-                if !found {
-                    slot_index = prev_end;
-                }
-            }
-            // Check for overlap with any occupied range
-            let start = slot_index;
-            let end = start + range_len;
-            for &(occ_start, occ_end) in &occupied {
-                if start < occ_end && end > occ_start {
-                    return Err(Error::Usage(format!(
-                        "Slot demand conflict at range [{}, {})",
-                        start, end
-                    )));
-                }
-            }
-            // Insert new range into occupied, keep sorted
-            occupied.push((start, end));
-            // No need to sort, as we only care about gaps and conflicts
-            resolved.push((session_id, slot_index, slot_length));
-        }
-        Ok(resolved)
+        resolve_slot_ranges(&existing_ranges, slot_demands).map_err(Error::Usage)
     }
 
     /// Sets slot demands for a reservation, replacing all previous demands.
@@ -361,10 +326,9 @@ impl LoadBalancerDB {
         .execute(&mut *tx)
         .await?;
 
-        // Resolve and check for conflicts
-        let resolved = self
-            .resolve_slot_demands(reservation_id, slot_demands)
-            .await?;
+        // Resolve slot demands with no existing ranges (we just deleted them all)
+        // This only checks for conflicts among the new demands themselves
+        let resolved = resolve_slot_ranges(&[], slot_demands).map_err(Error::Usage)?;
 
         // Insert new slot demands
         for (session_id, slot_index, slot_length) in resolved {

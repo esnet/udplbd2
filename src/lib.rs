@@ -18,7 +18,6 @@ use crate::snp4::metrics_collector::start_metrics_collector;
 
 use api::fix_connect_info;
 use chrono::Utc;
-use config::LoadBalancerInstanceConfig;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -146,14 +145,23 @@ fn build_server_futures(
     db: Arc<LoadBalancerDB>,
     manager_arc: Arc<Mutex<ReservationManager>>,
     config: &Config,
+    mock_mode: bool,
 ) -> Vec<impl std::future::Future<Output = Result<()>>> {
     let config_arc = Arc::new(config.clone());
     let mut server_futures = Vec::new();
     for addr in config.server.listen.iter() {
-        let lb_service =
-            LoadBalancerService::new(db.clone(), manager_arc.clone(), config_arc.clone());
-        let http_lb_service =
-            LoadBalancerService::new(db.clone(), manager_arc.clone(), config_arc.clone());
+        let lb_service = LoadBalancerService::new(
+            db.clone(),
+            manager_arc.clone(),
+            config_arc.clone(),
+            mock_mode,
+        );
+        let http_lb_service = LoadBalancerService::new(
+            db.clone(),
+            manager_arc.clone(),
+            config_arc.clone(),
+            mock_mode,
+        );
         let svc = LoadBalancerServer::new(lb_service);
 
         // gRPC route: direct, no custom service
@@ -173,7 +181,7 @@ fn build_server_futures(
         // Compose: gRPC route takes precedence, REST is fallback
         let app = grpc_router
             .fallback_service(rest_router)
-            .layer(axum::middleware::from_fn(fix_connect_info));
+            .layer(axum::middleware::from_fn_with_state(*addr, fix_connect_info));
 
         let tls_config = config.server.tls.clone();
         let server_future = serve_with_optional_tls(*addr, app, tls_config);
@@ -258,7 +266,7 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
     manager.initialize(is_empty).await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
-    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config);
+    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config, false);
 
     try_join_all(server_futures).await?;
 
@@ -302,14 +310,11 @@ pub async fn start_mocked_server(
     metrics::init_metrics();
 
     let mut sim_config = config.clone();
-    sim_config.lb.instances = vec![LoadBalancerInstanceConfig {
-        ipv4: Some("127.0.0.1".parse().unwrap()),
-        ipv6: Some("::1".parse().unwrap()),
-        event_number_port: config.lb.instances[0].event_number_port,
-    }];
-    if sim_config.lb.mac_unicast.is_none() || sim_config.lb.mac_unicast.as_deref() == Some("") {
-        sim_config.lb.mac_unicast = Some("02:00:DE:CA:FB:AD".to_string());
+
+    if sim_config.lb.mac_unicast.is_none() {
+        sim_config.lb.mac_unicast = Some("02:00:DE:CA:FB:AD".to_string())
     }
+    sim_config.server.allow_loopback = true;
 
     if let Some(path) = db_path {
         sim_config.database.file = path;
@@ -332,8 +337,11 @@ pub async fn start_mocked_server(
         }
     });
 
-    let sim_dataplane = MockDataplane::new();
-    let sim_addr = format!("http://127.0.0.1:{}", 50051);
+    let sim_dataplane = if let Some(ref mock_config) = config.mock {
+        MockDataplane::with_address_map(mock_config.address_map.clone())
+    } else {
+        MockDataplane::new()
+    };
     let sim_service =
         crate::proto::smartnic::p4_v2::smartnic_p4_server::SmartnicP4Server::new(sim_dataplane);
     tokio::spawn(async move {
@@ -347,20 +355,30 @@ pub async fn start_mocked_server(
     });
     sleep(Duration::from_millis(10)).await;
 
-    let sim_client = SNP4Client::new(&sim_addr, 0, -1, false, None, "").await?;
+    let sim_client = SNP4Client::new("http://127.0.0.1:50051", 0, -1, false, None, "").await?;
 
     trace!("created client");
 
     // Find first IPv4 and first IPv6 address in config.server.listen
-    let sync_addr_v4 = config.server.listen.iter().find(|a| a.is_ipv4()).cloned();
-    let sync_addr_v6 = config.server.listen.iter().find(|a| a.is_ipv6()).cloned();
+    let sync_addr_v4 = sim_config
+        .server
+        .listen
+        .iter()
+        .find(|a| a.is_ipv4())
+        .cloned();
+    let sync_addr_v6 = sim_config
+        .server
+        .listen
+        .iter()
+        .find(|a| a.is_ipv6())
+        .cloned();
 
     let mut manager = ReservationManager::new(
         db.clone(),
         MultiSNP4Client::new(vec![sim_client]),
-        config.get_controller_duration()?,
-        config.get_controller_offset()?,
-        config
+        sim_config.get_controller_duration()?,
+        sim_config.get_controller_offset()?,
+        sim_config
             .lb
             .mac_unicast
             .as_ref()
@@ -377,7 +395,7 @@ pub async fn start_mocked_server(
 
     trace!("initialized rules manager");
 
-    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config);
+    let server_futures = build_server_futures(db.clone(), manager_arc.clone(), &sim_config, true);
 
     try_join_all(server_futures).await?;
 

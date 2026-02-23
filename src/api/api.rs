@@ -154,16 +154,36 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     }
 }
 
+/// The gRPC host authority extracted from the HTTP request, for use in constructing EJFAT URIs.
+#[derive(Clone, Debug)]
+pub struct GrpcAuthority(pub String);
+
 // Middleware to ensure both REST and gRPC requests have the necessary
-// extensions to be able to read the remote_addr
+// extensions to be able to read the remote_addr and local_addr
 pub async fn fix_connect_info(
+    axum::extract::State(local): axum::extract::State<std::net::SocketAddr>,
     axum::extract::ConnectInfo(addr): axum::extract::ConnectInfo<std::net::SocketAddr>,
     mut req: axum::extract::Request,
     next: axum::middleware::Next,
 ) -> axum::response::Response {
+    // Extract the host authority from the HTTP request URI or Host header
+    let authority = req
+        .uri()
+        .authority()
+        .map(|a| a.to_string())
+        .or_else(|| {
+            req.headers()
+                .get("host")
+                .and_then(|v| v.to_str().ok())
+                .map(|s| s.to_string())
+        });
+    if let Some(authority) = authority {
+        req.extensions_mut().insert(GrpcAuthority(authority));
+    }
+
     req.extensions_mut()
         .insert(tonic::transport::server::TcpConnectInfo {
-            local_addr: None,
+            local_addr: Some(local),
             remote_addr: Some(addr),
         });
     next.run(req).await

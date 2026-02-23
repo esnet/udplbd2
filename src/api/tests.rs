@@ -41,7 +41,7 @@ pub async fn create_test_service_with_config(config: Config) -> (LoadBalancerSer
 
     let config = Arc::new(config);
     (
-        LoadBalancerService::new(db, manager, config),
+        LoadBalancerService::new(db, manager, config, false),
         reservation.id,
     )
 }
@@ -69,7 +69,7 @@ pub async fn create_test_service() -> (LoadBalancerService, i64, i64) {
 
     let config = Arc::new(Config::turmoil());
     (
-        LoadBalancerService::new(db, manager, config),
+        LoadBalancerService::new(db, manager, config, false),
         reservation.id,
         session_id,
     )

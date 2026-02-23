@@ -406,6 +406,7 @@ pub mod tester {
                                         db.clone(),
                                         manager_arc.clone(),
                                         conf_arc,
+                                        true
                                     );
                                     let svc = crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer::new(lb_service);
                                     Server::builder()

@@ -259,6 +259,17 @@ impl ActiveReservation {
                 .map(|chunk| u16::from_le_bytes([chunk[0], chunk[1]]))
                 .collect();
 
+            let unassigned_count = slots.iter().filter(|&&s| s == 65535).count();
+            if unassigned_count > 0 {
+                tracing::warn!(
+                    "epoch {} for lb/{} has {} unassigned slots (out of {})",
+                    epoch.epoch_count,
+                    self.reservation_id,
+                    unassigned_count,
+                    slots.len()
+                );
+            }
+
             for (slot_idx, &member_id) in slots.iter().enumerate() {
                 rules.push(
                     SlotToMemberRule {
