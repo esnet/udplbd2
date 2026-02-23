@@ -158,7 +158,7 @@ fn build_server_futures(
         // Compose: gRPC route takes precedence, REST is fallback
         let app = grpc_router
             .fallback_service(rest_router)
-            .layer(axum::middleware::from_fn(fix_connect_info));
+            .layer(axum::middleware::from_fn_with_state(*addr, fix_connect_info));
 
         let tls_config = config.server.tls.clone();
         let server_future = serve_with_optional_tls(*addr, app, tls_config);

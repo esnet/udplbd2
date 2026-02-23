@@ -89,6 +89,9 @@ pub struct ReserveLoadBalancerReply {
     /// the slot assignment strategy used by this load balancer
     #[prost(string, tag = "11")]
     pub strategy: ::prost::alloc::string::String,
+    /// EJFAT URI for this load balancer (ejfat\[s\]://token@host:port/lb/id?sync=...&data=...)
+    #[prost(string, tag = "12")]
+    pub ejfat_uri: ::prost::alloc::string::String,
 }
 /// LoadBalancerStatus
 #[derive(serde::Serialize, serde::Deserialize)]
@@ -584,6 +587,9 @@ pub mod token_permission {
 pub struct CreateTokenReply {
     #[prost(string, tag = "1")]
     pub token: ::prost::alloc::string::String,
+    /// EJFAT URI with the new token (ejfat\[s\]://token@host:port/)
+    #[prost(string, tag = "2")]
+    pub ejfat_uri: ::prost::alloc::string::String,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

@@ -9,6 +9,7 @@ use tonic::{Request, Response, Status};
 use tracing::{info, warn};
 
 use super::super::service::LoadBalancerService;
+use crate::api::client::EjfatUrl;
 use crate::db::models::{Permission, PermissionType, Resource};
 use crate::proto::loadbalancer::v1::{
     AddSendersReply, AddSendersRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
@@ -24,6 +25,7 @@ impl LoadBalancerService {
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
+        let grpc_authority = request.extensions().get::<crate::api::GrpcAuthority>().cloned();
         let request = request.into_inner();
 
         let all_lbs = self
@@ -205,24 +207,60 @@ impl LoadBalancerService {
             (16384, 32767)
         };
 
+        let sync_ipv4_address = manager
+            .sync_addr_v4
+            .map(|ip| ip.ip().to_string())
+            .unwrap_or_default();
+        let sync_ipv6_address = manager
+            .sync_addr_v6
+            .map(|ip| ip.ip().to_string())
+            .unwrap_or_default();
+        let sync_udp_port = u32::from(lb.event_number_udp_port);
+        let lb_id = reservation.id.to_string();
+
+        // Parse the gRPC authority (host:port) for the EJFAT URI
+        let (grpc_host, grpc_port) = match &grpc_authority {
+            Some(auth) => {
+                if let Some(idx) = auth.0.rfind(':') {
+                    (auth.0[..idx].to_string(), auth.0[idx + 1..].parse::<u16>().ok())
+                } else {
+                    (auth.0.clone(), None)
+                }
+            }
+            None => {
+                let listen = &self.config.server.listen[0];
+                (listen.ip().to_string(), Some(listen.port()))
+            }
+        };
+
+        let ejfat_url = EjfatUrl {
+            token: Some(token.clone()),
+            grpc_host,
+            grpc_port,
+            lb_id: Some(lb_id.clone()),
+            sync_addr_v4: if sync_ipv4_address.is_empty() { None } else { Some(sync_ipv4_address.clone()) },
+            sync_addr_v6: if sync_ipv6_address.is_empty() { None } else { Some(sync_ipv6_address.clone()) },
+            sync_udp_port: Some(sync_udp_port as u16),
+            data_addr_v4: if data_ipv4_address.is_empty() { None } else { Some(data_ipv4_address.clone()) },
+            data_addr_v6: if data_ipv6_address.is_empty() { None } else { Some(data_ipv6_address.clone()) },
+            data_min_port: data_min_port as u16,
+            data_max_port: data_max_port as u16,
+            tls_enabled: self.config.server.tls.enable,
+        };
+
         Ok(Response::new(ReserveLoadBalancerReply {
             token,
-            lb_id: reservation.id.to_string(),
-            sync_ipv4_address: manager
-                .sync_addr_v4
-                .map(|ip| ip.ip().to_string())
-                .unwrap_or_default(),
-            sync_ipv6_address: manager
-                .sync_addr_v6
-                .map(|ip| ip.ip().to_string())
-                .unwrap_or_default(),
-            sync_udp_port: u32::from(lb.event_number_udp_port),
+            lb_id,
+            sync_ipv4_address,
+            sync_ipv6_address,
+            sync_udp_port,
             data_ipv4_address,
             data_ipv6_address,
             fpga_lb_id: lb.fpga_lb_id as u32,
             data_min_port,
             data_max_port,
             strategy: reservation.strategy,
+            ejfat_uri: ejfat_url.to_string(),
         }))
     }
 
@@ -324,6 +362,7 @@ impl LoadBalancerService {
             } else {
                 reservation.strategy.clone()
             },
+            ejfat_uri: String::new(),
         }))
     }
 

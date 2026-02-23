@@ -265,14 +265,19 @@ async fn reserve_lb(
     ip_family: crate::proto::loadbalancer::v1::IpFamily,
     strategy: String,
 ) -> Result<()> {
-    let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
     let mut client = ControlPlaneClient::from_url(url.as_str()).await?;
     let reply = client
         .reserve_load_balancer(name, until, sender_addresses, ip_family, strategy)
         .await?
         .into_inner();
-    parsed_url.update_from_reservation(&reply);
-    println!("export 'EJFAT_URI={parsed_url}'");
+    if reply.ejfat_uri.is_empty() {
+        // Fallback: construct from reply fields
+        let mut parsed_url: EjfatUrl = url.parse().expect("bad URL");
+        parsed_url.update_from_reservation(&reply);
+        println!("export 'EJFAT_URI={parsed_url}'");
+    } else {
+        println!("export 'EJFAT_URI={}'", reply.ejfat_uri);
+    }
     Ok(())
 }
 
@@ -328,6 +333,9 @@ async fn create_token(
         .into_inner();
 
     println!("Created token: {}", reply.token);
+    if !reply.ejfat_uri.is_empty() {
+        println!("export 'EJFAT_URI={}'", reply.ejfat_uri);
+    }
     Ok(())
 }
 

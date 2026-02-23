@@ -1329,7 +1329,8 @@ const renderSessions = (workers) => {
                     method: 'POST',
                     body: JSON.stringify({ name, permissions })
                 });
-                createTokenResultDiv.innerHTML = `<span style="color:var(--success-color);">Token created:</span><br><code>${reply.token}</code><br><small>Store this token securely. It will not be shown again.</small>`;
+                const ejfatUriHtml = reply.ejfat_uri ? `<br><span style="color:var(--success-color);">EJFAT URI:</span><br><code>${reply.ejfat_uri}</code>` : '';
+                createTokenResultDiv.innerHTML = `<span style="color:var(--success-color);">Token created:</span><br><code>${reply.token}</code>${ejfatUriHtml}<br><small>Store this token securely. It will not be shown again.</small>`;
                 createTokenResultDiv.classList.remove('error-message');
                 createTokenResultDiv.classList.add('success-message');
                 createTokenForm.reset();
@@ -1522,7 +1523,8 @@ const renderSessions = (workers) => {
                 body: JSON.stringify({ name: tokenName, permissions: basicPermissions })
             });
 
-            alert(`Child token created:\n\n${reply.token}\n\nStore securely!`);
+            const uriMsg = reply.ejfat_uri ? `\n\nEJFAT URI:\n${reply.ejfat_uri}` : '';
+            alert(`Child token created:\n\n${reply.token}${uriMsg}\n\nStore securely!`);
 
             if (activeView === 'token-management-view') { // Refresh child list if visible
                 const childrenData = await apiFetch('/tokens/self/children');

@@ -123,6 +123,7 @@ message ReserveLoadBalancerReply {
 	uint32 dataMaxPort = 10; // max acceptable port to send UDP data to (for LAG entropy)
 	uint32 fpgaLbId = 7; // FPGA LB ID, for use in correlating logs/metrics
 	string strategy = 11; // the slot assignment strategy used by this load balancer
+	string ejfatUri = 12; // EJFAT URI for this load balancer (ejfat[s]://token@host:port/lb/id?sync=...&data=...)
 }
 
 
@@ -396,6 +397,7 @@ message TokenPermission {
 
 message CreateTokenReply {
 	string token = 1;
+	string ejfatUri = 2; // EJFAT URI with the new token (ejfat[s]://token@host:port/)
 }
 
 message TokenSelector {

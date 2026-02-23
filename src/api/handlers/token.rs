@@ -4,6 +4,7 @@ use tonic::{Request, Response, Status};
 use tracing::{debug, info, warn};
 
 use super::super::service::LoadBalancerService;
+use crate::api::client::EjfatUrl;
 use crate::db::{
     models::{Permission, PermissionType, Resource},
     LoadBalancerDB,
@@ -65,6 +66,7 @@ impl LoadBalancerService {
     ) -> Result<Response<CreateTokenReply>, Status> {
         let parent_token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
+        let grpc_authority = request.extensions().get::<crate::api::GrpcAuthority>().cloned();
         let request = request.into_inner();
 
         if !is_valid_name(&request.name) {
@@ -227,7 +229,41 @@ impl LoadBalancerService {
             "create_token: name={}, permissions={:?}, source={}",
             &request.name, &permissions_for_log, src
         );
-        Ok(Response::new(CreateTokenReply { token: new_token }))
+
+        // Build EJFAT URI with the new token
+        let (grpc_host, grpc_port) = match &grpc_authority {
+            Some(auth) => {
+                if let Some(idx) = auth.0.rfind(':') {
+                    (auth.0[..idx].to_string(), auth.0[idx + 1..].parse::<u16>().ok())
+                } else {
+                    (auth.0.clone(), None)
+                }
+            }
+            None => {
+                let listen = &self.config.server.listen[0];
+                (listen.ip().to_string(), Some(listen.port()))
+            }
+        };
+
+        let ejfat_url = EjfatUrl {
+            token: Some(new_token.clone()),
+            grpc_host,
+            grpc_port,
+            lb_id: None,
+            sync_addr_v4: None,
+            sync_addr_v6: None,
+            sync_udp_port: None,
+            data_addr_v4: None,
+            data_addr_v6: None,
+            data_min_port: 0,
+            data_max_port: 0,
+            tls_enabled: self.config.server.tls.enable,
+        };
+
+        Ok(Response::new(CreateTokenReply {
+            token: new_token,
+            ejfat_uri: ejfat_url.to_string(),
+        }))
     }
 
     pub(crate) async fn handle_list_token_permissions(
