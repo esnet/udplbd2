@@ -7,7 +7,7 @@ use crate::{
 use futures::{future::join_all, StreamExt};
 use tonic::{
     service::{interceptor::InterceptedService, Interceptor},
-    transport::{Channel, ClientTlsConfig, Endpoint, Certificate},
+    transport::{Certificate, Channel, ClientTlsConfig, Endpoint},
     Request, Status,
 };
 use tracing::{debug, info, trace, warn};
@@ -35,7 +35,7 @@ impl SNP4Client {
         pipeline_id: i32,
         device_id: i32,
         verify: bool,
-	ca_file: Option<PathBuf>,
+        ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
         let mut channel = Channel::from_shared(addr.to_string()).unwrap();
@@ -419,10 +419,17 @@ impl SNP4Client {
     }
 
     pub async fn clear_pipeline_stats(&mut self) -> Result<(), Status> {
+        self.clear_pipeline_stats_with_filters(None).await
+    }
+
+    pub async fn clear_pipeline_stats_with_filters(
+        &mut self,
+        filters: Option<crate::proto::smartnic::p4_v2::StatsFilters>,
+    ) -> Result<(), Status> {
         let request = Request::new(PipelineStatsRequest {
             dev_id: self.device_id,
             pipeline_id: self.pipeline_id,
-            filters: None,
+            filters,
         });
 
         crate::metrics::SMARTNIC_GRPC
@@ -443,6 +450,80 @@ impl SNP4Client {
         while stream.message().await?.is_some() {}
 
         Ok(())
+    }
+
+    /// Clear stats for specific metric names at a specific index.
+    /// This is useful for clearing counters for a specific member or LB.
+    pub async fn clear_stats_by_names_and_index(
+        &mut self,
+        metric_names: &[&str],
+        index: u32,
+    ) -> Result<(), Status> {
+        use crate::proto::smartnic::p4_v2::{
+            stats_metric_filter, stats_metric_match, StatsFilters, StatsMetricFilter,
+            StatsMetricMatch, StatsMetricMatchIndexSlice, StatsMetricMatchIndices,
+            StatsMetricMatchString,
+        };
+
+        // Build a filter that matches (name is one of the specified metrics) AND (index equals the specified index)
+        let name_filters: Vec<StatsMetricFilter> = metric_names
+            .iter()
+            .map(|name| StatsMetricFilter {
+                negated: false,
+                term: Some(stats_metric_filter::Term::Match(StatsMetricMatch {
+                    attribute: Some(stats_metric_match::Attribute::Name(
+                        StatsMetricMatchString {
+                            method: Some(
+                                crate::proto::smartnic::p4_v2::stats_metric_match_string::Method::Exact(
+                                    name.to_string(),
+                                ),
+                            ),
+                        },
+                    )),
+                })),
+            })
+            .collect();
+
+        let index_filter = StatsMetricFilter {
+            negated: false,
+            term: Some(stats_metric_filter::Term::Match(StatsMetricMatch {
+                attribute: Some(stats_metric_match::Attribute::Indices(
+                    StatsMetricMatchIndices {
+                        slices: vec![StatsMetricMatchIndexSlice {
+                            start: index as i32,
+                            end: index as i32,
+                            step: 1,
+                        }],
+                    },
+                )),
+            })),
+        };
+
+        let filters = Some(StatsFilters {
+            non_zero: false,
+            metric_filter: Some(StatsMetricFilter {
+                negated: false,
+                term: Some(stats_metric_filter::Term::AllSet(
+                    stats_metric_filter::Set {
+                        members: vec![
+                            StatsMetricFilter {
+                                negated: false,
+                                term: Some(stats_metric_filter::Term::AnySet(
+                                    stats_metric_filter::Set {
+                                        members: name_filters,
+                                    },
+                                )),
+                            },
+                            index_filter,
+                        ],
+                    },
+                )),
+            }),
+            with_labels: false,
+            ..Default::default()
+        });
+
+        self.clear_pipeline_stats_with_filters(filters).await
     }
 
     pub async fn get_server_config(&mut self) -> Result<ServerConfig, Status> {
@@ -638,10 +719,39 @@ impl MultiSNP4Client {
     }
 
     pub async fn clear_pipeline_stats(&mut self) -> Result<(), Vec<Result<(), Status>>> {
+        self.clear_pipeline_stats_with_filters(None).await
+    }
+
+    pub async fn clear_pipeline_stats_with_filters(
+        &mut self,
+        filters: Option<crate::proto::smartnic::p4_v2::StatsFilters>,
+    ) -> Result<(), Vec<Result<(), Status>>> {
         let futures: Vec<_> = self
             .clients
             .iter_mut()
-            .map(|client| client.clear_pipeline_stats())
+            .map(|client| client.clear_pipeline_stats_with_filters(filters.clone()))
+            .collect();
+
+        let results: Vec<Result<(), Status>> = join_all(futures).await;
+
+        if results.iter().all(|r| r.is_ok()) {
+            Ok(())
+        } else {
+            Err(results)
+        }
+    }
+
+    /// Clear stats for specific metric names at a specific index across all clients.
+    /// This is useful for clearing counters for a specific member or LB.
+    pub async fn clear_stats_by_names_and_index(
+        &mut self,
+        metric_names: &[&str],
+        index: u32,
+    ) -> Result<(), Vec<Result<(), Status>>> {
+        let futures: Vec<_> = self
+            .clients
+            .iter_mut()
+            .map(|client| client.clear_stats_by_names_and_index(metric_names, index))
             .collect();
 
         let results: Vec<Result<(), Status>> = join_all(futures).await;

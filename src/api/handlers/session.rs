@@ -111,6 +111,12 @@ impl LoadBalancerService {
             .await
             .map_err(|e| Status::internal(format!("Failed to add session: {e}")))?;
 
+        // Clear stats for the new member to reset counters
+        let mut manager = self.manager.lock().await;
+        crate::snp4::metrics_collector::clear_member_stats(&mut manager.snp4, session.id as u32)
+            .await;
+        drop(manager);
+
         let new_token_name = format!("session-{}", session.id);
         let token = self
             .db

@@ -72,8 +72,6 @@ button:disabled {
 
 .action-button {
     margin-right: 8px;
-    margin-bottom: 8px;
-    /* Add spacing below buttons */
     font-size: 0.9em;
 }
 
@@ -170,7 +168,7 @@ button:disabled {
 
 .left-sidebar li.disabled-lb {
     opacity: 0.5;
-    cursor: not-allowed;
+    cursor: pointer;
 }
 
 .left-sidebar .lb-details {
@@ -301,9 +299,25 @@ button:disabled {
     margin-bottom: 25px;
 }
 
-/* Sender Management Panel */
-.sender-management-panel {
+/* Combined Management Panel */
+.combined-management-panel {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
     margin-bottom: 25px;
+}
+
+.sender-management-panel,
+.management-tools {
+    min-width: 0;
+    /* Prevent grid overflow */
+}
+
+.sender-management-panel h3,
+.management-tools h3 {
+    margin-bottom: 15px;
+    font-size: 1.1em;
+    color: var(--text-secondary-color);
 }
 
 .sender-add-form {
@@ -318,7 +332,7 @@ button:disabled {
     border: 1px solid var(--border-color);
     color: var(--text-color);
     border-radius: 4px 0 0 4px;
-    font-size: 1em;
+    font-size: 0.9em;
 }
 
 .sender-add-form button {
@@ -367,19 +381,203 @@ button:disabled {
     color: #ff6b6b;
 }
 
-/* Management Tools */
-.management-tools {
+/* Management Actions Section */
+.tool-actions {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.tool-actions button {
+    width: 100%;
+    text-align: left;
+    justify-content: flex-start;
+}
+
+/* Reservation Form */
+#reservation-view .form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+#reservation-view label {
+    font-size: 0.98em;
+    color: var(--text-secondary-color);
+    margin-bottom: 2px;
+    font-weight: 500;
+}
+
+#reservation-view input[type="text"],
+#reservation-view textarea,
+#reservation-view select {
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-color);
+    border-radius: 4px;
+    font-size: 0.95em;
+    font-family: inherit;
+    transition: border-color 0.2s ease;
+}
+
+#reservation-view input[type="text"]:focus,
+#reservation-view textarea:focus,
+#reservation-view select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+#reservation-view textarea {
+    resize: vertical;
+    min-height: 100px;
+    line-height: 1.5;
+}
+
+#reservation-view small {
+    font-size: 0.85em;
+    color: var(--text-secondary-color);
+    font-style: italic;
+    margin-top: -2px;
+}
+
+#reservation-view .form-actions {
+    margin-top: 24px;
+    display: flex;
+    gap: 10px;
+}
+
+#reservation-view .form-actions button {
+    padding: 10px 20px;
+}
+
+/* Health Issues Panel */
+.health-issues-panel {
+    background-color: var(--card-bg);
+    border-radius: 8px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
     margin-bottom: 25px;
 }
 
-.management-tools .tool-actions {
+.health-issues-panel h3 {
+    margin-bottom: 15px;
+    color: var(--text-color);
+}
+
+.health-issue {
+    padding: 12px 15px;
+    margin-bottom: 10px;
+    border-radius: 6px;
+    border-left: 4px solid;
+}
+
+.health-issue:last-child {
+    margin-bottom: 0;
+}
+
+.health-issue-warning {
+    background-color: rgba(255, 204, 0, 0.1);
+    border-left-color: var(--warning-color);
+}
+
+.health-issue-error {
+    background-color: rgba(255, 59, 48, 0.1);
+    border-left-color: var(--danger-color);
+}
+
+.health-issue-critical {
+    background-color: rgba(255, 0, 0, 0.15);
+    border-left-color: #ff0000;
+}
+
+.health-issue-header {
     display: flex;
-    flex-wrap: wrap;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+.health-issue-type {
+    font-weight: 600;
+    color: var(--text-color);
+}
+
+.health-issue-severity {
+    font-size: 0.85em;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background-color: rgba(0, 0, 0, 0.3);
+    text-transform: uppercase;
+    font-weight: 500;
+}
+
+.health-issue-message {
+    color: var(--text-secondary-color);
+    font-size: 0.95em;
+    line-height: 1.4;
+    margin-bottom: 6px;
+}
+
+.health-issue-time {
+    font-size: 0.85em;
+    color: var(--text-secondary-color);
+    font-style: italic;
+}
+
+/* Receiver Health Warning */
+.receiver-health-warning {
+    display: block;
+    color: var(--warning-color);
+    font-size: 0.85em;
+    margin-top: 5px;
+    padding: 4px 0;
+}
+
+.receiver-health-warning i {
+    margin-right: 4px;
 }
 
 /* Charts Container */
 .charts-container {
     width: 100%;
+}
+
+/* Chart Tabs */
+.chart-tabs {
+    display: flex;
+    gap: 0;
+    margin-bottom: 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chart-tab {
+    padding: 12px 24px;
+    background: none;
+    border: none;
+    border-bottom: 2px solid transparent;
+    color: var(--text-secondary-color);
+    cursor: pointer;
+    font-size: 1em;
+    transition: color 0.2s, border-color 0.2s;
+}
+
+.chart-tab:hover {
+    color: var(--text-color);
+}
+
+.chart-tab.active {
+    color: var(--accent-color);
+    border-bottom-color: var(--accent-color);
+}
+
+.chart-tab-content {
+    display: none;
+}
+
+.chart-tab-content.active {
+    display: block;
 }
 
 .chart-container {
@@ -482,6 +680,54 @@ button:disabled {
 
 .deregister-btn:hover {
     background-color: rgba(255, 59, 48, 0.2);
+}
+
+/* Receiver Filter Controls */
+.receiver-filter-section {
+    padding: 15px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.receiver-filter-section h2 {
+    margin-bottom: 10px;
+}
+
+.filter-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.filter-button {
+    font-size: 0.85em;
+    padding: 6px 12px;
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary-color);
+}
+
+.filter-button:hover {
+    background: rgba(255, 255, 255, 0.05);
+    border-color: var(--accent-color);
+}
+
+.filter-button.active {
+    background: var(--accent-color);
+    color: white;
+    border-color: var(--accent-color);
+}
+
+.filtered-receiver {
+    background-color: rgba(0, 122, 255, 0.15);
+    border-left: 3px solid var(--accent-color) !important;
+}
+
+#receiver-list li {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+
+#receiver-list li:hover {
+    background-color: rgba(255, 255, 255, 0.05);
 }
 
 /* Token/System Info Views */

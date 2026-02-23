@@ -1,6 +1,5 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/db/models.rs
-
 use chrono::{DateTime, Utc};
 use macaddr::MacAddr6;
 use serde::{Deserialize, Serialize};
@@ -177,4 +176,44 @@ impl std::str::FromStr for PermissionType {
             _ => Err("Invalid permission type".to_string()),
         }
     }
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatGlobalSample {
+    pub sampled_at: i64,
+    pub rx_rslt: [i64; 14],
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatLbSample {
+    pub reservation_id: i64,
+    pub sampled_at: i64,
+    pub drop_bad_udplb_version: i64,
+    pub drop_blocked_src: i64,
+    pub drop_epoch_assign_miss: i64,
+    pub drop_lb_calendar_miss: i64,
+    pub drop_mbr_info_miss: i64,
+    pub drop_no_udplb_hdr: i64,
+    pub drop_not_ip: i64,
+    pub rx_bytes: i64,
+    pub rx_packets: i64,
+    pub rx_v2: i64,
+    pub rx_v3: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatLbScopedSample {
+    pub reservation_id: i64,
+    pub stat_scope_id: i64,
+    pub sampled_at: i64,
+    pub rx_bytes: i64,
+    pub rx_packets: i64,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct StatMemberSample {
+    pub session_id: i64,
+    pub sampled_at: i64,
+    pub mbr_tx_pkts: i64,
+    pub mbr_tx_bytes: i64,
 }

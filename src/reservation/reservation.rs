@@ -26,7 +26,7 @@ use tracing::{debug, error, info, trace, warn};
 /// Manages the lifecycle of load balancer reservations and their associated rules.
 pub struct ReservationManager {
     db: Arc<LoadBalancerDB>,
-    snp4: MultiSNP4Client,
+    pub(crate) snp4: MultiSNP4Client,
     active_reservations: Arc<Mutex<HashMap<i64, ActiveReservation>>>,
     tick_interval: Duration,
     tick_offset: Duration,

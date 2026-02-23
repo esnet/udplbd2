@@ -581,6 +581,93 @@ impl Receiver {
     }
 }
 
+/// A mock receiver that registers and sends zero control signals without actually opening a port.
+pub struct ZeroMockReceiver {
+    _client: ControlPlaneClient,
+    zero_pid_task: Option<tokio::task::JoinHandle<()>>,
+}
+
+impl ZeroMockReceiver {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn new(
+        name: &str,
+        ip_address: String,
+        port: u16,
+        weight: f32,
+        min_factor: f32,
+        max_factor: f32,
+        client: &mut ControlPlaneClient,
+        meta_event_context: Option<MetaEventContext>,
+        slot_demands: Vec<SlotRange>,
+    ) -> Result<Self, Error> {
+        let keep_lb_header = false;
+
+        let reg = client
+            .register(
+                name.into(),
+                weight,
+                ip_address.clone(),
+                port,
+                PortRange::PortRange1,
+                min_factor,
+                max_factor,
+                keep_lb_header,
+                slot_demands,
+            )
+            .await?
+            .into_inner();
+
+        let mut client2 = client.clone();
+        client2.session_id = Some(reg.session_id.clone());
+        let meta_event_ctx_clone = meta_event_context.clone();
+
+        let zero_pid_task_handle =
+            tokio::spawn(async move { zero_pid_loop(&mut client2, meta_event_ctx_clone).await });
+
+        Ok(Self {
+            _client: client.clone(),
+            zero_pid_task: Some(zero_pid_task_handle),
+        })
+    }
+
+    pub fn cancel_task(&mut self) {
+        if let Some(zero_pid_task) = self.zero_pid_task.take() {
+            zero_pid_task.abort();
+        }
+    }
+}
+
+/// PID loop that sends all-zero control signals
+async fn zero_pid_loop(
+    client: &mut ControlPlaneClient,
+    meta_event_context: Option<MetaEventContext>,
+) {
+    let event_context_opt = meta_event_context;
+    loop {
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        let control_signal = 0.0;
+        if let Some(ref event_context) = event_context_opt {
+            event_context.emit(MetaEventType::SendControl { control_signal })
+        }
+
+        client
+            .send_state(
+                0.0,  // fill_percentage
+                0.0,  // control_signal (all zeros)
+                true, // ok
+                0,    // total_events_recv
+                0,    // total_events_reassembled
+                0,    // total_events_reassembly_err
+                0,    // total_events_dequeued
+                0,    // total_event_enqueue_err
+                0,    // total_bytes_recv
+                0,    // total_packets_recv
+            )
+            .await
+            .expect("Failed to send state");
+    }
+}
+
 /// A builder for constructing Receiver instances.
 pub struct ReceiverBuilder {
     name: String,

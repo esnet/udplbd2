@@ -73,6 +73,12 @@ enum Commands {
 
     /// Dataplane testing commands.
     Dataplane(udplbd::dataplane::cli::DataplaneCli),
+
+    /// Configuration management commands.
+    Config(udplbd::config::cli::ConfigCli),
+
+    /// SmartNIC configuration commands.
+    Sncfg(udplbd::sncfg::cli::SncfgCli),
 }
 
 /// Application entry point.
@@ -107,6 +113,12 @@ pub async fn cli_main(cli: Cli, config: &mut Config) -> Result<()> {
         }
         Commands::Dataplane(dp_cli) => {
             dp_cli.run(config).await?;
+        }
+        Commands::Config(config_cli) => {
+            config_cli.run().await?;
+        }
+        Commands::Sncfg(sncfg_cli) => {
+            sncfg_cli.run(config).await?;
         }
     }
     Ok(())

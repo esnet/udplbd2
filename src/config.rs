@@ -3,6 +3,8 @@
 //! Clients commands will use this if `EJFAT_URI` is not otherwise provided.
 //!
 //! Typically instantiated using `serde_yaml`.
+pub mod cli;
+
 use macaddr::MacAddr6;
 use serde::{Deserialize, Serialize};
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -31,9 +33,26 @@ pub struct Config {
     pub rest: RestServerConfig,
     pub log: LogConfig,
     pub smartnic: Vec<SmartNICConfig>,
+    #[serde(default)]
+    pub metrics_collector: Option<MetricsCollectorConfigFile>,
     /// Optional mock dataplane configuration for testing
     #[serde(default)]
     pub mock: Option<MockDataplaneConfig>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MetricsCollectorConfigFile {
+    #[serde(default = "default_metrics_collector_enabled")]
+    pub enable: bool,
+    #[serde(default = "default_metrics_collector_interval")]
+    pub interval: String,
+}
+
+fn default_metrics_collector_enabled() -> bool {
+    true
+}
+fn default_metrics_collector_interval() -> String {
+    "5s".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -338,6 +357,10 @@ impl Config {
                 cfg_port: None,
                 cfg_auth_token: None,
             }],
+            metrics_collector: Some(MetricsCollectorConfigFile {
+                enable: false,
+                interval: default_metrics_collector_interval(),
+            }),
             mock: Some(MockDataplaneConfig { address_map }),
         }
     }
@@ -453,6 +476,15 @@ impl Config {
             return Err(ConfigError::Invalid(format!("Invalid cleanup age: {e}")));
         }
 
+        // Validate metrics_collector config if present
+        if let Some(mc) = &self.metrics_collector {
+            if let Err(e) = parse_duration(&mc.interval) {
+                return Err(ConfigError::Invalid(format!(
+                    "Invalid metrics_collector interval: {e}"
+                )));
+            }
+        }
+
         // Validate TLS configurations
         if self.server.tls.enable
             && (self.server.tls.cert_file.is_none() || self.server.tls.key_file.is_none())
@@ -482,6 +514,43 @@ impl Config {
     pub fn get_controller_offset(&self) -> Result<Duration, ConfigError> {
         parse_duration(&self.controller.offset)
             .map_err(|e| ConfigError::Invalid(format!("Failed to parse controller offset: {e}")))
+    }
+
+    /// Convert the config file section to the runtime MetricsCollectorConfig
+    pub fn get_metrics_collector_config(
+        &self,
+    ) -> crate::snp4::metrics_collector::MetricsCollectorConfig {
+        use crate::snp4::metrics_collector::MetricsCollectorConfig;
+        let (enabled, interval) = if let Some(mc) = &self.metrics_collector {
+            (
+                mc.enable,
+                parse_duration(&mc.interval).unwrap_or_else(|e| {
+                    panic!("metrics_collector.interval '{}' invalid: {e}", &mc.interval)
+                }),
+            )
+        } else {
+            (true, Duration::from_secs(30))
+        };
+        MetricsCollectorConfig { enabled, interval }
+    }
+
+    /// Get the health check config. Health checks are enabled if metrics_collector is enabled.
+    pub fn get_healthcheck_config(&self) -> crate::healthcheck::HealthCheckConfig {
+        use crate::healthcheck::HealthCheckConfig;
+        let enabled = if let Some(mc) = &self.metrics_collector {
+            mc.enable
+        } else {
+            true
+        };
+        // Health checks run at the same interval as metrics collection
+        let interval = if let Some(mc) = &self.metrics_collector {
+            parse_duration(&mc.interval).unwrap_or_else(|e| {
+                panic!("metrics_collector.interval '{}' invalid: {e}", &mc.interval)
+            })
+        } else {
+            Duration::from_secs(30)
+        };
+        HealthCheckConfig { enabled, interval }
     }
 }
 

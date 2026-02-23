@@ -1,0 +1,40 @@
+{
+    "strategy": "explicit",
+    "sender": {
+        "rate": 80,
+        "event_count": 1000,
+        "event_size": 25000
+    },
+    "receivers": [
+        {
+            "name": "R1",
+            "rate": 100,
+            "slot_demands": [
+                {
+                    "index": 0,
+                    "length": 250
+                }
+            ]
+        },
+        {
+            "name": "R2",
+            "rate": 100,
+            "slot_demands": [
+                {
+                    "index": 250,
+                    "length": 125
+                }
+            ]
+        },
+        {
+            "name": "R3",
+            "rate": 100,
+            "slot_demands": [
+                {
+                    "index": 325,
+                    "length": 125
+                }
+            ]
+        }
+    ]
+}

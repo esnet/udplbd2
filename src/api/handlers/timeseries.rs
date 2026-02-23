@@ -128,42 +128,17 @@ impl LoadBalancerService {
                     }
                 }
             }
-            // Expand reservation wildcard: pattern "/lb/{lb_id}/reservation/*"
-            if parts.len() >= 4 && parts[2] == "reservation" && parts[3] == "*" {
-                if let Ok(reservations) = self.db.list_reservations().await {
-                    if let Ok(lb_id) = parts[1].parse::<i64>() {
-                        for res in reservations
-                            .into_iter()
-                            .filter(|r| r.loadbalancer_id == lb_id)
-                        {
+            // Expand reservation wildcard: pattern "/lb/{reservation_id}/session/*"
+            if parts.len() >= 4 && parts[2] == "session" && parts[3] == "*" {
+                if let Ok(reservation_id) = parts[1].parse::<i64>() {
+                    if let Ok(session_list) = self.db.get_reservation_sessions(reservation_id).await
+                    {
+                        for sess in session_list {
                             let concrete = selector.replace(
-                                &format!("/lb/{lb_id}/reservation/*"),
-                                &format!("/lb/{}/reservation/{}", lb_id, res.id),
+                                &format!("/lb/{}/session/*", reservation_id),
+                                &format!("/lb/{}/session/{}", reservation_id, sess.id),
                             );
                             expanded_request.insert(concrete);
-                        }
-                    }
-                }
-            }
-            // Expand session wildcard: pattern "/lb/{lb_id}/reservation/{res_id}/session/*"
-            if parts.len() >= 6 && parts[4] == "session" && parts[5] == "*" {
-                if let Ok(session_list) = self
-                    .db
-                    .get_reservation_sessions(parts[3].parse::<i64>().unwrap_or(0))
-                    .await
-                {
-                    if let Ok(lb_id) = parts[1].parse::<i64>() {
-                        if let Ok(res_id) = parts[3].parse::<i64>() {
-                            for sess in session_list {
-                                let concrete = selector.replace(
-                                    &format!("/lb/{lb_id}/reservation/{res_id}/session/*"),
-                                    &format!(
-                                        "/lb/{}/reservation/{}/session/{}",
-                                        lb_id, res_id, sess.id
-                                    ),
-                                );
-                                expanded_request.insert(concrete);
-                            }
                         }
                     }
                 }
@@ -189,21 +164,19 @@ impl LoadBalancerService {
             return Ok(expanded_request.into_iter().collect());
         }
         if let Some(td) = token_details {
+            // Fetch all reservations once for efficiency
+            let all_reservations = self.db.list_reservations().await.unwrap_or_default();
+
             for perm in td.permissions {
                 match perm.resource {
                     Resource::LoadBalancer(lb_id) => {
-                        // Permission for a loadbalancer: allowed selectors start with "/lb/{lb_id}/"
-                        allowed_patterns.push(format!("/lb/{lb_id}/"));
+                        // Permission for a loadbalancer grants access to all its reservations
+                        for res in all_reservations.iter().filter(|r| r.loadbalancer_id == lb_id) {
+                            allowed_patterns.push(format!("/lb/{}/", res.id));
+                        }
                     }
                     Resource::Reservation(res_id) => {
-                        if let Ok(reservations) = self.db.list_reservations().await {
-                            if let Some(res) = reservations.into_iter().find(|r| r.id == res_id) {
-                                allowed_patterns.push(format!(
-                                    "/lb/{}/reservation/{}/",
-                                    res.loadbalancer_id, res_id
-                                ));
-                            }
-                        }
+                        allowed_patterns.push(format!("/lb/{}/", res_id));
                     }
                     Resource::Session(session_id) => {
                         allowed_patterns.push(format!("/session/{session_id}"));
@@ -256,7 +229,9 @@ impl LoadBalancerService {
             return Ok(allowed);
         }
         // Otherwise, expand based on specific permissions.
-        // List loadbalancers
+        // Fetch reservations once for efficiency
+        let all_reservations = self.db.list_reservations().await.unwrap_or_default();
+
         if let Ok(lbs) = self.db.list_loadbalancers().await {
             for lb in lbs {
                 let (ok, _) = self
@@ -267,41 +242,42 @@ impl LoadBalancerService {
                     )
                     .await?;
                 if ok {
-                    allowed.push(format!("/lb/{}", lb.id));
+                    // Permission for LB grants access to all its reservations
+                    for res in all_reservations.iter().filter(|r| r.loadbalancer_id == lb.id) {
+                        allowed.push(format!("/lb/{}", res.id));
+                    }
                 } else {
-                    // Check reservations for this loadbalancer.
-                    if let Ok(reservations) = self.db.list_reservations().await {
-                        let lb_res: Vec<_> = reservations
-                            .into_iter()
-                            .filter(|r| r.loadbalancer_id == lb.id)
-                            .collect();
-                        for res in lb_res {
-                            let (ok, _) = self
-                                .validate_token(
-                                    token,
-                                    Resource::Reservation(res.id),
-                                    PermissionType::ReadOnly,
-                                )
-                                .await?;
-                            if ok {
-                                allowed.push(format!("/lb/{}/reservation/{}", lb.id, res.id));
-                            } else if let Ok(sessions) =
-                                self.db.get_reservation_sessions(res.id).await
-                            {
-                                for sess in sessions {
-                                    let (ok, _) = self
-                                        .validate_token(
-                                            token,
-                                            Resource::Session(sess.id),
-                                            PermissionType::ReadOnly,
-                                        )
-                                        .await?;
-                                    if ok {
-                                        allowed.push(format!(
-                                            "/lb/{}/reservation/{}/session/{}",
-                                            lb.id, res.id, sess.id
-                                        ));
-                                    }
+                    // Check individual reservations for this loadbalancer
+                    let lb_res: Vec<_> = all_reservations
+                        .iter()
+                        .filter(|r| r.loadbalancer_id == lb.id)
+                        .collect();
+                    for res in lb_res {
+                        let (ok, _) = self
+                            .validate_token(
+                                token,
+                                Resource::Reservation(res.id),
+                                PermissionType::ReadOnly,
+                            )
+                            .await?;
+                        if ok {
+                            allowed.push(format!("/lb/{}", res.id));
+                        } else if let Ok(sessions) =
+                            self.db.get_reservation_sessions(res.id).await
+                        {
+                            for sess in sessions {
+                                let (ok, _) = self
+                                    .validate_token(
+                                        token,
+                                        Resource::Session(sess.id),
+                                        PermissionType::ReadOnly,
+                                    )
+                                    .await?;
+                                if ok {
+                                    allowed.push(format!(
+                                        "/lb/{}/session/{}",
+                                        res.id, sess.id
+                                    ));
                                 }
                             }
                         }

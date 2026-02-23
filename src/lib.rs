@@ -5,6 +5,7 @@ pub mod constants;
 pub mod dataplane;
 pub mod db;
 pub mod errors;
+pub mod healthcheck;
 pub mod macaddr;
 pub mod metrics;
 pub mod proto;
@@ -12,6 +13,8 @@ pub mod reservation;
 pub mod sncfg;
 pub mod snp4;
 pub mod util;
+
+use crate::snp4::metrics_collector::start_metrics_collector;
 
 use api::fix_connect_info;
 use chrono::Utc;
@@ -38,12 +41,47 @@ use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
 use crate::sncfg::setup::{auto_configure_smartnics, smallest_mac_address};
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 
-async fn build_smartnic_clients(
-    config: &mut Config,
-    snp4_client_table_index: i32,
-) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
-    let mut snp4_clients = Vec::new();
+/// Build SNCfg clients from the configuration
+pub async fn build_sncfg_clients(config: &Config) -> Result<MultiSNCfgClient> {
     let mut sncfg_clients = Vec::new();
+    for smartnic in &config.smartnic {
+        if !smartnic.mock {
+            if let Some(cfg_auth_token) = &smartnic.cfg_auth_token {
+                let addr = format!(
+                    "{}://{}:{}",
+                    if smartnic.tls.enable { "https" } else { "http" },
+                    if let Some(cfg_host) = &smartnic.cfg_host {
+                        cfg_host
+                    } else {
+                        &smartnic.host
+                    },
+                    if let Some(cfg_port) = smartnic.cfg_port {
+                        cfg_port
+                    } else {
+                        smartnic.port
+                    }
+                );
+                let client = SNCfgClient::new(
+                    &addr,
+                    0,
+                    smartnic.tls.verify,
+                    smartnic.tls.ca_file.clone(),
+                    cfg_auth_token.clone(),
+                )
+                .await?;
+                sncfg_clients.push(client);
+            }
+        }
+    }
+    Ok(MultiSNCfgClient::new(sncfg_clients))
+}
+
+/// Build SNP4 clients from the configuration with optional table index
+pub async fn build_snp4_clients(
+    config: &Config,
+    snp4_client_table_index: i32,
+) -> Result<MultiSNP4Client> {
+    let mut snp4_clients = Vec::new();
     for smartnic in &config.smartnic {
         if !smartnic.mock {
             let addr = format!(
@@ -63,34 +101,19 @@ async fn build_smartnic_clients(
             .await?;
             client.clear_table_repeats = smartnic.clear_table_repeats;
             snp4_clients.push(client);
-
-            if let (Some(cfg_host), Some(cfg_port), Some(cfg_auth_token)) = (
-                &smartnic.cfg_host,
-                smartnic.cfg_port,
-                &smartnic.cfg_auth_token,
-            ) {
-                let addr = format!(
-                    "{}://{}:{}",
-                    if smartnic.tls.enable { "https" } else { "http" },
-                    cfg_host,
-                    cfg_port
-                );
-                let client = SNCfgClient::new(
-                    &addr,
-                    0,
-                    smartnic.tls.verify,
-                    smartnic.tls.ca_file.clone(),
-                    cfg_auth_token.clone(),
-                )
-                .await?;
-                sncfg_clients.push(client);
-            }
         }
     }
-    Ok((
-        MultiSNP4Client::new(snp4_clients),
-        MultiSNCfgClient::new(sncfg_clients),
-    ))
+    Ok(MultiSNP4Client::new(snp4_clients))
+}
+
+async fn build_smartnic_clients(
+    config: &mut Config,
+    snp4_client_table_index: i32,
+) -> Result<(MultiSNP4Client, MultiSNCfgClient)> {
+    let snp4_clients = build_snp4_clients(config, snp4_client_table_index).await?;
+    let sncfg_clients = build_sncfg_clients(config).await?;
+
+    Ok((snp4_clients, sncfg_clients))
 }
 
 pub async fn apply_static_config(
@@ -198,6 +221,16 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
             tokio::time::sleep(cleanup_interval).await;
         }
     });
+
+    // Start SmartNIC P4 pipeline metrics collector if enabled
+    let metrics_collector_config = config.get_metrics_collector_config();
+    if metrics_collector_config.enabled {
+        start_metrics_collector(
+            db.clone(),
+            smartnic_clients.clone(),
+            metrics_collector_config,
+        );
+    }
 
     auto_configure_smartnics(&mut cfg_clients).await?;
 
@@ -349,7 +382,7 @@ pub async fn start_mocked_server(
             .lb
             .mac_unicast
             .as_ref()
-            .expect("no unicast mac address configured")
+            .unwrap_or(&"02:00:DE:CA:FB:AD".to_string())
             .parse()?,
         sync_addr_v4,
         sync_addr_v6,

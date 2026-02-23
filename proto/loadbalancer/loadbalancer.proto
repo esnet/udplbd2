@@ -79,6 +79,14 @@ message SlotRange {
 	uint32 length = 2; // length of the range in number of slots
 }
 
+message HealthIssue {
+	string type = 1; // event_type, e.g. "receiver_packet_stall"
+	string severity = 2; // "warning", "error", or "critical"
+	string message = 3; // human-readable message
+	google.protobuf.Struct details = 4; // machine-readable details
+	google.protobuf.Timestamp detected_at = 5; // when the issue was first detected
+}
+
 message SessionSlotRanges {
 	string sessionId = 1;
 	// If any slot ranges are provided this way or via UpdateSlots, slot shuffling will be turned off
@@ -154,6 +162,8 @@ message WorkerStatus {
     int64 totalPacketsRecv = 18;  // from latest SendState
 	repeated SlotRange slots = 19; // the slots that were assigned in the latest epoch
 	repeated SlotRange slotDemands = 20; // the slots that are explicitly demanded by this worker
+	repeated HealthIssue healthIssues = 21; // active health check issues for this worker
+	int64 sessionId = 22; // session ID from database
 }
 message LoadBalancerStatusReply {
 	google.protobuf.Timestamp timestamp = 1; // time that this message was generated
@@ -163,6 +173,7 @@ message LoadBalancerStatusReply {
 	repeated string senderAddresses = 5;
 	google.protobuf.Timestamp expiresAt = 6; // When this LB expires
 	uint32 slotResolution = 11; // total number of slots used for this LB, a power of two
+	repeated HealthIssue healthIssues = 12; // active health check issues for this load balancer
 }
 
 
