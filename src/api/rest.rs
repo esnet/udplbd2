@@ -21,11 +21,11 @@ use tracing::error;
 use crate::api::service::LoadBalancerService;
 use crate::metrics::INBOUND_REST;
 use crate::proto::loadbalancer::v1::{
-    AddSendersRequest, CreateTokenRequest, DeregisterRequest, FreeLoadBalancerRequest,
-    GetLoadBalancerRequest, ListChildTokensRequest, ListTokenPermissionsRequest,
-    LoadBalancerStatusRequest, OverviewRequest, RegisterRequest, RemoveSendersRequest,
-    ReserveLoadBalancerRequest, RevokeTokenRequest, SendStateRequest, TimeseriesRequest,
-    TokenPermission, TokenSelector, VersionRequest,
+    AddSendersRequest, CreateTokenRequest, DeregisterRequest, ExtendReservationRequest,
+    FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensRequest,
+    ListTokenPermissionsRequest, LoadBalancerStatusRequest, OverviewRequest, RegisterRequest,
+    RemoveSendersRequest, ReserveLoadBalancerRequest, ResetLoadBalancerRequest, RevokeTokenRequest,
+    SendStateRequest, TimeseriesRequest, TokenPermission, TokenSelector, VersionRequest,
 };
 
 // Embeds file content directly into the binary at compile time.
@@ -229,6 +229,8 @@ pub fn rest_endpoint_router(service: AppState) -> Router {
         .route("/lb/{id}", get(get_load_balancer_handler))
         .route("/lb/{id}/status", get(load_balancer_status_handler))
         .route("/lb/{id}", delete(free_load_balancer_handler))
+        .route("/lb/{id}/reset", post(reset_load_balancer_handler))
+        .route("/lb/{id}/extend", post(extend_reservation_handler))
         .route("/lb/{id}/senders", post(add_senders_handler))
         .route("/lb/{id}/senders", delete(remove_senders_handler))
         .route("/lb/{id}/sessions", post(register_handler))
@@ -419,6 +421,84 @@ async fn free_load_balancer_handler(
         FreeLoadBalancerRequest { lb_id: id },
         Some(addr),
         |svc, req| async move { svc.handle_free_load_balancer(req).await },
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+struct ResetLoadBalancerBody {
+    #[serde(default)]
+    sync: bool,
+    #[serde(default)]
+    epochs: bool,
+    #[serde(default)]
+    senders: bool,
+    #[serde(default)]
+    workers: bool,
+}
+
+async fn reset_load_balancer_handler(
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    State(service): State<AppState>,
+    Json(body): Json<ResetLoadBalancerBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    grpc_to_rest(
+        headers,
+        service,
+        ResetLoadBalancerRequest {
+            lb_id: id,
+            sync: body.sync,
+            epochs: body.epochs,
+            senders: body.senders,
+            workers: body.workers,
+        },
+        Some(addr),
+        |svc, req| async move { svc.handle_reset_load_balancer(req).await },
+    )
+    .await
+}
+
+#[derive(Deserialize)]
+struct ExtendReservationBody {
+    until: Option<String>,
+}
+
+async fn extend_reservation_handler(
+    headers: HeaderMap,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    Path(id): Path<String>,
+    State(service): State<AppState>,
+    Json(body): Json<ExtendReservationBody>,
+) -> Result<Json<serde_json::Value>, (StatusCode, Json<ErrorResponse>)> {
+    let until_timestamp = match body.until {
+        Some(ts_str) => match chrono::DateTime::parse_from_rfc3339(&ts_str) {
+            Ok(dt) => Some(prost_wkt_types::Timestamp {
+                seconds: dt.timestamp(),
+                nanos: dt.timestamp_subsec_nanos() as i32,
+            }),
+            Err(e) => {
+                return Err((
+                    StatusCode::BAD_REQUEST,
+                    Json(ErrorResponse {
+                        error: format!("Invalid timestamp format for 'until': {e}"),
+                        code: StatusCode::BAD_REQUEST.as_u16(),
+                    }),
+                ));
+            }
+        },
+        None => None,
+    };
+    grpc_to_rest(
+        headers,
+        service,
+        ExtendReservationRequest {
+            lb_id: id,
+            until: until_timestamp,
+        },
+        Some(addr),
+        |svc, req| async move { svc.handle_extend_reservation(req).await },
     )
     .await
 }

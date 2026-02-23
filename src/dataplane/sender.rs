@@ -253,7 +253,7 @@ impl Sender {
     }
 
     pub async fn send_ts(&mut self, buffer: &[u8], data_id: u16) -> u32 {
-        let tick = Utc::now().timestamp_millis() as u64;
+        let tick = Utc::now().timestamp_micros() as u64;
         self.send(buffer, tick, data_id).await
     }
 

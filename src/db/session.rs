@@ -502,4 +502,37 @@ impl LoadBalancerDB {
 
         Ok(())
     }
+
+    /// Soft-deletes all sessions (workers) for a reservation and cleans up their token permissions.
+    pub async fn clear_sessions(&self, reservation_id: i64) -> Result<()> {
+        let mut tx = self.write_pool.begin().await?;
+
+        // Hard delete token permissions for all sessions in this reservation
+        sqlx::query!(
+            "DELETE FROM token_session_permission
+             WHERE session_id IN (
+                 SELECT id FROM session WHERE reservation_id = ?1 AND deleted_at IS NULL
+             )",
+            reservation_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+        // Soft delete all sessions for this reservation
+        sqlx::query!(
+            "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+        tx.commit().await.map_err(Error::Database)?;
+
+        // Delete tokens with no remaining permissions
+        self.delete_tokens_with_no_permissions().await?;
+
+        Ok(())
+    }
 }

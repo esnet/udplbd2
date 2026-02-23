@@ -341,6 +341,74 @@ impl LoadBalancerDB {
         Ok(reservations)
     }
 
+    /// Clears sync (event_number) data for a reservation.
+    pub async fn clear_sync_data(&self, reservation_id: i64) -> Result<()> {
+        sqlx::query!(
+            "DELETE FROM event_number WHERE reservation_id = ?1",
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+        Ok(())
+    }
+
+    /// Soft-deletes all epochs for a reservation and resets the epoch counter.
+    pub async fn clear_epochs(&self, reservation_id: i64) -> Result<()> {
+        sqlx::query!(
+            "UPDATE epoch SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        sqlx::query!(
+            "UPDATE reservation SET current_epoch = 0 WHERE id = ?1",
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        Ok(())
+    }
+
+    /// Soft-deletes all senders for a reservation.
+    pub async fn clear_senders(&self, reservation_id: i64) -> Result<()> {
+        sqlx::query!(
+            "UPDATE sender SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+        Ok(())
+    }
+
+    /// Extends a reservation to the given expiration time, or 1 year from now if not specified.
+    /// Returns the new expiration time.
+    pub async fn extend_reservation(
+        &self,
+        reservation_id: i64,
+        until: Option<DateTime<Utc>>,
+    ) -> Result<DateTime<Utc>> {
+        let new_until = until
+            .unwrap_or_else(|| Utc::now() + Duration::days(365))
+            .timestamp_millis();
+        sqlx::query!(
+            "UPDATE reservation SET reserved_until = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+            new_until,
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+
+        DateTime::<Utc>::from_timestamp_millis(new_until)
+            .ok_or(Error::Parse("reserved_until out of range".to_string()))
+    }
+
     pub async fn delete_reservation(&self, reservation_id: i64) -> Result<()> {
         let mut tx = self.write_pool.begin().await?;
 

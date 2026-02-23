@@ -36,8 +36,12 @@ service LoadBalancer {
 	rpc GetLoadBalancer (GetLoadBalancerRequest) returns (ReserveLoadBalancerReply) {};
 	// Retrieves the current state of an LB
 	rpc LoadBalancerStatus (LoadBalancerStatusRequest) returns (LoadBalancerStatusReply) {};
-	// Sends a backend's state to server
+	// Ends a load balancer reservation
 	rpc FreeLoadBalancer (FreeLoadBalancerRequest) returns (FreeLoadBalancerReply) {};
+	// Reinitialize aspects of the load balancer while leaving others intact
+	rpc ResetLoadBalancer (ResetLoadBalancerRequest) returns (ResetLoadBalancerReply) {};
+	// Extend a load balancer reservation
+	rpc ExtendReservation (ExtendReservationRequest) returns (ExtendReservationReply) {};
 
 	// Update a sender address for a load balancer
     rpc AddSenders (AddSendersRequest) returns (AddSendersReply) {};
@@ -208,13 +212,34 @@ message FreeLoadBalancerRequest {
 }
 message FreeLoadBalancerReply {}
 
+// Reinitialize aspects of the load balancer while leaving others intact
+// WARNING: This gRPC will cause event loss if used during an active workflow
+message ResetLoadBalancerRequest {
+	string lbId = 1; // load balancer instance identifier
+	bool sync = 2; // if true, clear the received time sync data
+	bool epochs = 3; // if true, clear the existing epochs
+	bool senders = 4; // if true, clear the sender list
+	bool workers = 5; // if true, end all sessions
+}
+message ResetLoadBalancerReply {
+	bool sync = 2; // if true, received sync data was cleared
+	bool epochs = 3; // if true, existing epochs were cleared
+	bool senders = 4; // if true, senders were cleared
+	bool workers = 5; // if true, sessions were cleared
+}
+// Extend a load balancer reservation
+message ExtendReservationRequest {
+	string lbId = 1;
+	google.protobuf.Timestamp until = 2; // the new expiration time
+}
+message ExtendReservationReply {
+	google.protobuf.Timestamp until = 2; // the new expiration time
+};
 
 
 //
 // Register
 //
-
-
 message RegisterRequest {
 	string lbId = 2; // load balancer instance identifier
 	string name = 3; // name of receiver

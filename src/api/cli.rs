@@ -42,6 +42,10 @@ pub enum ApiCommand {
     Reserve(ReserveArgs),
     /// Free the reserved load balancer.
     Free,
+    /// Reset aspects of the load balancer while keeping the reservation.
+    Reset(ResetArgs),
+    /// Extend the load balancer reservation expiration.
+    Extend(ExtendArgs),
     /// Display an overview of the load balancers
     Overview,
     /// Manage allowed sender IP addresses.
@@ -94,6 +98,32 @@ pub struct ReserveArgs {
     /// IP family to use: 'dualstack', 'ipv4', or 'ipv6'.
     #[arg(long, value_name = "IP_FAMILY", default_value = "dualstack")]
     pub ip_family: String,
+}
+
+#[derive(Args, Debug)]
+pub struct ResetArgs {
+    /// Clear the received time sync data.
+    #[arg(long)]
+    pub sync: bool,
+    /// Clear the existing epochs.
+    #[arg(long)]
+    pub epochs: bool,
+    /// Clear the sender list.
+    #[arg(long)]
+    pub senders: bool,
+    /// End all worker sessions.
+    #[arg(long)]
+    pub workers: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct ExtendArgs {
+    /// New expiration timestamp (RFC 3339 format).
+    #[arg(long)]
+    pub until: Option<String>,
+    /// Duration offset for new expiration (e.g., "1hour 30min 2s").
+    #[arg(long)]
+    pub after: Option<String>,
 }
 
 #[derive(Subcommand, Debug)]
@@ -176,6 +206,58 @@ impl ApiCli {
                     "load balancer {} freed",
                     client.lb_id.unwrap_or("unknown".to_string())
                 );
+            }
+            ApiCommand::Reset(args) => {
+                let mut client = ControlPlaneClient::from_url(&url).await?;
+                let reply = client
+                    .reset_load_balancer(args.sync, args.epochs, args.senders, args.workers)
+                    .await?
+                    .into_inner();
+                let mut reset_items = Vec::new();
+                if reply.sync {
+                    reset_items.push("sync");
+                }
+                if reply.epochs {
+                    reset_items.push("epochs");
+                }
+                if reply.senders {
+                    reset_items.push("senders");
+                }
+                if reply.workers {
+                    reset_items.push("workers");
+                }
+                if reset_items.is_empty() {
+                    println!("no reset flags specified, nothing was reset");
+                } else {
+                    println!("reset: {}", reset_items.join(", "));
+                }
+            }
+            ApiCommand::Extend(args) => {
+                let expiration = match (&args.until, &args.after) {
+                    (Some(ts_str), None) => Some(ts_str.parse()?),
+                    (None, Some(duration_str)) => {
+                        let duration = parse_duration(duration_str)?;
+                        let now = std::time::SystemTime::now();
+                        let expiration = now + duration;
+                        Some(Timestamp::from(expiration))
+                    }
+                    (None, None) => None,
+                    _ => {
+                        return Err(Error::Usage(
+                            "cannot specify both --until and --after".to_string(),
+                        ))
+                    }
+                };
+                let mut client = ControlPlaneClient::from_url(&url).await?;
+                let reply = client.extend_reservation(expiration).await?.into_inner();
+                if let Some(until) = reply.until {
+                    let dt = Utc
+                        .timestamp_opt(until.seconds, until.nanos as u32)
+                        .unwrap();
+                    println!("reservation extended until {}", dt.to_rfc3339());
+                } else {
+                    println!("reservation extended");
+                }
             }
             ApiCommand::Overview => {
                 let overview = overview_to_string(url).await?;

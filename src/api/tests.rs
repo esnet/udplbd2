@@ -100,6 +100,7 @@ async fn test_create_token_invalid_parent() {
 #[tokio::test]
 async fn test_get_load_balancer_invalid_token() {
     let (service, reservation_id, _) = create_test_service().await;
+
     let mut request = Request::new(crate::proto::loadbalancer::v1::GetLoadBalancerRequest {
         lb_id: reservation_id.to_string(),
     });
@@ -449,6 +450,176 @@ async fn test_revoke_token_invalid_token() {
         err.contains("not found"),
         "Expected error to contain 'not found', got: {}",
         err
+    );
+}
+
+// ResetLoadBalancer Tests
+
+#[tokio::test]
+async fn test_reset_load_balancer_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ResetLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        sync: true,
+        epochs: true,
+        senders: true,
+        workers: true,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_reset_load_balancer(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_reset_load_balancer_clears_senders() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    // Verify sender was added
+    let senders = service
+        .db
+        .get_reservation_senders(reservation_id)
+        .await
+        .unwrap();
+    assert_eq!(senders.len(), 2);
+
+    // Reset senders only
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ResetLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        sync: false,
+        epochs: false,
+        senders: true,
+        workers: false,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let reply = service
+        .handle_reset_load_balancer(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(reply.senders);
+    assert!(!reply.sync);
+    assert!(!reply.epochs);
+    assert!(!reply.workers);
+
+    // Verify senders are cleared
+    let senders = service
+        .db
+        .get_reservation_senders(reservation_id)
+        .await
+        .unwrap();
+    assert!(senders.is_empty());
+}
+
+#[tokio::test]
+async fn test_reset_load_balancer_clears_workers() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    // Verify we have sessions (workers)
+    let sessions = service
+        .db
+        .get_reservation_sessions(reservation_id)
+        .await
+        .unwrap();
+    assert!(!sessions.is_empty());
+
+    // Reset workers only
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ResetLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        sync: false,
+        epochs: false,
+        senders: false,
+        workers: true,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let reply = service
+        .handle_reset_load_balancer(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(reply.workers);
+
+    // Verify workers are cleared
+    let sessions = service
+        .db
+        .get_reservation_sessions(reservation_id)
+        .await
+        .unwrap();
+    assert!(sessions.is_empty());
+}
+
+// ExtendReservation Tests
+#[tokio::test]
+async fn test_extend_reservation_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ExtendReservationRequest {
+        lb_id: reservation_id.to_string(),
+        until: None,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_extend_reservation(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_extend_reservation_with_until() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    let target = chrono::Utc::now() + chrono::Duration::hours(2);
+    let until_ts = prost_wkt_types::Timestamp {
+        seconds: target.timestamp(),
+        nanos: 0,
+    };
+
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ExtendReservationRequest {
+        lb_id: reservation_id.to_string(),
+        until: Some(until_ts),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let reply = service
+        .handle_extend_reservation(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(reply.until.is_some());
+
+    let until = reply.until.unwrap();
+    let expiry =
+        chrono::TimeZone::timestamp_opt(&chrono::Utc, until.seconds, until.nanos as u32).unwrap();
+    let diff = (expiry - target).num_seconds().abs();
+    assert!(
+        diff < 2,
+        "Expected expiry close to target, got {} seconds difference",
+        diff
     );
 }
 

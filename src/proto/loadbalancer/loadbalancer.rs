@@ -255,6 +255,61 @@ pub struct FreeLoadBalancerRequest {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct FreeLoadBalancerReply {}
+/// Reinitialize aspects of the load balancer while leaving others intact
+/// WARNING: This gRPC will cause event loss if used during an active workflow
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetLoadBalancerRequest {
+    /// load balancer instance identifier
+    #[prost(string, tag = "1")]
+    pub lb_id: ::prost::alloc::string::String,
+    /// if true, clear the received time sync data
+    #[prost(bool, tag = "2")]
+    pub sync: bool,
+    /// if true, clear the existing epochs
+    #[prost(bool, tag = "3")]
+    pub epochs: bool,
+    /// if true, clear the sender list
+    #[prost(bool, tag = "4")]
+    pub senders: bool,
+    /// if true, end all sessions
+    #[prost(bool, tag = "5")]
+    pub workers: bool,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResetLoadBalancerReply {
+    /// if true, received sync data was cleared
+    #[prost(bool, tag = "2")]
+    pub sync: bool,
+    /// if true, existing epochs were cleared
+    #[prost(bool, tag = "3")]
+    pub epochs: bool,
+    /// if true, senders were cleared
+    #[prost(bool, tag = "4")]
+    pub senders: bool,
+    /// if true, sessions were cleared
+    #[prost(bool, tag = "5")]
+    pub workers: bool,
+}
+/// Extend a load balancer reservation
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExtendReservationRequest {
+    #[prost(string, tag = "1")]
+    pub lb_id: ::prost::alloc::string::String,
+    /// the new expiration time
+    #[prost(message, optional, tag = "2")]
+    pub until: ::core::option::Option<::prost_wkt_types::Timestamp>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ExtendReservationReply {
+    /// the new expiration time
+    #[prost(message, optional, tag = "2")]
+    pub until: ::core::option::Option<::prost_wkt_types::Timestamp>,
+}
+/// Register
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct RegisterRequest {
@@ -952,7 +1007,7 @@ pub mod load_balancer_client {
                 );
             self.inner.unary(req, path, codec).await
         }
-        /// Sends a backend's state to server
+        /// Ends a load balancer reservation
         pub async fn free_load_balancer(
             &mut self,
             request: impl tonic::IntoRequest<super::FreeLoadBalancerRequest>,
@@ -976,6 +1031,60 @@ pub mod load_balancer_client {
             req.extensions_mut()
                 .insert(
                     GrpcMethod::new("loadbalancer.LoadBalancer", "FreeLoadBalancer"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Reinitialize aspects of the load balancer while leaving others intact
+        pub async fn reset_load_balancer(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ResetLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetLoadBalancerReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/loadbalancer.LoadBalancer/ResetLoadBalancer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("loadbalancer.LoadBalancer", "ResetLoadBalancer"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Extend a load balancer reservation
+        pub async fn extend_reservation(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ExtendReservationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExtendReservationReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/loadbalancer.LoadBalancer/ExtendReservation",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("loadbalancer.LoadBalancer", "ExtendReservation"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -1336,12 +1445,28 @@ pub mod load_balancer_server {
             tonic::Response<super::LoadBalancerStatusReply>,
             tonic::Status,
         >;
-        /// Sends a backend's state to server
+        /// Ends a load balancer reservation
         async fn free_load_balancer(
             &self,
             request: tonic::Request<super::FreeLoadBalancerRequest>,
         ) -> std::result::Result<
             tonic::Response<super::FreeLoadBalancerReply>,
+            tonic::Status,
+        >;
+        /// Reinitialize aspects of the load balancer while leaving others intact
+        async fn reset_load_balancer(
+            &self,
+            request: tonic::Request<super::ResetLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ResetLoadBalancerReply>,
+            tonic::Status,
+        >;
+        /// Extend a load balancer reservation
+        async fn extend_reservation(
+            &self,
+            request: tonic::Request<super::ExtendReservationRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ExtendReservationReply>,
             tonic::Status,
         >;
         /// Update a sender address for a load balancer
@@ -1680,6 +1805,98 @@ pub mod load_balancer_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = FreeLoadBalancerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/loadbalancer.LoadBalancer/ResetLoadBalancer" => {
+                    #[allow(non_camel_case_types)]
+                    struct ResetLoadBalancerSvc<T: LoadBalancer>(pub Arc<T>);
+                    impl<
+                        T: LoadBalancer,
+                    > tonic::server::UnaryService<super::ResetLoadBalancerRequest>
+                    for ResetLoadBalancerSvc<T> {
+                        type Response = super::ResetLoadBalancerReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ResetLoadBalancerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as LoadBalancer>::reset_load_balancer(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ResetLoadBalancerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/loadbalancer.LoadBalancer/ExtendReservation" => {
+                    #[allow(non_camel_case_types)]
+                    struct ExtendReservationSvc<T: LoadBalancer>(pub Arc<T>);
+                    impl<
+                        T: LoadBalancer,
+                    > tonic::server::UnaryService<super::ExtendReservationRequest>
+                    for ExtendReservationSvc<T> {
+                        type Response = super::ExtendReservationReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ExtendReservationRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as LoadBalancer>::extend_reservation(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ExtendReservationSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
