@@ -112,6 +112,7 @@ async fn test_archive_db_rotation_and_pruning() {
         fsync: false,
         cleanup_interval: "10s".to_string(),
         cleanup_age: "10s".to_string(),
+        backup_before_migrate: false,
     };
 
     // Create DB with archive manager

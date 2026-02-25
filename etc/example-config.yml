@@ -20,6 +20,18 @@ lb:
     - ipv4: "192.0.2.4"
       ipv6: "2001:DB8::4"
       event_number_port: 19534
+    - ipv4: "192.0.2.5"
+      ipv6: "2001:DB8::5"
+      event_number_port: 19535
+    - ipv4: "192.0.2.6"
+      ipv6: "2001:DB8::6"
+      event_number_port: 19536
+    - ipv4: "192.0.2.7"
+      ipv6: "2001:DB8::7"
+      event_number_port: 19537
+    - ipv4: "192.0.2.8"
+      ipv6: "2001:DB8::8"
+      event_number_port: 19538
 
 # Database configuration
 database:
@@ -37,6 +49,8 @@ database:
   archive_keep: 10
   # [bool] If true, use full fsync for durability (default: false, for performance)
   fsync: false
+  # [bool] If true, create a backup before applying migrations
+  backup_before_migrate: true
 
 # Controller timing configuration
 controller:
@@ -120,7 +134,15 @@ mock:
     "192.0.2.2": "127.0.0.1:19523"
     "192.0.2.3": "127.0.0.1:19524"
     "192.0.2.4": "127.0.0.1:19525"
+    "192.0.2.5": "127.0.0.1:19526"
+    "192.0.2.6": "127.0.0.1:19527"
+    "192.0.2.7": "127.0.0.1:19528"
+    "192.0.2.8": "127.0.0.1:19529"
     "2001:DB8::1": "[::1]:19522"
     "2001:DB8::2": "[::1]:19523"
     "2001:DB8::3": "[::1]:19524"
     "2001:DB8::4": "[::1]:19525"
+    "2001:DB8::5": "[::1]:19526"
+    "2001:DB8::6": "[::1]:19527"
+    "2001:DB8::7": "[::1]:19528"
+    "2001:DB8::8": "[::1]:19529"

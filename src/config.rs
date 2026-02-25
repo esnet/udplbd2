@@ -97,6 +97,10 @@ pub struct DatabaseConfig {
     /// Number of rotated database to keep around
     #[serde(default = "default_archive_keep")]
     pub archive_keep: u32,
+
+    /// Whether to backup the database before running migrations
+    #[serde(default = "default_backup_before_migrate")]
+    pub backup_before_migrate: bool,
 }
 
 fn default_archive_rotation() -> String {
@@ -105,6 +109,10 @@ fn default_archive_rotation() -> String {
 
 fn default_archive_keep() -> u32 {
     7
+}
+
+fn default_backup_before_migrate() -> bool {
+    true
 }
 
 fn default_cleanup_interval() -> String {
@@ -318,6 +326,7 @@ impl Config {
                 archive_dir: None,
                 archive_rotation: "168h".to_string(),
                 archive_keep: 1,
+                backup_before_migrate: false,
             },
             controller: ControllerConfig {
                 duration: "1s".to_string(),

@@ -75,9 +75,76 @@ impl LoadBalancerDB {
         })
     }
 
+    /// If the database file exists and has pending migrations, copy it to a backup file.
+    /// The backup overwrites any previous backup to avoid unbounded growth.
+    async fn backup_before_migrate(db_path: &Path) -> Result<()> {
+        if !db_path.exists() {
+            return Ok(());
+        }
+
+        // Open a temporary read-only connection to check applied migrations
+        let options = sqlx::sqlite::SqliteConnectOptions::new()
+            .filename(db_path)
+            .create_if_missing(false);
+
+        let pool = sqlx::sqlite::SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect_with(options)
+            .await
+            .map_err(Error::Database)?;
+
+        // Check if the _sqlx_migrations table exists
+        let table_exists: bool = sqlx::query_scalar::<_, i32>(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='_sqlx_migrations'",
+        )
+        .fetch_one(&pool)
+        .await
+        .map(|count| count > 0)
+        .unwrap_or(false);
+
+        let applied_count = if table_exists {
+            sqlx::query_scalar::<_, i32>("SELECT COUNT(*) FROM _sqlx_migrations")
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0)
+        } else {
+            0
+        };
+
+        pool.close().await;
+
+        let total_migrations = MIGRATOR.migrations.len() as i32;
+        if applied_count >= total_migrations {
+            debug!(
+                "no pending migrations (applied={applied_count}, total={total_migrations}), skipping backup"
+            );
+            return Ok(());
+        }
+
+        let pending = total_migrations - applied_count;
+        let backup_name = format!(
+            "{}.pre-migrate.bak",
+            db_path.file_name().unwrap_or_default().to_string_lossy()
+        );
+        let backup_path = db_path.with_file_name(&backup_name);
+
+        info!(
+            "{pending} pending migration(s), backing up database to {}",
+            backup_path.display()
+        );
+        fs::copy(db_path, &backup_path).map_err(Error::IoError)?;
+
+        Ok(())
+    }
+
     /// Alternative constructor: create from config, using config.database.file and archive settings.
     pub async fn with_config(config: &Config) -> Result<Self> {
         let db_path = &config.database.file;
+
+        if config.database.backup_before_migrate {
+            Self::backup_before_migrate(db_path.as_path()).await?;
+        }
+
         let mut db = Self::new(db_path).await?;
 
         // If an archive directory is configured, initialize ArchiveDBManager
