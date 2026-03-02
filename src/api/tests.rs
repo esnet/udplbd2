@@ -623,6 +623,492 @@ async fn test_extend_reservation_with_until() {
     );
 }
 
+// Token hierarchy tests (list_child_tokens, list_token_permissions, revoke_token with descendants)
+
+/// Helper to create a child token via the handler and return the new token string
+async fn create_child_token(
+    service: &LoadBalancerService,
+    parent_token: &str,
+    name: &str,
+    permissions: Vec<crate::proto::loadbalancer::v1::TokenPermission>,
+) -> String {
+    let mut request = Request::new(CreateTokenRequest {
+        name: name.to_string(),
+        permissions,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {parent_token}")).unwrap(),
+    );
+    service
+        .handle_create_token(request)
+        .await
+        .unwrap()
+        .into_inner()
+        .token
+}
+
+fn make_global_read_permission() -> crate::proto::loadbalancer::v1::TokenPermission {
+    use crate::proto::loadbalancer::v1::token_permission::{
+        PermissionType as ProtoPermissionType, ResourceType,
+    };
+    crate::proto::loadbalancer::v1::TokenPermission {
+        resource_type: ResourceType::All.into(),
+        resource_id: String::new(),
+        permission: ProtoPermissionType::ReadOnly.into(),
+    }
+}
+
+#[tokio::test]
+async fn test_list_child_tokens_direct_parent() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+
+    // List children of admin using admin's own token
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
+        target: None,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer admin").unwrap(),
+    );
+    let reply = service
+        .handle_list_child_tokens(request)
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(reply.tokens.len(), 1);
+    assert_eq!(reply.tokens[0].name, "child");
+
+    // Also verify the child token itself has no children
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
+        target: None,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let reply = service
+        .handle_list_child_tokens(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert!(reply.tokens.is_empty());
+}
+
+#[tokio::test]
+async fn test_list_child_tokens_grandparent_sees_all_descendants() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child -> grandchild
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let _grandchild_token = create_child_token(
+        &service,
+        &child_token,
+        "grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    // Admin lists descendants: should see both child and grandchild
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
+        target: None,
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer admin").unwrap(),
+    );
+    let reply = service
+        .handle_list_child_tokens(request)
+        .await
+        .unwrap()
+        .into_inner();
+
+    assert_eq!(reply.tokens.len(), 2);
+    let names: Vec<&str> = reply.tokens.iter().map(|t| t.name.as_str()).collect();
+    assert!(names.contains(&"child"), "Expected 'child' in {names:?}");
+    assert!(
+        names.contains(&"grandchild"),
+        "Expected 'grandchild' in {names:?}"
+    );
+}
+
+#[tokio::test]
+async fn test_list_child_tokens_unrelated_token_denied() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child, admin -> unrelated
+    let _child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let unrelated_token = create_child_token(
+        &service,
+        "admin",
+        "unrelated",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    // Get child's token ID
+    let child_id = service
+        .db
+        .get_token_id(&_child_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // unrelated tries to list child's children -> permission denied
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(child_id as u32),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {unrelated_token}")).unwrap(),
+    );
+    let result = service.handle_list_child_tokens(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("permission"),
+        "Expected permission denied"
+    );
+}
+
+#[tokio::test]
+async fn test_list_token_permissions_parent_can_view_descendant() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child -> grandchild
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let grandchild_token = create_child_token(
+        &service,
+        &child_token,
+        "grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    // child views grandchild's permissions (direct parent)
+    let grandchild_id = service
+        .db
+        .get_token_id(&grandchild_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut request = Request::new(
+        crate::proto::loadbalancer::v1::ListTokenPermissionsRequest {
+            target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+                token_selector: Some(
+                    crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                        grandchild_id as u32,
+                    ),
+                ),
+            }),
+        },
+    );
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let reply = service
+        .handle_list_token_permissions(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(reply.token.unwrap().name, "grandchild");
+}
+
+#[tokio::test]
+async fn test_list_token_permissions_grandparent_can_view_grandchild() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child -> grandchild
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let grandchild_token = create_child_token(
+        &service,
+        &child_token,
+        "grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    // admin views grandchild's permissions (grandparent, not direct parent)
+    // admin has global Update so it passes via the admin check, but let's test
+    // with a mid-level token that is only a ReadOnly ancestor
+    let grandchild_id = service
+        .db
+        .get_token_id(&grandchild_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let mut request = Request::new(
+        crate::proto::loadbalancer::v1::ListTokenPermissionsRequest {
+            target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+                token_selector: Some(
+                    crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                        grandchild_id as u32,
+                    ),
+                ),
+            }),
+        },
+    );
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let reply = service
+        .handle_list_token_permissions(request)
+        .await
+        .unwrap()
+        .into_inner();
+    assert_eq!(reply.token.unwrap().name, "grandchild");
+}
+
+#[tokio::test]
+async fn test_list_token_permissions_unrelated_token_denied() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child, admin -> unrelated (readonly)
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let unrelated_token = create_child_token(
+        &service,
+        "admin",
+        "unrelated",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    let child_id = service
+        .db
+        .get_token_id(&child_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // unrelated tries to view child's permissions -> denied (not a descendant, not admin)
+    let mut request = Request::new(
+        crate::proto::loadbalancer::v1::ListTokenPermissionsRequest {
+            target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+                token_selector: Some(
+                    crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                        child_id as u32,
+                    ),
+                ),
+            }),
+        },
+    );
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {unrelated_token}")).unwrap(),
+    );
+    let result = service.handle_list_token_permissions(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("permission"),
+        "Expected permission denied"
+    );
+}
+
+#[tokio::test]
+async fn test_revoke_token_grandparent_can_revoke_grandchild() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child -> grandchild
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let grandchild_token = create_child_token(
+        &service,
+        &child_token,
+        "grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    let grandchild_id = service
+        .db
+        .get_token_id(&grandchild_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // child (non-admin parent) revokes grandchild
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                    grandchild_id as u32,
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let result = service.handle_revoke_token(request).await;
+    assert!(result.is_ok(), "Parent should be able to revoke child");
+
+    // Verify grandchild is gone
+    let id = service.db.get_token_id(&grandchild_token).await.unwrap();
+    assert!(id.is_none(), "Grandchild token should be revoked");
+}
+
+#[tokio::test]
+async fn test_revoke_token_ancestor_can_revoke_deep_descendant() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child -> grandchild -> great_grandchild
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let grandchild_token = create_child_token(
+        &service,
+        &child_token,
+        "grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+    let great_grandchild_token = create_child_token(
+        &service,
+        &grandchild_token,
+        "great-grandchild",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    let great_grandchild_id = service
+        .db
+        .get_token_id(&great_grandchild_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // child revokes great-grandchild (2 levels down)
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                    great_grandchild_id as u32,
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let result = service.handle_revoke_token(request).await;
+    assert!(
+        result.is_ok(),
+        "Ancestor should be able to revoke deep descendant"
+    );
+
+    let id = service
+        .db
+        .get_token_id(&great_grandchild_token)
+        .await
+        .unwrap();
+    assert!(id.is_none(), "Great-grandchild token should be revoked");
+}
+
+#[tokio::test]
+async fn test_revoke_token_unrelated_token_denied() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child, admin -> unrelated
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let unrelated_token = create_child_token(
+        &service,
+        "admin",
+        "unrelated",
+        vec![make_global_read_permission()],
+    )
+    .await;
+
+    let child_id = service
+        .db
+        .get_token_id(&child_token)
+        .await
+        .unwrap()
+        .unwrap();
+
+    // unrelated tries to revoke child -> denied
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                    child_id as u32,
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {unrelated_token}")).unwrap(),
+    );
+    let result = service.handle_revoke_token(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("permission"),
+        "Expected permission denied"
+    );
+}
+
+#[tokio::test]
+async fn test_revoke_token_child_cannot_revoke_parent() {
+    let (service, _, _) = create_test_service().await;
+    service.db.create_admin_token("admin").await.unwrap();
+
+    // admin -> child
+    let child_token =
+        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+
+    // Get admin token ID
+    let admin_id = service.db.get_token_id("admin").await.unwrap().unwrap();
+
+    // child tries to revoke admin (its parent) -> denied
+    let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
+        target: Some(crate::proto::loadbalancer::v1::TokenSelector {
+            token_selector: Some(
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
+                    admin_id as u32,
+                ),
+            ),
+        }),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
+    );
+    let result = service.handle_revoke_token(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("permission"),
+        "Child should not be able to revoke its parent"
+    );
+}
+
 // IP Validation Tests
 
 #[tokio::test]

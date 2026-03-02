@@ -260,6 +260,36 @@ impl LoadBalancerDB {
         Ok(children)
     }
 
+    /// Recursively list all descendant tokens of the given parent token ID.
+    pub async fn list_descendant_tokens_by_id(
+        &self,
+        parent_id: i64,
+    ) -> Result<Vec<TokenDetails>> {
+        let descendant_tokens = sqlx::query!(
+            r#"
+            WITH RECURSIVE token_tree AS (
+                SELECT id FROM token WHERE parent_token_id = ?1
+                UNION ALL
+                SELECT t.id FROM token t
+                INNER JOIN token_tree tt ON t.parent_token_id = tt.id
+            )
+            SELECT id FROM token_tree
+            "#,
+            parent_id
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        let mut descendants = Vec::new();
+        for token in descendant_tokens {
+            if let Some(details) = self.get_token_details_by_id(token.id).await? {
+                descendants.push(details);
+            }
+        }
+
+        Ok(descendants)
+    }
+
     pub async fn validate_token(
         &self,
         token: &str,

@@ -312,13 +312,20 @@ impl LoadBalancerService {
 
             if !has_permission {
                 // Check if the target token is a child of the request token
-                let children = self
+                let request_token_id = self
                     .db
-                    .list_child_tokens(&request_token)
+                    .get_token_id(&request_token)
                     .await
-                    .map_err(|e| Status::internal(format!("Failed to list child tokens: {e}")))?;
+                    .map_err(|e| Status::internal(format!("Failed to get request token ID: {e}")))?
+                    .ok_or_else(|| Status::not_found("Request token not found"))?;
 
-                let is_child = children.iter().any(|child| child.name == details.name);
+                let descendants = self
+                    .db
+                    .list_descendant_tokens_by_id(request_token_id)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to list descendant tokens: {e}")))?;
+
+                let is_child = descendants.iter().any(|child| child.name == details.name);
 
                 if !is_child {
                     warn!(
@@ -417,9 +424,9 @@ impl LoadBalancerService {
 
         let children = self
             .db
-            .list_child_tokens_by_id(parent_token_id)
+            .list_descendant_tokens_by_id(parent_token_id)
             .await
-            .map_err(|e| Status::internal(format!("Failed to list child tokens: {e}")))?;
+            .map_err(|e| Status::internal(format!("Failed to list descendant tokens: {e}")))?;
 
         let mut proto_tokens = Vec::new();
         for child in children {
@@ -497,14 +504,14 @@ impl LoadBalancerService {
         });
 
         if !has_permission {
-            // Check if the token to revoke is a child of the request token
-            let children = self
+            // Check if the token to revoke is a descendant of the request token
+            let descendants = self
                 .db
-                .list_child_tokens_by_id(request_token_id)
+                .list_descendant_tokens_by_id(request_token_id)
                 .await
-                .map_err(|e| Status::internal(format!("Failed to list child tokens: {e}")))?;
+                .map_err(|e| Status::internal(format!("Failed to list descendant tokens: {e}")))?;
 
-            has_permission = children.iter().any(|child| child.id == token_to_revoke_id);
+            has_permission = descendants.iter().any(|child| child.id == token_to_revoke_id);
         }
 
         if !has_permission {
