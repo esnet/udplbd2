@@ -409,6 +409,193 @@ impl LoadBalancerDB {
             .ok_or(Error::Parse("reserved_until out of range".to_string()))
     }
 
+    /// Creates an upstream chain record for a reservation.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn create_upstream_chain(
+        &self,
+        reservation_id: i64,
+        grpc_host: &str,
+        grpc_port: u16,
+        tls_enabled: bool,
+        lb_id: &str,
+        session_token: &str,
+        session_id: &str,
+    ) -> Result<crate::db::models::UpstreamChain> {
+        let tls_int = i32::from(tls_enabled);
+        let port_int = grpc_port as i32;
+        let record = sqlx::query!(
+            r#"
+            INSERT INTO upstream_chain (reservation_id, upstream_grpc_host, upstream_grpc_port,
+                upstream_tls_enabled, upstream_lb_id, upstream_session_token, upstream_session_id)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            RETURNING id, reservation_id, upstream_grpc_host, upstream_grpc_port,
+                upstream_tls_enabled, upstream_lb_id, upstream_session_token,
+                upstream_session_id, created_at, deleted_at
+            "#,
+            reservation_id,
+            grpc_host,
+            port_int,
+            tls_int,
+            lb_id,
+            session_token,
+            session_id
+        )
+        .fetch_one(&self.write_pool)
+        .await?;
+
+        let id = record.id.ok_or(Error::Parse("missing id".to_string()))?;
+
+        Ok(crate::db::models::UpstreamChain {
+            id,
+            reservation_id: record.reservation_id,
+            upstream_grpc_host: record.upstream_grpc_host,
+            upstream_grpc_port: record.upstream_grpc_port as u16,
+            upstream_tls_enabled: record.upstream_tls_enabled != 0,
+            upstream_lb_id: record.upstream_lb_id,
+            upstream_session_token: record.upstream_session_token,
+            upstream_session_id: record.upstream_session_id,
+            created_at: DateTime::<Utc>::from_timestamp_millis(record.created_at as i64)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: None,
+        })
+    }
+
+    /// Gets an upstream chain by ID.
+    pub async fn get_upstream_chain(
+        &self,
+        chain_id: i64,
+    ) -> Result<crate::db::models::UpstreamChain> {
+        let r = sqlx::query!(
+            r#"
+            SELECT id, reservation_id, upstream_grpc_host, upstream_grpc_port,
+                upstream_tls_enabled, upstream_lb_id, upstream_session_token,
+                upstream_session_id, created_at, deleted_at
+            FROM upstream_chain
+            WHERE id = ?1 AND deleted_at IS NULL
+            "#,
+            chain_id
+        )
+        .fetch_optional(&self.read_pool)
+        .await?
+        .ok_or_else(|| Error::NotFound(format!("Upstream chain {chain_id} not found")))?;
+
+        Ok(crate::db::models::UpstreamChain {
+            id: r.id,
+            reservation_id: r.reservation_id,
+            upstream_grpc_host: r.upstream_grpc_host,
+            upstream_grpc_port: r.upstream_grpc_port as u16,
+            upstream_tls_enabled: r.upstream_tls_enabled != 0,
+            upstream_lb_id: r.upstream_lb_id,
+            upstream_session_token: r.upstream_session_token,
+            upstream_session_id: r.upstream_session_id,
+            created_at: DateTime::<Utc>::from_timestamp_millis(r.created_at as i64)
+                .ok_or(Error::Parse("created_at out of range".to_string()))?,
+            deleted_at: None,
+        })
+    }
+
+    /// Lists all upstream chains for a reservation.
+    pub async fn list_upstream_chains_for_reservation(
+        &self,
+        reservation_id: i64,
+    ) -> Result<Vec<crate::db::models::UpstreamChain>> {
+        let records = sqlx::query!(
+            r#"
+            SELECT id, reservation_id, upstream_grpc_host, upstream_grpc_port,
+                upstream_tls_enabled, upstream_lb_id, upstream_session_token,
+                upstream_session_id, created_at, deleted_at
+            FROM upstream_chain
+            WHERE reservation_id = ?1 AND deleted_at IS NULL
+            "#,
+            reservation_id
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        let mut chains = Vec::with_capacity(records.len());
+        for r in records {
+            chains.push(crate::db::models::UpstreamChain {
+                id: r.id,
+                reservation_id: r.reservation_id,
+                upstream_grpc_host: r.upstream_grpc_host,
+                upstream_grpc_port: r.upstream_grpc_port as u16,
+                upstream_tls_enabled: r.upstream_tls_enabled != 0,
+                upstream_lb_id: r.upstream_lb_id,
+                upstream_session_token: r.upstream_session_token,
+                upstream_session_id: r.upstream_session_id,
+                created_at: DateTime::<Utc>::from_timestamp_millis(r.created_at as i64)
+                    .ok_or(Error::Parse("created_at out of range".to_string()))?,
+                deleted_at: None,
+            });
+        }
+
+        Ok(chains)
+    }
+
+    /// Lists all active upstream chains across all reservations (for the background SendState task).
+    pub async fn list_active_upstream_chains(
+        &self,
+    ) -> Result<Vec<crate::db::models::UpstreamChain>> {
+        let records = sqlx::query!(
+            r#"
+            SELECT uc.id, uc.reservation_id, uc.upstream_grpc_host, uc.upstream_grpc_port,
+                uc.upstream_tls_enabled, uc.upstream_lb_id, uc.upstream_session_token,
+                uc.upstream_session_id, uc.created_at, uc.deleted_at
+            FROM upstream_chain uc
+            JOIN reservation r ON uc.reservation_id = r.id
+            WHERE uc.deleted_at IS NULL AND r.deleted_at IS NULL
+            "#
+        )
+        .fetch_all(&self.read_pool)
+        .await?;
+
+        let mut chains = Vec::with_capacity(records.len());
+        for r in records {
+            chains.push(crate::db::models::UpstreamChain {
+                id: r.id,
+                reservation_id: r.reservation_id,
+                upstream_grpc_host: r.upstream_grpc_host,
+                upstream_grpc_port: r.upstream_grpc_port as u16,
+                upstream_tls_enabled: r.upstream_tls_enabled != 0,
+                upstream_lb_id: r.upstream_lb_id,
+                upstream_session_token: r.upstream_session_token,
+                upstream_session_id: r.upstream_session_id,
+                created_at: DateTime::<Utc>::from_timestamp_millis(r.created_at as i64)
+                    .ok_or(Error::Parse("created_at out of range".to_string()))?,
+                deleted_at: None,
+            });
+        }
+
+        Ok(chains)
+    }
+
+    /// Soft-deletes a specific upstream chain by ID.
+    pub async fn delete_upstream_chain(&self, chain_id: i64) -> Result<()> {
+        sqlx::query!(
+            "UPDATE upstream_chain SET deleted_at = unixepoch('subsec') * 1000 WHERE id = ?1 AND deleted_at IS NULL",
+            chain_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+        Ok(())
+    }
+
+    /// Soft-deletes all upstream chains for a reservation.
+    pub async fn delete_upstream_chains_for_reservation(
+        &self,
+        reservation_id: i64,
+    ) -> Result<()> {
+        sqlx::query!(
+            "UPDATE upstream_chain SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+            reservation_id
+        )
+        .execute(&self.write_pool)
+        .await
+        .map_err(Error::Database)?;
+        Ok(())
+    }
+
     pub async fn delete_reservation(&self, reservation_id: i64) -> Result<()> {
         let mut tx = self.write_pool.begin().await?;
 

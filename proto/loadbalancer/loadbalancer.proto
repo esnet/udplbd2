@@ -75,6 +75,13 @@ service LoadBalancer {
 	rpc ListChildTokens (ListChildTokensRequest) returns (ListChildTokensReply) {};
 	// Revokes a token and all its children
 	rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenReply) {};
+
+	// Registers this load balancer as a receiver with an upstream control plane,
+	// enabling LB chaining. The local LB's data plane address is registered upstream
+	// with keepLbHeader = true. Aggregated SendState updates are sent periodically.
+	rpc ChainLoadBalancer (ChainLoadBalancerRequest) returns (ChainLoadBalancerReply) {};
+	// Removes a specific upstream chain by ID, deregistering from the upstream control plane.
+	rpc UnchainLoadBalancer (UnchainLoadBalancerRequest) returns (UnchainLoadBalancerReply) {};
 }
 
 
@@ -480,3 +487,29 @@ message RevokeTokenRequest {
 }
 
 message RevokeTokenReply {}
+
+
+//
+// ChainLoadBalancer
+//
+message ChainLoadBalancerRequest {
+	string lbId = 1; // local reservation ID
+	string ejfatUri = 2; // EJFAT URI of the upstream control plane (including token and lb_id)
+	IpFamily ipFamily = 3; // IPV4 or IPV6 only (DUAL_STACK not allowed)
+	float weight = 4; // relative weight of this node for initial lb calendar
+	float minFactor = 5; // min slot factor (see Register)
+	float maxFactor = 6; // max slot factor (see Register)
+	repeated SlotRange slotDemands = 7; // slot ranges that should always be assigned to this node
+}
+message ChainLoadBalancerReply {
+	string chainId = 1; // database identifier for this upstream chain
+}
+
+//
+// UnchainLoadBalancer
+//
+message UnchainLoadBalancerRequest {
+	string lbId = 1; // local reservation ID
+	string chainId = 2; // upstream chain ID from ChainLoadBalancerReply
+}
+message UnchainLoadBalancerReply {}

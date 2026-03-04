@@ -178,6 +178,20 @@ impl std::str::FromStr for PermissionType {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct UpstreamChain {
+    pub id: i64,
+    pub reservation_id: i64,
+    pub upstream_grpc_host: String,
+    pub upstream_grpc_port: u16,
+    pub upstream_tls_enabled: bool,
+    pub upstream_lb_id: String,
+    pub upstream_session_token: String,
+    pub upstream_session_id: String,
+    pub created_at: DateTime<Utc>,
+    pub deleted_at: Option<DateTime<Utc>>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct StatGlobalSample {
     pub sampled_at: i64,

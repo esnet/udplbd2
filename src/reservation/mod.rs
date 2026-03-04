@@ -19,6 +19,8 @@ pub mod static_reservation {
     include!("static_reservation.rs");
 }
 
+pub mod upstream;
+
 pub mod turmoil {
     pub mod event_id_sync {
         use turmoil::net::UdpSocket;

@@ -266,6 +266,9 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
     manager.initialize(is_empty).await?;
     let manager_arc = Arc::new(Mutex::new(manager));
 
+    // Start upstream SendState background task
+    crate::reservation::upstream::start_upstream_send_state(db.clone());
+
     let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config, false);
 
     try_join_all(server_futures).await?;
@@ -394,6 +397,9 @@ pub async fn start_mocked_server(
     let manager_arc = Arc::new(Mutex::new(manager));
 
     trace!("initialized rules manager");
+
+    // Start upstream SendState background task
+    crate::reservation::upstream::start_upstream_send_state(db.clone());
 
     let server_futures = build_server_futures(db.clone(), manager_arc.clone(), &sim_config, true);
 
