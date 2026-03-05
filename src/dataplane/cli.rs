@@ -1,37 +1,37 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/dataplane/cli.rs
 use clap::{Args, Parser, Subcommand};
+use std::collections::HashMap;
 use std::io;
+use std::net::IpAddr;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::{fs::File, mem::size_of, path::Path};
+
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UdpSocket;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
+use tracing::info;
 use zerocopy::FromBytes;
 
+use super::turmoil::tester::run_turmoil_test;
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
 use crate::dataplane::doctor::doctor_multi;
 use crate::dataplane::meta_events::MetaEventContext;
+use crate::dataplane::meta_events::MetaEventType;
+use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
 use crate::dataplane::protocol::EjfatEvent;
+use crate::dataplane::protocol::LBHeader;
 use crate::dataplane::protocol::{
     LBPayload, ReassemblyPayload, LB_HEADER_SIZE, REASSEMBLY_HEADER_SIZE,
 };
+use crate::dataplane::receiver::{Receiver, ZeroMockReceiver};
 use crate::dataplane::sender::Sender;
 use crate::dataplane::tester;
 use crate::errors::{Error, Result};
-
-use crate::dataplane::meta_events::MetaEventType;
-use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
-use crate::dataplane::protocol::LBHeader;
-use crate::dataplane::receiver::{Receiver, ZeroMockReceiver};
-
 use crate::macaddr::get_mac_addr;
-use std::net::IpAddr;
-
-use super::turmoil::tester::run_turmoil_test;
 
 /// Dataplane commands for testing the EJFAT protocol.
 ///
@@ -83,6 +83,8 @@ pub enum DataplaneCommand {
     Stats(StatsArgs),
     /// Start a zero mock receiver that registers and sends zero control signals without opening a port.
     ZeroMockRecv(ZeroMockArgs),
+    /// Ping all configured load balancer addresses.
+    Ping(PingArgs),
 }
 
 #[derive(Args, Debug)]
@@ -217,6 +219,16 @@ pub struct MacAddrArgs {
 pub struct StatsArgs {}
 
 #[derive(Args, Debug)]
+pub struct PingArgs {
+    /// Number of ping packets to send to each address
+    #[arg(short, long, default_value = "1")]
+    pub count: usize,
+    /// Timeout in seconds for each ping
+    #[arg(short, long, default_value = "5")]
+    pub timeout: u64,
+}
+
+#[derive(Args, Debug)]
 pub struct ZeroMockArgs {
     /// IP address to register with.
     #[arg(short, long)]
@@ -309,7 +321,14 @@ impl DataplaneCli {
                     .to
                     .as_ref()
                     .map(|addr| addr.parse().expect("Invalid address:port format"));
-                send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot).await?;
+                send_file(
+                    args.file.clone(),
+                    target_addr,
+                    url.to_string(),
+                    0,
+                    args.slot,
+                )
+                .await?;
             }
             DataplaneCommand::Doctor(args) => {
                 let results =
@@ -399,6 +418,9 @@ impl DataplaneCli {
                     slot_demands,
                 )
                 .await?;
+            }
+            DataplaneCommand::Ping(args) => {
+                ping_lb_addresses(config, args.count, args.timeout).await?;
             }
         }
         Ok(())
@@ -741,4 +763,135 @@ async fn start_zero_mock_receiver(
     println!("\nstopping zero mock receiver...");
 
     Ok(())
+}
+
+struct PingResult {
+    addr: String,
+    success: bool,
+    output: String,
+}
+
+impl std::fmt::Display for PingResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.success {
+            write!(f, "  \x1b[32m✓\x1b[0m {} reachable: ", self.addr)?;
+            for line in self.output.lines() {
+                if line.contains("packets transmitted") || line.contains("packet loss") {
+                    writeln!(f, "{}", line.trim())?;
+                }
+            }
+        } else {
+            write!(f, "  \x1b[31m✗\x1b[0m {} unreachable: ", self.addr)?;
+            for line in self.output.lines().take(3) {
+                if !line.trim().is_empty() {
+                    writeln!(f, "  {}", line.trim())?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+struct LBPingResult {
+    ipv4: Option<PingResult>,
+    ipv6: Option<PingResult>,
+}
+
+async fn ping_lb_addresses(config: &Config, count: usize, timeout: u64) -> Result<()> {
+    if config.lb.instances.is_empty() {
+        println!("no load balancer instances configured");
+        return Ok(());
+    }
+
+    info!("pinging {} load balancers...\n", config.lb.instances.len());
+
+    let mut tasks: HashMap<usize, (Option<_>, Option<_>)> = HashMap::new();
+    for (idx, instance) in config.lb.instances.iter().enumerate() {
+        let ipv4_task = instance
+            .ipv4
+            .map(|ipv4| tokio::spawn(ping_address(IpAddr::V4(ipv4), count, timeout)));
+
+        let ipv6_task = instance
+            .ipv6
+            .map(|ipv6| tokio::spawn(ping_address(IpAddr::V6(ipv6), count, timeout)));
+
+        tasks.insert(idx + 1, (ipv4_task, ipv6_task));
+    }
+
+    let mut completed_results: HashMap<usize, LBPingResult> = HashMap::new();
+    for (idx, (ipv4_task, ipv6_task)) in tasks {
+        let mut instance_result = LBPingResult {
+            ipv4: None,
+            ipv6: None,
+        };
+        instance_result.ipv4 = resolve_ping_task(ipv4_task).await;
+        instance_result.ipv6 = resolve_ping_task(ipv6_task).await;
+        completed_results.insert(idx, instance_result);
+    }
+
+    let mut sorted_results: Vec<_> = completed_results.into_iter().collect();
+    sorted_results.sort_by_key(|(idx, _)| *idx);
+
+    for (idx, instance) in sorted_results {
+        println!("LB {idx}");
+        if let Some(ref v4) = instance.ipv4 {
+            print!("{v4}");
+        }
+        if let Some(ref v6) = instance.ipv6 {
+            print!("{v6}");
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+async fn resolve_ping_task(
+    task: Option<tokio::task::JoinHandle<Result<PingResult>>>,
+) -> Option<PingResult> {
+    let task = task?;
+    let result = match task.await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => PingResult {
+            addr: "unknown".to_string(),
+            success: false,
+            output: format!("failed to ping: {e}"),
+        },
+        Err(join_err) => PingResult {
+            addr: "unknown".to_string(),
+            success: false,
+            output: format!("task failed: {join_err}"),
+        },
+    };
+    Some(result)
+}
+
+async fn ping_address(addr: IpAddr, count: usize, timeout: u64) -> Result<PingResult> {
+    let addr_str = addr.to_string();
+    let mut cmd = Command::new("ping");
+
+    #[cfg(target_os = "macos")]
+    {
+        cmd.arg("-c").arg(count.to_string());
+        cmd.arg("-W").arg((timeout * 1000).to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        cmd.arg("-c").arg(count.to_string());
+        cmd.arg("-W").arg(timeout.to_string());
+    }
+
+    cmd.arg(&addr_str);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().await?;
+    let success = output.status.success();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(PingResult {
+        addr: addr_str,
+        success,
+        output: stdout,
+    })
 }
