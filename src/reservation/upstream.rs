@@ -127,11 +127,44 @@ async fn compute_aggregated_state(
     })
 }
 
+/// Cache key that captures the connection-relevant fields of an upstream chain.
+/// If any of these change, we need to create a new client.
+#[derive(Clone, PartialEq, Eq)]
+struct ChainCacheKey {
+    upstream_grpc_host: String,
+    upstream_grpc_port: u16,
+    upstream_tls_enabled: bool,
+    upstream_session_token: String,
+    upstream_lb_id: String,
+    upstream_session_id: String,
+}
+
+impl ChainCacheKey {
+    fn from_chain(chain: &UpstreamChain) -> Self {
+        Self {
+            upstream_grpc_host: chain.upstream_grpc_host.clone(),
+            upstream_grpc_port: chain.upstream_grpc_port,
+            upstream_tls_enabled: chain.upstream_tls_enabled,
+            upstream_session_token: chain.upstream_session_token.clone(),
+            upstream_lb_id: chain.upstream_lb_id.clone(),
+            upstream_session_id: chain.upstream_session_id.clone(),
+        }
+    }
+}
+
+struct CachedClient {
+    key: ChainCacheKey,
+    client: ControlPlaneClient,
+}
+
 /// Starts the background task that periodically sends aggregated SendState to all upstream chains.
 pub fn start_upstream_send_state(db: Arc<LoadBalancerDB>) {
     tokio::spawn(async move {
         let mut interval = tokio::time::interval(std::time::Duration::from_millis(100));
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+
+        // Cache of clients keyed by chain ID. Invalidated when chain config changes or on error.
+        let mut client_cache: HashMap<i64, CachedClient> = HashMap::new();
 
         loop {
             interval.tick().await;
@@ -145,8 +178,15 @@ pub fn start_upstream_send_state(db: Arc<LoadBalancerDB>) {
             };
 
             if chains.is_empty() {
+                // Remove all cached clients when there are no active chains
+                client_cache.clear();
                 continue;
             }
+
+            // Remove cached clients for chains that no longer exist
+            let active_chain_ids: std::collections::HashSet<i64> =
+                chains.iter().map(|c| c.id).collect();
+            client_cache.retain(|id, _| active_chain_ids.contains(id));
 
             // Group chains by reservation_id so we compute aggregate once per reservation
             let mut chains_by_reservation: HashMap<i64, Vec<&UpstreamChain>> = HashMap::new();
@@ -170,43 +210,66 @@ pub fn start_upstream_send_state(db: Arc<LoadBalancerDB>) {
                 };
 
                 for chain in reservation_chains {
-                    match create_upstream_client(chain).await {
-                        Ok(mut client) => {
-                            if let Err(e) = client
-                                .send_state(
-                                    state.fill_percent,
-                                    state.control_signal,
-                                    state.is_ready,
-                                    state.total_events_recv,
-                                    state.total_events_reassembled,
-                                    state.total_events_reassembly_err,
-                                    state.total_events_dequeued,
-                                    state.total_event_enqueue_err,
-                                    state.total_bytes_recv,
-                                    state.total_packets_recv,
-                                )
-                                .await
-                            {
-                                warn!(
-                                    "upstream_send_state: send failed for chain {} (reservation {}): {}",
-                                    chain.id, chain.reservation_id, e
-                                );
-                            } else {
-                                trace!(
-                                    "upstream_send_state: chain={}, reservation={}, is_ready={}, fill={:.2}%",
+                    let cache_key = ChainCacheKey::from_chain(chain);
+
+                    // Check if we have a cached client with matching config
+                    let needs_new_client = match client_cache.get(&chain.id) {
+                        Some(cached) => cached.key != cache_key,
+                        None => true,
+                    };
+
+                    if needs_new_client {
+                        match create_upstream_client(chain).await {
+                            Ok(client) => {
+                                client_cache.insert(
                                     chain.id,
-                                    chain.reservation_id,
-                                    state.is_ready,
-                                    state.fill_percent * 100.0
+                                    CachedClient {
+                                        key: cache_key,
+                                        client,
+                                    },
                                 );
                             }
+                            Err(e) => {
+                                warn!(
+                                    "upstream_send_state: failed to connect to upstream for chain {}: {}",
+                                    chain.id, e
+                                );
+                                continue;
+                            }
                         }
-                        Err(e) => {
-                            warn!(
-                                "upstream_send_state: failed to connect to upstream for chain {}: {}",
-                                chain.id, e
-                            );
-                        }
+                    }
+
+                    let cached = client_cache.get_mut(&chain.id).unwrap();
+                    if let Err(e) = cached
+                        .client
+                        .send_state(
+                            state.fill_percent,
+                            state.control_signal,
+                            state.is_ready,
+                            state.total_events_recv,
+                            state.total_events_reassembled,
+                            state.total_events_reassembly_err,
+                            state.total_events_dequeued,
+                            state.total_event_enqueue_err,
+                            state.total_bytes_recv,
+                            state.total_packets_recv,
+                        )
+                        .await
+                    {
+                        warn!(
+                            "upstream_send_state: send failed for chain {} (reservation {}): {}",
+                            chain.id, chain.reservation_id, e
+                        );
+                        // Remove the cached client so we reconnect on the next tick
+                        client_cache.remove(&chain.id);
+                    } else {
+                        trace!(
+                            "upstream_send_state: chain={}, reservation={}, is_ready={}, fill={:.2}%",
+                            chain.id,
+                            chain.reservation_id,
+                            state.is_ready,
+                            state.fill_percent * 100.0
+                        );
                     }
                 }
             }

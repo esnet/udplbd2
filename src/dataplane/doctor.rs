@@ -73,6 +73,20 @@ pub struct ExplicitStrategyOutput {
     pub errors: Vec<String>,
 }
 
+/// Output for LB chaining test
+#[derive(Debug, Serialize)]
+pub struct ChainOutput {
+    pub upstream_lb_id: String,
+    pub downstream_lb_id: String,
+    pub chain_id: String,
+    pub chain_ok: bool,
+    pub packets_sent: usize,
+    pub packets_received: usize,
+    pub first_packet_ms: Option<u128>,
+    pub unchain_ok: bool,
+    pub errors: Vec<String>,
+}
+
 /// Aggregated output of all doctor tests for a single address across all strategies.
 #[derive(Debug, Serialize)]
 pub struct DoctorOutput {
@@ -824,6 +838,209 @@ async fn test_explicit_strategy(
         initial_loss_pct,
         updated_recv,
         updated_loss_pct,
+        errors,
+    })
+}
+
+/// Test LB chaining: reserve two LBs on the same control plane, chain LB-B to LB-A,
+/// send traffic to LB-A, and verify it arrives at a receiver registered on LB-B.
+pub async fn test_chain(
+    url: &str,
+    ip_address: IpAddr,
+    port: u16,
+    mtu: usize,
+    with_lb_headers: bool,
+) -> Result<ChainOutput> {
+    let mut errors = Vec::new();
+    let base_port = port + 30; // Avoid conflicts with other strategies
+
+    let ip_family = match ip_address {
+        IpAddr::V4(_) => IpFamily::Ipv4,
+        IpAddr::V6(_) => IpFamily::Ipv6,
+    };
+    let expiration = SystemTime::now() + Duration::from_secs(180);
+    let expiration_timestamp = Timestamp::from(expiration);
+
+    // Reserve LB-A (upstream)
+    tracing::info!("reserving upstream LB (LB-A) for chain test");
+    let mut client_a = ControlPlaneClient::from_url(url).await?;
+    let reply_a = client_a
+        .reserve_load_balancer(
+            "doctor-chain-upstream".to_string(),
+            Some(expiration_timestamp.clone()),
+            vec![ip_address.to_string()],
+            ip_family,
+            "dynamic".to_string(),
+        )
+        .await?
+        .into_inner();
+
+    let lb_a_id = reply_a.lb_id.clone();
+    client_a.lb_id = Some(lb_a_id.clone());
+
+    let mut url_a: EjfatUrl = url.parse().expect("Invalid EJFAT url");
+    url_a.update_from_reservation(&reply_a);
+    url_a = match ip_family {
+        IpFamily::Ipv4 => url_a.without_v6(),
+        IpFamily::Ipv6 => url_a.without_v4(),
+        _ => url_a,
+    };
+
+    tracing::info!("upstream LB-A reserved: id={}, EJFAT_URI={}", lb_a_id, url_a);
+
+    // Reserve LB-B (downstream)
+    tracing::info!("reserving downstream LB (LB-B) for chain test");
+    let mut client_b = ControlPlaneClient::from_url(url).await?;
+    let reply_b = client_b
+        .reserve_load_balancer(
+            "doctor-chain-downstream".to_string(),
+            Some(expiration_timestamp),
+            vec![],
+            ip_family,
+            "dynamic".to_string(),
+        )
+        .await?
+        .into_inner();
+
+    let lb_b_id = reply_b.lb_id.clone();
+    client_b.lb_id = Some(lb_b_id.clone());
+
+    let mut url_b: EjfatUrl = url.parse().expect("Invalid EJFAT url");
+    url_b.update_from_reservation(&reply_b);
+    url_b = match ip_family {
+        IpFamily::Ipv4 => url_b.without_v6(),
+        IpFamily::Ipv6 => url_b.without_v4(),
+        _ => url_b,
+    };
+
+    tracing::info!("downstream LB-B reserved: id={}, EJFAT_URI={}", lb_b_id, url_b);
+
+    // Chain LB-B to LB-A: registers LB-B's data address with LB-A as a receiver (keepLbHeader=true)
+    tracing::info!("chaining LB-B to LB-A");
+    let chain_result = client_b
+        .chain_load_balancer(
+            lb_b_id.clone(),
+            url_a.to_string(),
+            ip_family,
+            1.0,
+            0.5,
+            2.0,
+            vec![],
+        )
+        .await;
+
+    let (chain_ok, chain_id) = match chain_result {
+        Ok(reply) => {
+            let chain_id = reply.into_inner().chain_id;
+            tracing::info!("chain created: chain_id={}", chain_id);
+            (true, chain_id)
+        }
+        Err(e) => {
+            let msg = format!("chain_load_balancer failed: {e}");
+            tracing::error!("{}", msg);
+            errors.push(msg);
+            // Cleanup and return early
+            client_a.free_load_balancer().await.ok();
+            client_b.free_load_balancer().await.ok();
+            return Ok(ChainOutput {
+                upstream_lb_id: lb_a_id,
+                downstream_lb_id: lb_b_id,
+                chain_id: String::new(),
+                chain_ok: false,
+                packets_sent: 0,
+                packets_received: 0,
+                first_packet_ms: None,
+                unchain_ok: false,
+                errors,
+            });
+        }
+    };
+
+    // Register a receiver on LB-B (the final destination for chained traffic)
+    tracing::info!("registering receiver on LB-B");
+    let offset = if with_lb_headers {
+        std::mem::size_of::<LBHeader>()
+    } else {
+        0
+    };
+    let mut receiver = ReceiverBuilder::new("doctor-chain-recv", ip_address.to_string(), base_port)
+        .mtu(mtu)
+        .offset(offset)
+        .build(&mut client_b)
+        .await?;
+
+    // Allow time for the chain registration and receiver to propagate
+    tokio::time::sleep(Duration::from_secs(2)).await;
+
+    // Send traffic to LB-A's data plane
+    tracing::info!("sending traffic to LB-A, expecting it to arrive at LB-B's receiver");
+    let num_packets = 500;
+    let mut sender = Sender::from_url(&url_a, None, ip_address.is_ipv6()).await?;
+    let cancel = CancellationToken::new();
+    let cancel_cloned = cancel.clone();
+    let jh = tokio::spawn(async move {
+        sender
+            .generate_test_stream(num_packets, 1, Duration::from_millis(10), cancel_cloned)
+            .await
+    });
+
+    // Wait for packets at LB-B's receiver
+    let received = receiver.count_packets(num_packets, Duration::from_secs(10)).await;
+    let first_packet_ms = receiver.first_packet_duration().map(|d| d.as_millis());
+    cancel.cancel();
+    jh.await.unwrap();
+
+    tracing::info!(
+        "chain traffic test: sent={}, received={}, first_packet_ms={:?}",
+        num_packets, received, first_packet_ms
+    );
+    if received == 0 {
+        errors.push("no packets received through chain".to_string());
+    }
+
+    // Unchain
+    tracing::info!("unchaining LB-B from LB-A");
+    let unchain_ok = match client_b
+        .unchain_load_balancer(lb_b_id.clone(), chain_id.clone())
+        .await
+    {
+        Ok(_) => {
+            tracing::info!("unchain successful");
+            true
+        }
+        Err(e) => {
+            let msg = format!("unchain_load_balancer failed: {e}");
+            tracing::error!("{}", msg);
+            errors.push(msg);
+            false
+        }
+    };
+
+    // Cleanup
+    receiver.cancel_tasks();
+    client_b.deregister().await.ok();
+
+    tracing::info!("Freeing LB-A ({})", lb_a_id);
+    if let Err(e) = client_a.free_load_balancer().await {
+        tracing::warn!("Failed to free LB-A: {}", e);
+        errors.push(format!("free LB-A: {e}"));
+    }
+
+    tracing::info!("Freeing LB-B ({})", lb_b_id);
+    if let Err(e) = client_b.free_load_balancer().await {
+        tracing::warn!("Failed to free LB-B: {}", e);
+        errors.push(format!("free LB-B: {e}"));
+    }
+
+    Ok(ChainOutput {
+        upstream_lb_id: lb_a_id,
+        downstream_lb_id: lb_b_id,
+        chain_id,
+        chain_ok,
+        packets_sent: num_packets,
+        packets_received: received,
+        first_packet_ms,
+        unchain_ok,
         errors,
     })
 }

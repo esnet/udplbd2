@@ -192,18 +192,18 @@ impl MockLoadBalancer {
         };
 
         // Handle MemberInfoAction
-        let dst_addr = match &member.action {
+        let (dst_addr, keep_lb_header) = match &member.action {
             MemberInfoAction::Rewrite {
                 set_dest_mac_addr: _,
                 set_dest_ip_addr,
                 set_dest_udp_port,
                 set_entropy_bit_mask_width,
-                set_keep_lb_header: _,
+                set_keep_lb_header,
             } => {
                 let entropy_mask = (1u16 << *set_entropy_bit_mask_width) - 1;
                 let dst_port =
                     *set_dest_udp_port + (lb_payload.header.entropy.get() & entropy_mask);
-                SocketAddr::new(*set_dest_ip_addr, dst_port)
+                (SocketAddr::new(*set_dest_ip_addr, dst_port), *set_keep_lb_header)
             }
             MemberInfoAction::Drop => {
                 // Drop the packet (do not forward)
@@ -257,7 +257,13 @@ impl MockLoadBalancer {
             }
         }
 
-        Some((lb_payload.body.to_vec(), dst_addr))
+        let payload = if keep_lb_header {
+            data.to_vec()
+        } else {
+            lb_payload.body.to_vec()
+        };
+
+        Some((payload, dst_addr))
     }
 }
 

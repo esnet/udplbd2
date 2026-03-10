@@ -19,7 +19,7 @@ use crate::proto::loadbalancer::v1::{
     GetLoadBalancerRequest, IpFamily, LoadBalancerStatusReply, LoadBalancerStatusRequest,
     RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
     ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest,
-    UnchainLoadBalancerReply, UnchainLoadBalancerRequest, WorkerStatus,
+    UnchainLoadBalancerReply, UnchainLoadBalancerRequest, WorkerStatus, PortRange
 };
 use tonic::transport::{Channel, ClientTlsConfig};
 use crate::util::is_valid_name;
@@ -1086,6 +1086,12 @@ impl LoadBalancerService {
             _ => unreachable!(),
         };
 
+        let port_range = if self.mock_mode {
+            PortRange::PortRange1
+        } else {
+            PortRange::PortRange16384
+        };
+
         // Connect to the upstream control plane and register
         let channel = if ejfat_url.tls_enabled {
             let tls_config = ClientTlsConfig::new().with_enabled_roots();
@@ -1121,13 +1127,35 @@ impl LoadBalancerService {
         let mut upstream_client =
             ControlPlaneClient::new(client, Some(upstream_lb_id.clone()), None);
 
+        // Query the upstream for its data plane addresses
+        let upstream_info = upstream_client
+            .get_load_balancer()
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to get upstream load balancer info: {e}"
+                ))
+            })?
+            .into_inner();
+
+        let upstream_data_ipv4 = if upstream_info.data_ipv4_address.is_empty() {
+            None
+        } else {
+            Some(upstream_info.data_ipv4_address)
+        };
+        let upstream_data_ipv6 = if upstream_info.data_ipv6_address.is_empty() {
+            None
+        } else {
+            Some(upstream_info.data_ipv6_address)
+        };
+
         let register_reply = upstream_client
             .register(
                 format!("chain-{reservation_id}"),
                 request.weight,
                 ip_address,
                 data_port,
-                crate::proto::loadbalancer::v1::PortRange::PortRange16384,
+                port_range,
                 request.min_factor,
                 request.max_factor,
                 true, // keepLbHeader
@@ -1153,6 +1181,8 @@ impl LoadBalancerService {
                 &upstream_lb_id,
                 &upstream_session_token,
                 &upstream_session_id,
+                upstream_data_ipv4.as_deref(),
+                upstream_data_ipv6.as_deref(),
             )
             .await
             .map_err(|e| Status::internal(format!("Failed to store upstream chain: {e}")))?;

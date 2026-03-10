@@ -188,6 +188,8 @@ pub struct UpstreamChain {
     pub upstream_lb_id: String,
     pub upstream_session_token: String,
     pub upstream_session_id: String,
+    pub upstream_data_ipv4: Option<IpAddr>,
+    pub upstream_data_ipv6: Option<IpAddr>,
     pub created_at: DateTime<Utc>,
     pub deleted_at: Option<DateTime<Utc>>,
 }

@@ -9,6 +9,8 @@ CREATE TABLE upstream_chain (
     upstream_lb_id TEXT NOT NULL,
     upstream_session_token TEXT NOT NULL,
     upstream_session_id TEXT NOT NULL,
+    upstream_data_ipv4 TEXT,
+    upstream_data_ipv6 TEXT,
     created_at REAL NOT NULL DEFAULT (unixepoch('subsec') * 1000),
     deleted_at REAL,
     FOREIGN KEY (reservation_id) REFERENCES reservation(id)

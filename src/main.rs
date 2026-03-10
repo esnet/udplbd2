@@ -147,12 +147,14 @@ fn setup_logging(level: &str) -> Result<()> {
         .or_else(|_| EnvFilter::try_new(filter_str))
         .expect("invalid log level in configuration or RUST_LOG");
 
-    tracing_subscriber::fmt()
+    // ignore init fails so we can run this multiple times in tests
+    let _ = tracing_subscriber::fmt()
         .with_env_filter(filter)
         .with_target(level == "trace")
         .with_thread_ids(level == "trace")
         .with_thread_names(level == "trace")
-        .init();
+        .try_init();
+
     Ok(())
 }
 
@@ -195,6 +197,7 @@ mod test {
             "Timed out waiting for mock DP to listen on 127.0.0.1:19523"
         );
 
+        // Run the basic doctor test
         let mut config = Config::turmoil();
         let cli = Cli::parse_from(vec![
             "udplbd",
@@ -207,6 +210,22 @@ mod test {
             "-p",
             "33851",
         ]);
-        assert!(cli_main(cli, &mut config).await.is_ok())
+        assert!(cli_main(cli, &mut config).await.is_ok());
+
+        // Run the chain doctor test against the same server
+        let mut config = Config::turmoil();
+        let cli = Cli::parse_from(vec![
+            "udplbd",
+            "dataplane",
+            "-u",
+            "ejfat://test@127.0.0.1:19523/",
+            "doctor",
+            "-a",
+            "127.0.0.1",
+            "-p",
+            "33861",
+            "--chain",
+        ]);
+        assert!(cli_main(cli, &mut config).await.is_ok());
     }
 }

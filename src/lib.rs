@@ -40,6 +40,7 @@ use crate::reservation::ReservationManager;
 use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
 use crate::sncfg::setup::{auto_configure_smartnics, smallest_mac_address};
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
+use crate::reservation::upstream::start_upstream_send_state;
 
 /// Build SNCfg clients from the configuration
 pub async fn build_sncfg_clients(config: &Config) -> Result<MultiSNCfgClient> {
@@ -267,7 +268,7 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
     let manager_arc = Arc::new(Mutex::new(manager));
 
     // Start upstream SendState background task
-    crate::reservation::upstream::start_upstream_send_state(db.clone());
+    start_upstream_send_state(db.clone());
 
     let server_futures = build_server_futures(db.clone(), manager_arc.clone(), config, false);
 
@@ -399,7 +400,7 @@ pub async fn start_mocked_server(
     trace!("initialized rules manager");
 
     // Start upstream SendState background task
-    crate::reservation::upstream::start_upstream_send_state(db.clone());
+    start_upstream_send_state(db.clone());
 
     let server_futures = build_server_futures(db.clone(), manager_arc.clone(), &sim_config, true);
 

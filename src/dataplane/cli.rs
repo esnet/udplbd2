@@ -163,6 +163,9 @@ pub struct DoctorArgs {
     /// Expect packets to still contain LB headers.
     #[arg(long)]
     pub lb: bool,
+    /// Test LB chaining (reserves two LBs and chains them).
+    #[arg(long)]
+    pub chain: bool,
 }
 
 #[derive(Args, Debug)]
@@ -312,12 +315,35 @@ impl DataplaneCli {
                 send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot).await?;
             }
             DataplaneCommand::Doctor(args) => {
-                let results =
-                    doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb).await;
-                for res in results {
-                    match res {
-                        Ok(output) => println!("{output}"),
-                        Err(e) => eprintln!("doctor error: {e}"),
+                if args.chain {
+                    let ip_addr: std::net::IpAddr = args
+                        .addresses
+                        .first()
+                        .expect("At least one address required for --chain")
+                        .parse()
+                        .expect("Invalid IP address");
+                    match crate::dataplane::doctor::test_chain(
+                        &url, ip_addr, args.port, args.mtu, args.lb,
+                    )
+                    .await
+                    {
+                        Ok(output) => {
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&output).unwrap()
+                            );
+                        }
+                        Err(e) => eprintln!("chain doctor error: {e}"),
+                    }
+                } else {
+                    let results =
+                        doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb)
+                            .await;
+                    for res in results {
+                        match res {
+                            Ok(output) => println!("{output}"),
+                            Err(e) => eprintln!("doctor error: {e}"),
+                        }
                     }
                 }
             }
