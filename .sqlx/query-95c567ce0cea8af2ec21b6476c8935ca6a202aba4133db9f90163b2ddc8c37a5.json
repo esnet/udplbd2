@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "\n            SELECT r.id res_id, r.loadbalancer_id, r.reserved_until, r.created_at res_created_at,\n                   lb.id lb_id, lb.name, lb.unicast_mac_address, lb.broadcast_mac_address,\n                   lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,\n                   lb.fpga_lb_id, lb.created_at lb_created_at, r.current_epoch\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
+  "query": "\n            SELECT r.id res_id, r.loadbalancer_id, r.name as res_name, r.reserved_until, r.created_at res_created_at,\n                   lb.id lb_id, lb.unicast_mac_address,\n                   lb.unicast_ipv4_address, lb.unicast_ipv6_address, lb.event_number_udp_port,\n                   lb.fpga_lb_id, lb.created_at lb_created_at, r.current_epoch\n            FROM reservation r\n            JOIN loadbalancer lb ON r.loadbalancer_id = lb.id\n            WHERE r.deleted_at IS NULL AND lb.deleted_at IS NULL\n            ",
   "describe": {
     "columns": [
       {
@@ -14,24 +14,24 @@
         "type_info": "Integer"
       },
       {
-        "name": "reserved_until",
+        "name": "res_name",
         "ordinal": 2,
-        "type_info": "Integer"
+        "type_info": "Text"
       },
       {
-        "name": "res_created_at",
+        "name": "reserved_until",
         "ordinal": 3,
         "type_info": "Integer"
       },
       {
-        "name": "lb_id",
+        "name": "res_created_at",
         "ordinal": 4,
         "type_info": "Integer"
       },
       {
-        "name": "name",
+        "name": "lb_id",
         "ordinal": 5,
-        "type_info": "Text"
+        "type_info": "Integer"
       },
       {
         "name": "unicast_mac_address",
@@ -39,38 +39,33 @@
         "type_info": "Text"
       },
       {
-        "name": "broadcast_mac_address",
+        "name": "unicast_ipv4_address",
         "ordinal": 7,
         "type_info": "Text"
       },
       {
-        "name": "unicast_ipv4_address",
+        "name": "unicast_ipv6_address",
         "ordinal": 8,
         "type_info": "Text"
       },
       {
-        "name": "unicast_ipv6_address",
-        "ordinal": 9,
-        "type_info": "Text"
-      },
-      {
         "name": "event_number_udp_port",
-        "ordinal": 10,
+        "ordinal": 9,
         "type_info": "Integer"
       },
       {
         "name": "fpga_lb_id",
-        "ordinal": 11,
+        "ordinal": 10,
         "type_info": "Integer"
       },
       {
         "name": "lb_created_at",
-        "ordinal": 12,
+        "ordinal": 11,
         "type_info": "Integer"
       },
       {
         "name": "current_epoch",
-        "ordinal": 13,
+        "ordinal": 12,
         "type_info": "Integer"
       }
     ],
@@ -78,7 +73,6 @@
       "Right": 0
     },
     "nullable": [
-      false,
       false,
       false,
       false,
@@ -94,5 +88,5 @@
       false
     ]
   },
-  "hash": "2cec6719702287d83aa2551c3c41b1fc0c11c62f0b490c55df76a4818d966389"
+  "hash": "95c567ce0cea8af2ec21b6476c8935ca6a202aba4133db9f90163b2ddc8c37a5"
 }

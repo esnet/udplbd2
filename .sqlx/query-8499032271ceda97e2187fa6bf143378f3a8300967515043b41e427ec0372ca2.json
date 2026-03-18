@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT loadbalancer_id FROM reservation WHERE id = ? AND deleted_at IS NULL",
+  "query": "SELECT id FROM reservation WHERE id = ? AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
-        "name": "loadbalancer_id",
+        "name": "id",
         "ordinal": 0,
         "type_info": "Integer"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "bacd6d00d06b01550117414024dc37263004bca40cdd8cacc8795b16c3bc5f00"
+  "hash": "8499032271ceda97e2187fa6bf143378f3a8300967515043b41e427ec0372ca2"
 }

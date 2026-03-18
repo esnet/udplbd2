@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            WITH RECURSIVE token_tree AS (\n                SELECT id FROM token WHERE parent_token_id = ?1\n                UNION ALL\n                SELECT t.id FROM token t\n                INNER JOIN token_tree tt ON t.parent_token_id = tt.id\n            )\n            SELECT id FROM token_tree\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "2d474c8a57281cd46ac7ab07d2ea3e40806d821db3e801ae008302d86addc075"
+}

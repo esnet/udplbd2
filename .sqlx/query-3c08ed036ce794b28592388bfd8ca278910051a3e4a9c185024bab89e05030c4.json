@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch\n             FROM reservation\n             WHERE deleted_at IS NULL",
+  "query": "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch, strategy\n             FROM reservation\n             WHERE id = ?1 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -14,37 +14,49 @@
         "type_info": "Integer"
       },
       {
-        "name": "reserved_until",
+        "name": "name",
         "ordinal": 2,
-        "type_info": "Integer"
+        "type_info": "Text"
       },
       {
-        "name": "created_at",
+        "name": "reserved_until",
         "ordinal": 3,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 4,
         "type_info": "Integer"
       },
       {
-        "name": "current_epoch",
+        "name": "deleted_at",
         "ordinal": 5,
         "type_info": "Integer"
+      },
+      {
+        "name": "current_epoch",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "strategy",
+        "ordinal": 7,
+        "type_info": "Text"
       }
     ],
     "parameters": {
-      "Right": 0
+      "Right": 1
     },
     "nullable": [
       false,
       false,
       false,
       false,
+      false,
       true,
-      false
+      false,
+      true
     ]
   },
-  "hash": "281085c7934401e63384c77b8813a389bfbf10548af72848cab3a2de932df69e"
+  "hash": "3c08ed036ce794b28592388bfd8ca278910051a3e4a9c185024bab89e05030c4"
 }

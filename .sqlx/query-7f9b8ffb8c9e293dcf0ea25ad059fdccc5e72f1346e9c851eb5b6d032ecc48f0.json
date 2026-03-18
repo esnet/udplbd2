@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE session SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7f9b8ffb8c9e293dcf0ea25ad059fdccc5e72f1346e9c851eb5b6d032ecc48f0"
+}

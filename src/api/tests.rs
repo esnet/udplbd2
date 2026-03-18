@@ -665,13 +665,17 @@ async fn test_list_child_tokens_direct_parent() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
 
     // List children of admin using admin's own token
-    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
-        target: None,
-    });
+    let mut request =
+        Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest { target: None });
     request.metadata_mut().insert(
         "authorization",
         MetadataValue::try_from("Bearer admin").unwrap(),
@@ -686,9 +690,8 @@ async fn test_list_child_tokens_direct_parent() {
     assert_eq!(reply.tokens[0].name, "child");
 
     // Also verify the child token itself has no children
-    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
-        target: None,
-    });
+    let mut request =
+        Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest { target: None });
     request.metadata_mut().insert(
         "authorization",
         MetadataValue::try_from(format!("Bearer {child_token}")).unwrap(),
@@ -707,8 +710,13 @@ async fn test_list_child_tokens_grandparent_sees_all_descendants() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child -> grandchild
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let _grandchild_token = create_child_token(
         &service,
         &child_token,
@@ -718,9 +726,8 @@ async fn test_list_child_tokens_grandparent_sees_all_descendants() {
     .await;
 
     // Admin lists descendants: should see both child and grandchild
-    let mut request = Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest {
-        target: None,
-    });
+    let mut request =
+        Request::new(crate::proto::loadbalancer::v1::ListChildTokensRequest { target: None });
     request.metadata_mut().insert(
         "authorization",
         MetadataValue::try_from("Bearer admin").unwrap(),
@@ -746,8 +753,13 @@ async fn test_list_child_tokens_unrelated_token_denied() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child, admin -> unrelated
-    let _child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let _child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let unrelated_token = create_child_token(
         &service,
         "admin",
@@ -790,8 +802,13 @@ async fn test_list_token_permissions_parent_can_view_descendant() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child -> grandchild
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let grandchild_token = create_child_token(
         &service,
         &child_token,
@@ -837,8 +854,13 @@ async fn test_list_token_permissions_grandparent_can_view_grandchild() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child -> grandchild
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let grandchild_token = create_child_token(
         &service,
         &child_token,
@@ -886,8 +908,13 @@ async fn test_list_token_permissions_unrelated_token_denied() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child, admin -> unrelated (readonly)
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let unrelated_token = create_child_token(
         &service,
         "admin",
@@ -933,8 +960,13 @@ async fn test_revoke_token_grandparent_can_revoke_grandchild() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child -> grandchild
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let grandchild_token = create_child_token(
         &service,
         &child_token,
@@ -978,8 +1010,13 @@ async fn test_revoke_token_ancestor_can_revoke_deep_descendant() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child -> grandchild -> great_grandchild
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let grandchild_token = create_child_token(
         &service,
         &child_token,
@@ -1036,8 +1073,13 @@ async fn test_revoke_token_unrelated_token_denied() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child, admin -> unrelated
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
     let unrelated_token = create_child_token(
         &service,
         "admin",
@@ -1057,9 +1099,7 @@ async fn test_revoke_token_unrelated_token_denied() {
     let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
         target: Some(crate::proto::loadbalancer::v1::TokenSelector {
             token_selector: Some(
-                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
-                    child_id as u32,
-                ),
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(child_id as u32),
             ),
         }),
     });
@@ -1081,8 +1121,13 @@ async fn test_revoke_token_child_cannot_revoke_parent() {
     service.db.create_admin_token("admin").await.unwrap();
 
     // admin -> child
-    let child_token =
-        create_child_token(&service, "admin", "child", vec![make_global_read_permission()]).await;
+    let child_token = create_child_token(
+        &service,
+        "admin",
+        "child",
+        vec![make_global_read_permission()],
+    )
+    .await;
 
     // Get admin token ID
     let admin_id = service.db.get_token_id("admin").await.unwrap().unwrap();
@@ -1091,9 +1136,7 @@ async fn test_revoke_token_child_cannot_revoke_parent() {
     let mut request = Request::new(crate::proto::loadbalancer::v1::RevokeTokenRequest {
         target: Some(crate::proto::loadbalancer::v1::TokenSelector {
             token_selector: Some(
-                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(
-                    admin_id as u32,
-                ),
+                crate::proto::loadbalancer::v1::token_selector::TokenSelector::Id(admin_id as u32),
             ),
         }),
     });
@@ -1242,8 +1285,16 @@ async fn test_unchain_load_balancer_wrong_reservation() {
     let chain = service
         .db
         .create_upstream_chain(
-            reservation_id, "host", 18347, false, "42", "tok", "sid",
-            None, None,
+            reservation_id,
+            "host",
+            18347,
+            false,
+            "42",
+            "ejfat_token",
+            "session_token",
+            "sid",
+            None,
+            None,
         )
         .await
         .unwrap();

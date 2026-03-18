@@ -1,10 +1,10 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT loadbalancer_id FROM reservation\n             WHERE id = ? AND deleted_at IS NULL",
+  "query": "SELECT COUNT(*) as count FROM session WHERE reservation_id = ?1 AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
-        "name": "loadbalancer_id",
+        "name": "count",
         "ordinal": 0,
         "type_info": "Integer"
       }
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "879a25c2548d32e5f3e700e64d8edd2cec7dec758bd08cb64e12c64cee8b36c7"
+  "hash": "9fefdd04c54f30577fceab6b0a13bb408e589fe07a7e5917efe702a0e3fe27e4"
 }

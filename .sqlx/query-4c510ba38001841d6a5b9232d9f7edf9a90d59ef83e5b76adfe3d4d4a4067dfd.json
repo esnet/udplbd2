@@ -1,0 +1,62 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            UPDATE loadbalancer\n            SET unicast_mac_address = ?1,\n                unicast_ipv4_address = ?2,\n                unicast_ipv6_address = ?3,\n                event_number_udp_port = ?4,\n                fpga_lb_id = ?5\n            WHERE id = ?6 AND deleted_at IS NULL\n            RETURNING id, unicast_mac_address,\n                      unicast_ipv4_address, unicast_ipv6_address,\n                      event_number_udp_port, fpga_lb_id, created_at, deleted_at\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "unicast_mac_address",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "unicast_ipv4_address",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "unicast_ipv6_address",
+        "ordinal": 3,
+        "type_info": "Text"
+      },
+      {
+        "name": "event_number_udp_port",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "fpga_lb_id",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 7,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 6
+    },
+    "nullable": [
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+      false,
+      true
+    ]
+  },
+  "hash": "4c510ba38001841d6a5b9232d9f7edf9a90d59ef83e5b76adfe3d4d4a4067dfd"
+}

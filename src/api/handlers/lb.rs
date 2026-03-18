@@ -10,19 +10,19 @@ use tracing::{info, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::api::client::EjfatUrl;
-use crate::db::models::{Permission, PermissionType, Resource};
 use crate::api::client::{BearerInterceptor, ControlPlaneClient};
+use crate::db::models::{Permission, PermissionType, Resource};
 use crate::proto::loadbalancer::v1::{
-    load_balancer_client::LoadBalancerClient, AddSendersReply, AddSendersRequest,
+    load_balancer_client::LoadBalancerClient, AddSendersReply, AddSendersRequest, ChainGraphEdge,
     ChainLoadBalancerReply, ChainLoadBalancerRequest, ExtendReservationReply,
-    ExtendReservationRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
-    GetLoadBalancerRequest, IpFamily, LoadBalancerStatusReply, LoadBalancerStatusRequest,
-    RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
-    ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest,
-    UnchainLoadBalancerReply, UnchainLoadBalancerRequest, WorkerStatus, PortRange
+    ExtendReservationRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest, GetChainGraphReply,
+    GetChainGraphRequest, GetLoadBalancerRequest, IpFamily, LoadBalancerStatusReply,
+    LoadBalancerStatusRequest, PortRange, RemoveSendersReply, RemoveSendersRequest,
+    ReserveLoadBalancerReply, ReserveLoadBalancerRequest, ResetLoadBalancerReply,
+    ResetLoadBalancerRequest, UnchainLoadBalancerReply, UnchainLoadBalancerRequest, WorkerStatus,
 };
-use tonic::transport::{Channel, ClientTlsConfig};
 use crate::util::is_valid_name;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 impl LoadBalancerService {
     pub(crate) async fn handle_reserve_load_balancer(
@@ -31,7 +31,10 @@ impl LoadBalancerService {
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
-        let grpc_authority = request.extensions().get::<crate::api::GrpcAuthority>().cloned();
+        let grpc_authority = request
+            .extensions()
+            .get::<crate::api::GrpcAuthority>()
+            .cloned();
         let request = request.into_inner();
 
         let all_lbs = self
@@ -217,9 +220,7 @@ impl LoadBalancerService {
         };
 
         let (data_min_port, data_max_port) = if self.mock_mode {
-            let port = mapped_v4_port
-                .or(mapped_v6_port)
-                .unwrap_or(19522) as u32;
+            let port = mapped_v4_port.or(mapped_v6_port).unwrap_or(19522) as u32;
             (port, port)
         } else {
             (16384, 32767)
@@ -240,7 +241,10 @@ impl LoadBalancerService {
         let (grpc_host, grpc_port) = match &grpc_authority {
             Some(auth) => {
                 if let Some(idx) = auth.0.rfind(':') {
-                    (auth.0[..idx].to_string(), auth.0[idx + 1..].parse::<u16>().ok())
+                    (
+                        auth.0[..idx].to_string(),
+                        auth.0[idx + 1..].parse::<u16>().ok(),
+                    )
                 } else {
                     (auth.0.clone(), None)
                 }
@@ -256,11 +260,27 @@ impl LoadBalancerService {
             grpc_host,
             grpc_port,
             lb_id: Some(lb_id.clone()),
-            sync_addr_v4: if sync_ipv4_address.is_empty() { None } else { Some(sync_ipv4_address.clone()) },
-            sync_addr_v6: if sync_ipv6_address.is_empty() { None } else { Some(sync_ipv6_address.clone()) },
+            sync_addr_v4: if sync_ipv4_address.is_empty() {
+                None
+            } else {
+                Some(sync_ipv4_address.clone())
+            },
+            sync_addr_v6: if sync_ipv6_address.is_empty() {
+                None
+            } else {
+                Some(sync_ipv6_address.clone())
+            },
             sync_udp_port: Some(sync_udp_port as u16),
-            data_addr_v4: if data_ipv4_address.is_empty() { None } else { Some(data_ipv4_address.clone()) },
-            data_addr_v6: if data_ipv6_address.is_empty() { None } else { Some(data_ipv6_address.clone()) },
+            data_addr_v4: if data_ipv4_address.is_empty() {
+                None
+            } else {
+                Some(data_ipv4_address.clone())
+            },
+            data_addr_v6: if data_ipv6_address.is_empty() {
+                None
+            } else {
+                Some(data_ipv6_address.clone())
+            },
             data_min_port: data_min_port as u16,
             data_max_port: data_max_port as u16,
             tls_enabled: self.config.server.tls.enable,
@@ -348,9 +368,7 @@ impl LoadBalancerService {
         };
 
         let (data_min_port, data_max_port) = if self.mock_mode {
-            let port = mapped_v4_port
-                .or(mapped_v6_port)
-                .unwrap_or(19522) as u32;
+            let port = mapped_v4_port.or(mapped_v6_port).unwrap_or(19522) as u32;
             (port, port)
         } else {
             (16384, 32767)
@@ -461,11 +479,11 @@ impl LoadBalancerService {
             let slots_assigned = slot_counts.get(&(session.id as u16)).unwrap_or(&0);
 
             // Fetch health issues for this session (all active issues)
-            let session_health_issues = self
-                .db
-                .list_session_healthcheck_events(session.id)
-                .await
-                .map_err(|e| Status::internal(format!("Failed to get health issues: {e}")))?;
+            let session_health_issues =
+                self.db
+                    .list_session_healthcheck_events(session.id)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to get health issues: {e}")))?;
 
             let health_issues = session_health_issues
                 .into_iter()
@@ -672,9 +690,7 @@ impl LoadBalancerService {
             .await
         {
             for chain in &chains {
-                if let Err(e) =
-                    crate::reservation::upstream::deregister_upstream(chain).await
-                {
+                if let Err(e) = crate::reservation::upstream::deregister_upstream(chain).await {
                     warn!(
                         "free_load_balancer: failed to deregister from upstream chain {}: {}",
                         chain.id, e
@@ -1050,13 +1066,11 @@ impl LoadBalancerService {
 
         let (ip_address, data_port) = match ip_family {
             IpFamily::Ipv4 => {
-                let ip = lb
-                    .unicast_ipv4_address
-                    .ok_or_else(|| {
-                        Status::failed_precondition(
-                            "Load balancer does not have an IPv4 address configured",
-                        )
-                    })?;
+                let ip = lb.unicast_ipv4_address.ok_or_else(|| {
+                    Status::failed_precondition(
+                        "Load balancer does not have an IPv4 address configured",
+                    )
+                })?;
                 if self.mock_mode {
                     match address_map.and_then(|m| m.get(&IpAddr::V4(ip))) {
                         Some(mapped) => (mapped.ip().to_string(), mapped.port()),
@@ -1067,13 +1081,11 @@ impl LoadBalancerService {
                 }
             }
             IpFamily::Ipv6 => {
-                let ip = lb
-                    .unicast_ipv6_address
-                    .ok_or_else(|| {
-                        Status::failed_precondition(
-                            "Load balancer does not have an IPv6 address configured",
-                        )
-                    })?;
+                let ip = lb.unicast_ipv6_address.ok_or_else(|| {
+                    Status::failed_precondition(
+                        "Load balancer does not have an IPv6 address configured",
+                    )
+                })?;
                 if self.mock_mode {
                     match address_map.and_then(|m| m.get(&IpAddr::V6(ip))) {
                         Some(mapped) => (mapped.ip().to_string(), mapped.port()),
@@ -1121,7 +1133,7 @@ impl LoadBalancerService {
         };
 
         let bearer_interceptor = BearerInterceptor {
-            token: upstream_token,
+            token: upstream_token.clone(),
         };
         let client = LoadBalancerClient::with_interceptor(channel, bearer_interceptor);
         let mut upstream_client =
@@ -1132,9 +1144,7 @@ impl LoadBalancerService {
             .get_load_balancer()
             .await
             .map_err(|e| {
-                Status::internal(format!(
-                    "Failed to get upstream load balancer info: {e}"
-                ))
+                Status::internal(format!("Failed to get upstream load balancer info: {e}"))
             })?
             .into_inner();
 
@@ -1148,6 +1158,28 @@ impl LoadBalancerService {
         } else {
             Some(upstream_info.data_ipv6_address)
         };
+
+        // Cycle detection: check if adding this chain would create a forwarding loop.
+        // Build the compound identity "host:port/lb_id" for this node's reservation.
+        let listen = &self.config.server.listen[0];
+        let my_compound_id = format!("{}:{}/{}", listen.ip(), listen.port(), reservation_id);
+        match upstream_client
+            .get_chain_graph(upstream_lb_id.clone(), vec![my_compound_id])
+            .await
+        {
+            Ok(reply) => {
+                if reply.into_inner().cycle_detected {
+                    return Err(Status::failed_precondition(
+                        "ChainLoadBalancer would create a forwarding cycle",
+                    ));
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "chain_load_balancer: cycle check failed (upstream unreachable), proceeding optimistically: {e}"
+                );
+            }
+        }
 
         let register_reply = upstream_client
             .register(
@@ -1163,7 +1195,9 @@ impl LoadBalancerService {
             )
             .await
             .map_err(|e| {
-                Status::internal(format!("Failed to register with upstream control plane: {e}"))
+                Status::internal(format!(
+                    "Failed to register with upstream control plane: {e}"
+                ))
             })?;
 
         let reply = register_reply.into_inner();
@@ -1179,6 +1213,7 @@ impl LoadBalancerService {
                 upstream_grpc_port,
                 ejfat_url.tls_enabled,
                 &upstream_lb_id,
+                &upstream_token,
                 &upstream_session_token,
                 &upstream_session_id,
                 upstream_data_ipv4.as_deref(),
@@ -1250,9 +1285,7 @@ impl LoadBalancerService {
         }
 
         // Deregister from the upstream control plane (best-effort)
-        if let Err(e) =
-            crate::reservation::upstream::deregister_upstream(&chain).await
-        {
+        if let Err(e) = crate::reservation::upstream::deregister_upstream(&chain).await {
             warn!(
                 "unchain_load_balancer: failed to deregister from upstream (chain_id={}): {}",
                 chain_id, e
@@ -1274,5 +1307,140 @@ impl LoadBalancerService {
         );
 
         Ok(Response::new(UnchainLoadBalancerReply {}))
+    }
+
+    pub(crate) async fn handle_get_chain_graph(
+        &self,
+        request: Request<GetChainGraphRequest>,
+    ) -> Result<Response<GetChainGraphReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+
+        let (ok, _) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::ReadOnly,
+            )
+            .await?;
+        if !ok {
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        // Derive this node's compound identity: "host:port/lb_id"
+        let listen = &self.config.server.listen[0];
+        let my_compound_id = format!("{}:{}/{}", listen.ip(), listen.port(), reservation_id);
+
+        // If we appear in the visited set, the caller found a cycle back to us
+        if request.visited.contains(&my_compound_id) {
+            return Ok(Response::new(GetChainGraphReply {
+                edges: vec![],
+                cycle_detected: true,
+            }));
+        }
+
+        // Fetch local LB data-plane addresses for the downstream side of edges
+        let reservation = self
+            .db
+            .get_reservation(reservation_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get reservation: {e}")))?;
+        let lb = self
+            .db
+            .get_loadbalancer(reservation.loadbalancer_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get load balancer: {e}")))?;
+        let downstream_data_ipv4 = lb
+            .unicast_ipv4_address
+            .map(|ip| ip.to_string())
+            .unwrap_or_default();
+        let downstream_data_ipv6 = lb
+            .unicast_ipv6_address
+            .map(|ip| ip.to_string())
+            .unwrap_or_default();
+
+        let chains = self
+            .db
+            .list_upstream_chains_for_reservation(reservation_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list upstream chains: {e}")))?;
+
+        let mut edges = Vec::new();
+        let mut new_visited = request.visited.clone();
+        new_visited.push(my_compound_id);
+
+        for chain in &chains {
+            edges.push(ChainGraphEdge {
+                upstream_lb_id: chain.upstream_lb_id.clone(),
+                upstream_data_ipv4: chain
+                    .upstream_data_ipv4
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default(),
+                upstream_data_ipv6: chain
+                    .upstream_data_ipv6
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default(),
+                downstream_lb_id: reservation_id.to_string(),
+                downstream_data_ipv4: downstream_data_ipv4.clone(),
+                downstream_data_ipv6: downstream_data_ipv6.clone(),
+                chain_id: chain.id.to_string(),
+            });
+
+            let ejfat_token = match &chain.upstream_ejfat_token {
+                Some(t) => t.clone(),
+                None => {
+                    warn!(
+                        "get_chain_graph: chain {} has no ejfat token, skipping recursion",
+                        chain.id
+                    );
+                    continue;
+                }
+            };
+
+            let mut upstream_client =
+                match crate::reservation::upstream::create_upstream_client(chain, &ejfat_token)
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(
+                            "get_chain_graph: cannot connect to upstream {}:{} (chain {}): {}",
+                            chain.upstream_grpc_host, chain.upstream_grpc_port, chain.id, e
+                        );
+                        continue;
+                    }
+                };
+
+            match upstream_client
+                .get_chain_graph(chain.upstream_lb_id.clone(), new_visited.clone())
+                .await
+            {
+                Ok(reply) => {
+                    let reply = reply.into_inner();
+                    if reply.cycle_detected {
+                        return Ok(Response::new(GetChainGraphReply {
+                            edges,
+                            cycle_detected: true,
+                        }));
+                    }
+                    edges.extend(reply.edges);
+                }
+                Err(e) => {
+                    warn!(
+                        "get_chain_graph: upstream {}:{} error (chain {}): {}",
+                        chain.upstream_grpc_host, chain.upstream_grpc_port, chain.id, e
+                    );
+                }
+            }
+        }
+
+        Ok(Response::new(GetChainGraphReply {
+            edges,
+            cycle_detected: false,
+        }))
     }
 }

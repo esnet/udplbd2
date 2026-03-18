@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sampled_at,\n                drop_bad_udplb_version,\n                drop_blocked_src,\n                drop_epoch_assign_miss,\n                drop_lb_calendar_miss,\n                drop_mbr_info_miss,\n                drop_no_udplb_hdr,\n                drop_not_ip,\n                rx_bytes,\n                rx_packets\n             FROM stat_lb_sample\n             WHERE reservation_id = ? AND sampled_at >= ?\n             ORDER BY sampled_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "sampled_at",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_bad_udplb_version",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_blocked_src",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_epoch_assign_miss",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_lb_calendar_miss",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_mbr_info_miss",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_no_udplb_hdr",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "drop_not_ip",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_bytes",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_packets",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "127ed247fe5bafb90b3a562156ed66a643724f00e1a30e133d9aa9898919c095"
+}

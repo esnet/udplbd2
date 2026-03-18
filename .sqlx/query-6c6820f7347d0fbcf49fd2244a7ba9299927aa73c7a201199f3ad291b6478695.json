@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stat_scope (domain, zone, block) VALUES (?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "6c6820f7347d0fbcf49fd2244a7ba9299927aa73c7a201199f3ad291b6478695"
+}

@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "INSERT INTO reservation (loadbalancer_id, reserved_until)\n             VALUES (?1, ?2)\n             RETURNING id, loadbalancer_id, reserved_until, created_at, deleted_at, current_epoch",
+  "query": "SELECT id, loadbalancer_id, name, reserved_until, created_at, deleted_at, current_epoch\n             FROM reservation\n             WHERE deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -14,30 +14,36 @@
         "type_info": "Integer"
       },
       {
-        "name": "reserved_until",
+        "name": "name",
         "ordinal": 2,
-        "type_info": "Integer"
+        "type_info": "Text"
       },
       {
-        "name": "created_at",
+        "name": "reserved_until",
         "ordinal": 3,
         "type_info": "Integer"
       },
       {
-        "name": "deleted_at",
+        "name": "created_at",
         "ordinal": 4,
         "type_info": "Integer"
       },
       {
-        "name": "current_epoch",
+        "name": "deleted_at",
         "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "current_epoch",
+        "ordinal": 6,
         "type_info": "Integer"
       }
     ],
     "parameters": {
-      "Right": 2
+      "Right": 0
     },
     "nullable": [
+      false,
       false,
       false,
       false,
@@ -46,5 +52,5 @@
       false
     ]
   },
-  "hash": "7d3cb982ea2822863dc0c63f58895287bf22c76e620cd603e5b5a7d45296924b"
+  "hash": "4a4b21a0b2c0b31b7854b9af563eedc2217e51cd08dbeb619fad35c1f9a032ce"
 }

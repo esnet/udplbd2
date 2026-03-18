@@ -13,7 +13,8 @@ use crate::{
         ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
         SendStateReply, SendStateRequest, SetSlotDemandsReply, SetSlotDemandsRequest,
         TimeseriesRequest, TimeseriesResponse, UnchainLoadBalancerReply,
-        UnchainLoadBalancerRequest, VersionReply, VersionRequest,
+        UnchainLoadBalancerRequest, GetChainGraphRequest, GetChainGraphReply,
+        VersionReply, VersionRequest,
     },
 };
 use tonic::{Request, Response, Status};
@@ -186,6 +187,14 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     ) -> Result<Response<UnchainLoadBalancerReply>, Status> {
         INBOUND_GRPC.inc();
         self.handle_unchain_load_balancer(request).await
+    }
+
+    async fn get_chain_graph(
+        &self,
+        request: Request<GetChainGraphRequest>,
+    ) -> Result<Response<GetChainGraphReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_get_chain_graph(request).await
     }
 }
 

@@ -642,15 +642,31 @@ async fn test_upstream_chain_crud() {
     // Create two chains
     let chain1 = db
         .create_upstream_chain(
-            reservation.id, "host1", 18347, false, "1", "tok1", "sid1",
-            Some("10.0.0.1"), None,
+            reservation.id,
+            "host1",
+            18347,
+            false,
+            "1",
+            "ejfat_token",
+            "session_token",
+            "sid1",
+            Some("10.0.0.1"),
+            None,
         )
         .await
         .unwrap();
     let chain2 = db
         .create_upstream_chain(
-            reservation.id, "host2", 18348, true, "2", "tok2", "sid2",
-            None, Some("::1"),
+            reservation.id,
+            "host2",
+            18348,
+            true,
+            "2",
+            "ejfat_token",
+            "session_token",
+            "sid2",
+            None,
+            Some("::1"),
         )
         .await
         .unwrap();
@@ -660,7 +676,10 @@ async fn test_upstream_chain_crud() {
     assert!(chain2.upstream_tls_enabled);
 
     // List for reservation
-    let chains = db.list_upstream_chains_for_reservation(reservation.id).await.unwrap();
+    let chains = db
+        .list_upstream_chains_for_reservation(reservation.id)
+        .await
+        .unwrap();
     assert_eq!(chains.len(), 2);
 
     // List active (joins with reservation)
@@ -669,7 +688,10 @@ async fn test_upstream_chain_crud() {
 
     // Delete one by ID
     db.delete_upstream_chain(chain1.id).await.unwrap();
-    let chains = db.list_upstream_chains_for_reservation(reservation.id).await.unwrap();
+    let chains = db
+        .list_upstream_chains_for_reservation(reservation.id)
+        .await
+        .unwrap();
     assert_eq!(chains.len(), 1);
     assert_eq!(chains[0].id, chain2.id);
 
@@ -677,8 +699,13 @@ async fn test_upstream_chain_crud() {
     assert!(db.get_upstream_chain(chain1.id).await.is_err());
 
     // Delete remaining by reservation
-    db.delete_upstream_chains_for_reservation(reservation.id).await.unwrap();
-    let chains = db.list_upstream_chains_for_reservation(reservation.id).await.unwrap();
+    db.delete_upstream_chains_for_reservation(reservation.id)
+        .await
+        .unwrap();
+    let chains = db
+        .list_upstream_chains_for_reservation(reservation.id)
+        .await
+        .unwrap();
     assert!(chains.is_empty());
 }
 
@@ -688,9 +715,19 @@ async fn test_upstream_chain_excluded_when_reservation_deleted() {
     let (_lb, reservation) = setup_test_loadbalancer(&db).await;
 
     db.create_upstream_chain(
-        reservation.id, "host1", 18347, false, "1", "tok1", "sid1",
-        None, None,
-    ).await.unwrap();
+        reservation.id,
+        "host1",
+        18347,
+        false,
+        "1",
+        "ejfat_token",
+        "session_token",
+        "1",
+        None,
+        None,
+    )
+    .await
+    .unwrap();
 
     assert_eq!(db.list_active_upstream_chains().await.unwrap().len(), 1);
 

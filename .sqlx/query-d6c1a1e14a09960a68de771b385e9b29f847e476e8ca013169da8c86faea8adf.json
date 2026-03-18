@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT s.reservation_id, e.created_at as epoch_created_at\n            FROM session s\n            LEFT JOIN epoch e ON e.reservation_id = s.reservation_id AND e.deleted_at IS NULL\n            WHERE s.id = ?1\n            ORDER BY e.created_at DESC\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "reservation_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "epoch_created_at",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      true
+    ]
+  },
+  "hash": "d6c1a1e14a09960a68de771b385e9b29f847e476e8ca013169da8c86faea8adf"
+}

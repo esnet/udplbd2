@@ -1,0 +1,104 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sampled_at,\n                rx_rslt_drop_parse_fail,\n                rx_rslt_drop_mac_dst_miss,\n                rx_rslt_drop_not_ip,\n                rx_rslt_drop_ip_dst_miss,\n                rx_rslt_drop_arp_bad_tpa,\n                rx_rslt_drop_icmpv4_echo_bad_dst,\n                rx_rslt_drop_icmpv6_echo_bad_dst,\n                rx_rslt_drop_ipv6nd_neigh_sol_bad_target,\n                rx_rslt_ok_arp_req,\n                rx_rslt_ok_icmpv4_echo,\n                rx_rslt_ok_icmpv6_echo,\n                rx_rslt_ok_ipv6nd_neigh_sol,\n                rx_rslt_ok_host,\n                rx_rslt_ok_lb\n             FROM stat_global_sample\n             WHERE sampled_at >= ?\n             ORDER BY sampled_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "sampled_at",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_parse_fail",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_mac_dst_miss",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_not_ip",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_ip_dst_miss",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_arp_bad_tpa",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_icmpv4_echo_bad_dst",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_icmpv6_echo_bad_dst",
+        "ordinal": 7,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_drop_ipv6nd_neigh_sol_bad_target",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_arp_req",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_icmpv4_echo",
+        "ordinal": 10,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_icmpv6_echo",
+        "ordinal": 11,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_ipv6nd_neigh_sol",
+        "ordinal": 12,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_host",
+        "ordinal": 13,
+        "type_info": "Integer"
+      },
+      {
+        "name": "rx_rslt_ok_lb",
+        "ordinal": 14,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "1c1f972623b3b44cb221358485e807c44874606098d3207789dd2c576db05342"
+}

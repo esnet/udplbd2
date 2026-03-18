@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE slot_demand SET deleted_at = unixepoch('subsec') * 1000 WHERE reservation_id = ?1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "24e60efe109547405a171153085a6470d802d6784ca9dd792af8d61a782f1b4c"
+}

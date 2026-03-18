@@ -80,6 +80,7 @@ pub struct ChainOutput {
     pub downstream_lb_id: String,
     pub chain_id: String,
     pub chain_ok: bool,
+    pub cycle_rejected: bool,
     pub packets_sent: usize,
     pub packets_received: usize,
     pub first_packet_ms: Option<u128>,
@@ -867,7 +868,7 @@ pub async fn test_chain(
     let reply_a = client_a
         .reserve_load_balancer(
             "doctor-chain-upstream".to_string(),
-            Some(expiration_timestamp.clone()),
+            Some(expiration_timestamp),
             vec![ip_address.to_string()],
             ip_family,
             "dynamic".to_string(),
@@ -886,7 +887,11 @@ pub async fn test_chain(
         _ => url_a,
     };
 
-    tracing::info!("upstream LB-A reserved: id={}, EJFAT_URI={}", lb_a_id, url_a);
+    tracing::info!(
+        "upstream LB-A reserved: id={}, EJFAT_URI={}",
+        lb_a_id,
+        url_a
+    );
 
     // Reserve LB-B (downstream)
     tracing::info!("reserving downstream LB (LB-B) for chain test");
@@ -913,7 +918,11 @@ pub async fn test_chain(
         _ => url_b,
     };
 
-    tracing::info!("downstream LB-B reserved: id={}, EJFAT_URI={}", lb_b_id, url_b);
+    tracing::info!(
+        "downstream LB-B reserved: id={}, EJFAT_URI={}",
+        lb_b_id,
+        url_b
+    );
 
     // Chain LB-B to LB-A: registers LB-B's data address with LB-A as a receiver (keepLbHeader=true)
     tracing::info!("chaining LB-B to LB-A");
@@ -947,12 +956,54 @@ pub async fn test_chain(
                 downstream_lb_id: lb_b_id,
                 chain_id: String::new(),
                 chain_ok: false,
+                cycle_rejected: false,
                 packets_sent: 0,
                 packets_received: 0,
                 first_packet_ms: None,
                 unchain_ok: false,
                 errors,
             });
+        }
+    };
+
+    // Cycle detection test: attempt to chain A to B (would complete A→B→A cycle).
+    // This must be rejected with FAILED_PRECONDITION.
+    tracing::info!("testing cycle detection: attempting A→B chain (should be rejected)");
+    let cycle_result = client_a
+        .chain_load_balancer(
+            lb_a_id.clone(),
+            url_b.to_string(),
+            ip_family,
+            1.0,
+            0.5,
+            2.0,
+            vec![],
+        )
+        .await;
+    let cycle_rejected = match cycle_result {
+        Err(s) if s.code() == tonic::Code::FailedPrecondition => {
+            tracing::info!("✓ Cycle detection: correctly rejected with FAILED_PRECONDITION");
+            true
+        }
+        Err(e) => {
+            let msg = format!("cycle detection: rejected with unexpected error: {e}");
+            tracing::error!("{}", msg);
+            errors.push(msg);
+            false
+        }
+        Ok(reply) => {
+            let bad_chain_id = reply.into_inner().chain_id;
+            let msg = format!(
+                "cycle detection: chain was incorrectly allowed (chain_id={bad_chain_id})"
+            );
+            tracing::error!("{}", msg);
+            errors.push(msg);
+            // Undo the bad chain so cleanup works
+            client_a
+                .unchain_load_balancer(lb_a_id.clone(), bad_chain_id)
+                .await
+                .ok();
+            false
         }
     };
 
@@ -985,14 +1036,18 @@ pub async fn test_chain(
     });
 
     // Wait for packets at LB-B's receiver
-    let received = receiver.count_packets(num_packets, Duration::from_secs(10)).await;
+    let received = receiver
+        .count_packets(num_packets, Duration::from_secs(10))
+        .await;
     let first_packet_ms = receiver.first_packet_duration().map(|d| d.as_millis());
     cancel.cancel();
     jh.await.unwrap();
 
     tracing::info!(
         "chain traffic test: sent={}, received={}, first_packet_ms={:?}",
-        num_packets, received, first_packet_ms
+        num_packets,
+        received,
+        first_packet_ms
     );
     if received == 0 {
         errors.push("no packets received through chain".to_string());
@@ -1037,6 +1092,7 @@ pub async fn test_chain(
         downstream_lb_id: lb_b_id,
         chain_id,
         chain_ok,
+        cycle_rejected,
         packets_sent: num_packets,
         packets_received: received,
         first_packet_ms,

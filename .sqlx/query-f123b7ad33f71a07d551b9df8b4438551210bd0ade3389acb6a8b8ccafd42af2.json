@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE reservation SET strategy = ?1 WHERE id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "f123b7ad33f71a07d551b9df8b4438551210bd0ade3389acb6a8b8ccafd42af2"
+}

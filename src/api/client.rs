@@ -11,8 +11,8 @@ use crate::proto::loadbalancer::v1::{
     RegisterRequest, RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
     ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply,
     RevokeTokenRequest, SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
-    SetSlotDemandsRequest, SlotRange, TokenPermission, TokenSelector,
-    UnchainLoadBalancerReply, UnchainLoadBalancerRequest, VersionReply, VersionRequest,
+    SetSlotDemandsRequest, SlotRange, TokenPermission, TokenSelector, UnchainLoadBalancerReply,
+    UnchainLoadBalancerRequest, VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
 use serde::Serialize;
@@ -412,6 +412,7 @@ impl ControlPlaneClient {
         self.client.revoke_token(request).await
     }
 
+    #[allow(clippy::too_many_arguments)]
     pub async fn chain_load_balancer(
         &mut self,
         lb_id: String,
@@ -441,6 +442,18 @@ impl ControlPlaneClient {
     ) -> std::result::Result<tonic::Response<UnchainLoadBalancerReply>, tonic::Status> {
         let request = UnchainLoadBalancerRequest { lb_id, chain_id };
         self.client.unchain_load_balancer(request).await
+    }
+
+    pub async fn get_chain_graph(
+        &mut self,
+        lb_id: String,
+        visited: Vec<String>,
+    ) -> std::result::Result<
+        tonic::Response<crate::proto::loadbalancer::v1::GetChainGraphReply>,
+        tonic::Status,
+    > {
+        let request = crate::proto::loadbalancer::v1::GetChainGraphRequest { lb_id, visited };
+        self.client.get_chain_graph(request).await
     }
 }
 

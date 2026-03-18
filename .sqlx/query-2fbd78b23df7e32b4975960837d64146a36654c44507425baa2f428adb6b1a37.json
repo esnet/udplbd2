@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT session_id, slot_index, slot_length\n            FROM slot_demand\n            WHERE reservation_id = ?1\n            AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "slot_index",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "slot_length",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true,
+      false,
+      false
+    ]
+  },
+  "hash": "2fbd78b23df7e32b4975960837d64146a36654c44507425baa2f428adb6b1a37"
+}

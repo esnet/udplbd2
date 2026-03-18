@@ -1,6 +1,6 @@
 {
   "db_name": "SQLite",
-  "query": "SELECT id FROM reservation WHERE loadbalancer_id = ? AND deleted_at IS NULL AND reserved_until > unixepoch('subsec') * 1000",
+  "query": "SELECT id FROM reservation\n             WHERE id = ? AND deleted_at IS NULL",
   "describe": {
     "columns": [
       {
@@ -16,5 +16,5 @@
       false
     ]
   },
-  "hash": "105e74f79e68bdb99e74f533fa4f10649819e17a73381395ebe38c51107a0c02"
+  "hash": "9b2dcfc28272ca1fe4f731963101a26f4edbb756a536bcd654ecc455ff0d5106"
 }

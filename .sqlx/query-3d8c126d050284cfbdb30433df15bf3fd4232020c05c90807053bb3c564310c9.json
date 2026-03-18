@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stat_member_sample (\n                session_id,\n                sampled_at,\n                mbr_tx_pkts,\n                mbr_tx_bytes\n            ) VALUES (?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "3d8c126d050284cfbdb30433df15bf3fd4232020c05c90807053bb3c564310c9"
+}

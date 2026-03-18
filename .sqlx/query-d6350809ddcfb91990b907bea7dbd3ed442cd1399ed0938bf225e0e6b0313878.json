@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT strategy FROM reservation WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "strategy",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      true
+    ]
+  },
+  "hash": "d6350809ddcfb91990b907bea7dbd3ed442cd1399ed0938bf225e0e6b0313878"
+}

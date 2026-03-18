@@ -25,8 +25,8 @@ struct AggregatedState {
     total_packets_recv: i64,
 }
 
-/// Creates a ControlPlaneClient for an upstream chain.
-async fn create_upstream_client(chain: &UpstreamChain) -> Result<ControlPlaneClient> {
+/// Creates a ControlPlaneClient for an upstream chain using the provided bearer token.
+pub async fn create_upstream_client(chain: &UpstreamChain, token: &str) -> Result<ControlPlaneClient> {
     let channel = if chain.upstream_tls_enabled {
         let tls_config = ClientTlsConfig::new().with_enabled_roots();
         Channel::from_shared(format!(
@@ -47,7 +47,7 @@ async fn create_upstream_client(chain: &UpstreamChain) -> Result<ControlPlaneCli
         .await?
     };
     let bearer_interceptor = BearerInterceptor {
-        token: chain.upstream_session_token.clone(),
+        token: token.to_string(),
     };
     let client = LoadBalancerClient::with_interceptor(channel, bearer_interceptor);
     Ok(ControlPlaneClient::new(
@@ -59,7 +59,7 @@ async fn create_upstream_client(chain: &UpstreamChain) -> Result<ControlPlaneCli
 
 /// Deregisters from an upstream control plane. Used by UnchainLoadBalancer and auto-deregister on free.
 pub async fn deregister_upstream(chain: &UpstreamChain) -> Result<()> {
-    let mut client = create_upstream_client(chain).await?;
+    let mut client = create_upstream_client(chain, &chain.upstream_session_token).await?;
     client.deregister().await?;
     Ok(())
 }
@@ -219,7 +219,7 @@ pub fn start_upstream_send_state(db: Arc<LoadBalancerDB>) {
                     };
 
                     if needs_new_client {
-                        match create_upstream_client(chain).await {
+                        match create_upstream_client(chain, &chain.upstream_session_token).await {
                             Ok(client) => {
                                 client_cache.insert(
                                     chain.id,

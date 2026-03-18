@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE session_state\n                SET timestamp = ?1, is_ready = ?2, fill_percent = ?3, control_signal = ?4,\n                    total_events_recv = ?5, total_events_reassembled = ?6,\n                    total_events_reassembly_err = ?7, total_events_dequeued = ?8,\n                    total_event_enqueue_err = ?9, total_bytes_recv = ?10,\n                    total_packets_recv = ?11, created_at = ?12\n                WHERE id = ?13\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "27a440504dfa736fecfe590ed26377c0b3d94b4a96a80efc2be19b48379ae29e"
+}

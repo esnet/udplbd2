@@ -186,6 +186,7 @@ pub struct UpstreamChain {
     pub upstream_grpc_port: u16,
     pub upstream_tls_enabled: bool,
     pub upstream_lb_id: String,
+    pub upstream_ejfat_token: Option<String>,
     pub upstream_session_token: String,
     pub upstream_session_id: String,
     pub upstream_data_ipv4: Option<IpAddr>,

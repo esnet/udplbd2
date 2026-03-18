@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        WITH consecutive_samples AS (\n            SELECT\n                session_id,\n                sampled_at,\n                mbr_tx_pkts,\n                LAG(sampled_at) OVER (PARTITION BY session_id ORDER BY sampled_at) as prev_sampled_at,\n                LAG(mbr_tx_pkts) OVER (PARTITION BY session_id ORDER BY sampled_at) as prev_mbr_tx_pkts\n            FROM stat_member_sample\n            WHERE sampled_at >= ?1\n              AND session_id IS NOT NULL\n        ),\n        tx_increases AS (\n            SELECT\n                session_id,\n                prev_sampled_at as first_sample_ts,\n                sampled_at as last_sample_ts,\n                prev_mbr_tx_pkts as first_tx_pkts,\n                mbr_tx_pkts as last_tx_pkts\n            FROM consecutive_samples\n            WHERE prev_mbr_tx_pkts IS NOT NULL\n              AND mbr_tx_pkts > prev_mbr_tx_pkts\n        ),\n        receiver_responses AS (\n            SELECT\n                ti.session_id,\n                ti.first_sample_ts,\n                ti.last_sample_ts,\n                ti.first_tx_pkts,\n                ti.last_tx_pkts,\n                COALESCE((\n                    SELECT MIN(total_packets_recv)\n                    FROM session_state ss\n                    WHERE ss.session_id = ti.session_id\n                      AND ss.timestamp >= ti.first_sample_ts\n                      AND ss.timestamp <= ti.last_sample_ts + ?2\n                ), 0) as first_recv_pkts,\n                COALESCE((\n                    SELECT MAX(total_packets_recv)\n                    FROM session_state ss\n                    WHERE ss.session_id = ti.session_id\n                      AND ss.timestamp >= ti.first_sample_ts\n                      AND ss.timestamp <= ti.last_sample_ts + ?2\n                ), 0) as last_recv_pkts\n            FROM tx_increases ti\n        )\n        SELECT DISTINCT\n            rr.session_id,\n            rr.first_sample_ts as \"first_sample_ts!: i64\",\n            rr.last_sample_ts as \"last_sample_ts!: i64\",\n            rr.first_tx_pkts as \"first_tx_pkts!: i64\",\n            rr.last_tx_pkts as \"last_tx_pkts!: i64\",\n            rr.first_recv_pkts as \"first_recv_pkts!: i64\",\n            rr.last_recv_pkts as \"last_recv_pkts!: i64\",\n            s.name as session_name,\n            s.reservation_id,\n            r.loadbalancer_id\n        FROM receiver_responses rr\n        JOIN session s ON rr.session_id = s.id\n        JOIN reservation r ON s.reservation_id = r.id\n        WHERE s.deleted_at IS NULL\n          AND r.deleted_at IS NULL\n          AND rr.last_recv_pkts = rr.first_recv_pkts\n        ",
+  "describe": {
+    "columns": [
+      {
+        "name": "session_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "first_sample_ts!: i64",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_sample_ts!: i64",
+        "ordinal": 2,
+        "type_info": "Integer"
+      },
+      {
+        "name": "first_tx_pkts!: i64",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_tx_pkts!: i64",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "first_recv_pkts!: i64",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "last_recv_pkts!: i64",
+        "ordinal": 6,
+        "type_info": "Integer"
+      },
+      {
+        "name": "session_name",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 9,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      true,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "5ed55c54f20db7c0f2728fc9ab789596fada299441c18a6119c7361038b18a83"
+}

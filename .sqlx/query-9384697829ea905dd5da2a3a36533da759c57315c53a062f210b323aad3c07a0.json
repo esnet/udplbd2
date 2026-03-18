@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stat_lb_scoped_sample (\n                reservation_id,\n                stat_scope_id,\n                sampled_at,\n                rx_bytes,\n                rx_packets\n            ) VALUES (?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "9384697829ea905dd5da2a3a36533da759c57315c53a062f210b323aad3c07a0"
+}

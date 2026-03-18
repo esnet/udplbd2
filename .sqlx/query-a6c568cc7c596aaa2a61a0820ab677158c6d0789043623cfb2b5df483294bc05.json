@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT l.fpga_lb_id, r.id as reservation_id\n                 FROM loadbalancer l\n                 JOIN reservation r ON l.id = r.loadbalancer_id\n                 WHERE l.deleted_at IS NULL\n                   AND r.deleted_at IS NULL\n                   AND r.reserved_until > unixepoch('subsec') * 1000",
+  "describe": {
+    "columns": [
+      {
+        "name": "fpga_lb_id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "a6c568cc7c596aaa2a61a0820ab677158c6d0789043623cfb2b5df483294bc05"
+}

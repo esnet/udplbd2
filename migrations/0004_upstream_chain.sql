@@ -7,6 +7,7 @@ CREATE TABLE upstream_chain (
     upstream_grpc_port INTEGER NOT NULL,
     upstream_tls_enabled INTEGER NOT NULL DEFAULT 0,
     upstream_lb_id TEXT NOT NULL,
+    upstream_ejfat_token TEXT,
     upstream_session_token TEXT NOT NULL,
     upstream_session_id TEXT NOT NULL,
     upstream_data_ipv4 TEXT,

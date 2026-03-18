@@ -82,6 +82,10 @@ service LoadBalancer {
 	rpc ChainLoadBalancer (ChainLoadBalancerRequest) returns (ChainLoadBalancerReply) {};
 	// Removes a specific upstream chain by ID, deregistering from the upstream control plane.
 	rpc UnchainLoadBalancer (UnchainLoadBalancerRequest) returns (UnchainLoadBalancerReply) {};
+	// Returns the transitive upstream chain graph starting from this node, recursing to each
+	// upstream's control plane. Used by control planes to detect forwarding cycles before
+	// accepting new ChainLoadBalancer requests. Also useful for operators to visualize topology.
+	rpc GetChainGraph (GetChainGraphRequest) returns (GetChainGraphReply) {};
 }
 
 
@@ -503,6 +507,36 @@ message ChainLoadBalancerRequest {
 }
 message ChainLoadBalancerReply {
 	string chainId = 1; // database identifier for this upstream chain
+}
+
+//
+// GetChainGraph
+//
+message GetChainGraphRequest {
+	// lb_id of the LB reservation to start the traversal from.
+	// When called during cycle detection this is the upstream's lb_id (from the ejfatUri).
+	string lbId = 1;
+	// Globally-unique node identifiers already visited in this traversal.
+	// Format: "{grpc_host}:{grpc_port}/{lb_id}" — prefixing with the control plane's
+	// first gRPC listen address makes lb_ids unique across instances.
+	// Prevents infinite loops and serves as the cycle-detection sentinel:
+	// if an upstream's compound id matches any entry, cycleDetected is returned true.
+	repeated string visited = 2;
+}
+message ChainGraphEdge {
+	string upstreamLbId       = 1; // lb_id of the upstream LB reservation
+	string upstreamDataIpv4   = 2; // IPv4 data-plane address of the upstream LB (if available)
+	string upstreamDataIpv6   = 3; // IPv6 data-plane address of the upstream LB (if available)
+	string downstreamLbId     = 4; // lb_id of the downstream (local) LB reservation
+	string downstreamDataIpv4 = 5; // IPv4 data-plane address of the downstream LB (if available)
+	string downstreamDataIpv6 = 6; // IPv6 data-plane address of the downstream LB (if available)
+	string chainId            = 7; // local upstream_chain row id
+}
+message GetChainGraphReply {
+	repeated ChainGraphEdge edges = 1;
+	// True when an upstream's compound id matched a visited entry, meaning the
+	// initiating LB already exists upstream in this chain (cycle detected).
+	bool cycleDetected = 2;
 }
 
 //

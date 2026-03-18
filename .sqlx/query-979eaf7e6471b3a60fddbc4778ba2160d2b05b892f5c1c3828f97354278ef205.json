@@ -1,0 +1,32 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT sampled_at, mbr_tx_pkts, mbr_tx_bytes\n             FROM stat_member_sample\n             WHERE session_id = ? AND sampled_at >= ?\n             ORDER BY sampled_at ASC",
+  "describe": {
+    "columns": [
+      {
+        "name": "sampled_at",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mbr_tx_pkts",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "mbr_tx_bytes",
+        "ordinal": 2,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "979eaf7e6471b3a60fddbc4778ba2160d2b05b892f5c1c3828f97354278ef205"
+}
