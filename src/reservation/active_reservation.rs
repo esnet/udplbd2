@@ -325,6 +325,8 @@ impl ActiveReservation {
                         match_event: boundary.start,
                         match_event_prefix_len: 64 - boundary.power_of_two,
                         set_epoch: (epoch.epoch_count % 4) as u32,
+                        slot_select_bit_cnt: 9,
+                        slot_select_xor: 0,
                         priority: if i == recent_epochs.len() - 1 { 63 } else { 0 },
                     }
                     .into(),

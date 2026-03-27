@@ -147,6 +147,10 @@ pub struct SendArgs {
     /// Slot index to use in the LB header for slot-based routing.
     #[arg(long, short)]
     pub slot: Option<u16>,
+
+    /// Use LB protocol version 2 instead of the default version 3.
+    #[arg(long = "v2")]
+    pub v2: bool,
 }
 
 #[derive(Args, Debug)]
@@ -312,7 +316,7 @@ impl DataplaneCli {
                     .to
                     .as_ref()
                     .map(|addr| addr.parse().expect("Invalid address:port format"));
-                send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot).await?;
+                send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot, args.v2).await?;
             }
             DataplaneCommand::Doctor(args) => {
                 if args.chain {
@@ -439,6 +443,7 @@ pub async fn send_file(
     url: String,
     data_id: u16,
     slot: Option<u16>,
+    v2: bool,
 ) -> Result<()> {
     let mut buffer = Vec::new();
     if file_path == "-" {
@@ -452,6 +457,9 @@ pub async fn send_file(
         Some(addr) => {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
             let mut sender = Sender::from_data_socket(socket, addr, None).await?;
+            if v2 {
+                sender.lb_version = crate::dataplane::protocol::LBHeaderVersion::V2;
+            }
             match slot {
                 Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
                 None => sender.send_ts(&buffer, data_id).await,
@@ -459,6 +467,9 @@ pub async fn send_file(
         }
         None => {
             let mut sender = Sender::from_url(&url.parse().expect("bad URL"), None, false).await?;
+            if v2 {
+                sender.lb_version = crate::dataplane::protocol::LBHeaderVersion::V2;
+            }
             match slot {
                 Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
                 None => sender.send_ts(&buffer, data_id).await,

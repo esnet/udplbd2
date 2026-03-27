@@ -19,6 +19,21 @@ pub struct EjfatEvent {
     pub data: Vec<u8>,
 }
 
+/// The LB protocol version.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LBHeaderVersion {
+    V2,
+    V3,
+}
+
+/// The full 16-byte LB header (common + version-specific body).
+///
+/// The binary layout is identical for v2 and v3; only the interpretation of
+/// bytes 4–7 differs:
+///   - v2: `[rsvd(2)] [entropy(2)] [tick(8)]`
+///   - v3: `[slot_select(2)] [port_select(2)] [tick(8)]`
+///
+/// This struct stores the raw bytes and exposes typed accessors.
 #[derive(FromBytes, IntoBytes, KnownLayout, Immutable, Unaligned, Debug, Clone, Copy)]
 #[repr(C)]
 pub struct LBHeader {
@@ -26,8 +41,10 @@ pub struct LBHeader {
     pub magic_b: u8,
     pub version: u8,
     pub protocol: u8,
-    _reserved1: U16<NetworkEndian>,
-    pub entropy: U16<NetworkEndian>,
+    /// v2: reserved; v3: slot_select (lower 16 bits of calendar slot)
+    pub slot_select: U16<NetworkEndian>,
+    /// v2: entropy (port selector); v3: port_select
+    pub port_select: U16<NetworkEndian>,
     pub tick: U64<NetworkEndian>,
 }
 
@@ -43,27 +60,51 @@ impl serde::Serialize for LBHeader {
         state.serialize_field("magic_b", &self.magic_b)?;
         state.serialize_field("version", &self.version)?;
         state.serialize_field("protocol", &self.protocol)?;
-        state.serialize_field("_reserved1", &self._reserved1.get())?;
-        state.serialize_field("entropy", &self.entropy.get())?;
+        state.serialize_field("slot_select", &self.slot_select.get())?;
+        state.serialize_field("port_select", &self.port_select.get())?;
         state.serialize_field("tick", &self.tick.get())?;
         state.end()
     }
 }
 
 impl LBHeader {
+    /// Create a new v3 LB header with default values.
     pub fn new() -> Self {
+        LBHeader {
+            magic_l: b'L',
+            magic_b: b'B',
+            version: 3,
+            protocol: 1,
+            slot_select: U16::new(0),
+            port_select: U16::new(0),
+            tick: U64::new(0),
+        }
+    }
+
+    /// Create a new v2 LB header with default values.
+    pub fn new_v2() -> Self {
         LBHeader {
             magic_l: b'L',
             magic_b: b'B',
             version: 2,
             protocol: 1,
-            _reserved1: U16::new(0),
-            entropy: U16::new(0),
+            slot_select: U16::new(0), // reserved in v2
+            port_select: U16::new(0), // entropy in v2
             tick: U64::new(0),
         }
     }
 
+    /// Set defaults for a v3 header (the default version).
     pub fn set_defaults(&mut self) -> &mut Self {
+        self.magic_l = b'L';
+        self.magic_b = b'B';
+        self.version = 3;
+        self.protocol = 1;
+        self
+    }
+
+    /// Set defaults for a v2 header.
+    pub fn set_defaults_v2(&mut self) -> &mut Self {
         self.magic_l = b'L';
         self.magic_b = b'B';
         self.version = 2;
@@ -71,8 +112,34 @@ impl LBHeader {
         self
     }
 
+    /// Returns true if the magic bytes are valid and the version is 2 or 3.
     pub fn is_valid(&self) -> bool {
-        self.magic_l == b'L' && self.magic_b == b'B' && self.version == 2
+        self.magic_l == b'L' && self.magic_b == b'B' && (self.version == 2 || self.version == 3)
+    }
+
+    /// Returns the protocol version.
+    pub fn lb_version(&self) -> Option<LBHeaderVersion> {
+        match self.version {
+            2 => Some(LBHeaderVersion::V2),
+            3 => Some(LBHeaderVersion::V3),
+            _ => None,
+        }
+    }
+
+    /// For v2: returns the entropy field (used as port_select).
+    /// For v3: returns the port_select field.
+    /// In both cases this is stored in the `port_select` field of this struct.
+    pub fn get_port_select(&self) -> u16 {
+        self.port_select.get()
+    }
+
+    /// For v2: the slot is derived from the lower 9 bits of tick.
+    /// For v3: the slot is taken from the slot_select field.
+    pub fn get_slot_select(&self) -> u16 {
+        match self.version {
+            3 => self.slot_select.get(),
+            _ => (self.tick.get() & 0x1FF) as u16, // v2: lower 9 bits of tick
+        }
     }
 
     pub fn set_tick_to_timestamp(&mut self) -> &mut Self {
@@ -92,10 +159,11 @@ impl fmt::Display for LBHeader {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             f,
-            "LBHeader\n  version  = {}\n  protocol = {}\n  entropy  = {}\n  tick     = {}",
+            "LBHeader\n  version      = {}\n  protocol     = {}\n  slot_select  = {}\n  port_select  = {}\n  tick         = {}",
             self.version,
             self.protocol,
-            self.entropy.get(),
+            self.slot_select.get(),
+            self.port_select.get(),
             self.tick.get()
         )
     }
