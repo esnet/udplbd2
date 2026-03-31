@@ -196,10 +196,12 @@ impl MockLoadBalancer {
         let member = match state.get_member_info(self.lb_id, member_id) {
             Some(info) => info,
             None => {
-                debug!(
-                    "no member info for lb_id {} member_id {}",
-                    self.lb_id, member_id
-                );
+                if member_id != u16::MAX {
+                    debug!(
+                        "no member info for lb_id {} member_id {}",
+                        self.lb_id, member_id
+                    );
+                }
                 return None;
             }
         };

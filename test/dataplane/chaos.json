@@ -1,7 +1,8 @@
 {
-    "event_count": 5000,
     "sender": {
-        "rate": 1000
+        "rate": 1000,
+        "event_count": 5000,
+        "event_size": 1500
     },
     "receivers": [
         {
