@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Tonic gRPC client for the smartnic-p4 gRPC API
 use crate::{
+    grpc_common::{create_grpc_channel, BearerTokenInterceptor},
     proto::smartnic::p4_v2::{batch_response, ErrorCode},
     snp4::rules::TableUpdate,
 };
 use futures::{future::join_all, StreamExt};
 use tonic::{
-    service::{interceptor::InterceptedService, Interceptor},
-    transport::{Certificate, Channel, ClientTlsConfig, Endpoint},
+    service::interceptor::InterceptedService,
+    transport::{Channel, Endpoint},
     Request, Status,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::proto::smartnic::p4_v2::{
     batch_request, smartnic_p4_client::SmartnicP4Client, BatchOperation, BatchRequest,
@@ -38,29 +39,7 @@ impl SNP4Client {
         ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
-        let mut channel = Channel::from_shared(addr.to_string()).unwrap();
-
-        if addr.starts_with("https://") {
-            let tls_config: ClientTlsConfig;
-            if let Some(ca_file) = ca_file {
-                let ca_file_str = ca_file.to_string_lossy();
-                info!("sn-p4 client for {addr} only trusting configured CA in {ca_file_str}");
-
-                let pem = std::fs::read_to_string(ca_file).expect("Failed to read CA certificate");
-                let cert = Certificate::from_pem(pem);
-                tls_config = ClientTlsConfig::new().ca_certificate(cert);
-            } else {
-                debug!("sn-p4 client for {addr} has no ca cert provided, trusting system root CAs");
-                tls_config = ClientTlsConfig::new().with_enabled_roots();
-            }
-            if !verify {
-                // TODO
-                unimplemented!()
-            }
-            channel = channel.tls_config(tls_config)?;
-        }
-
-        let channel = channel.connect().await?;
+        let channel = create_grpc_channel(addr, verify, ca_file, "sn-p4").await?;
         let interceptor = BearerTokenInterceptor::new(auth_token);
 
         Ok(Self {
@@ -801,31 +780,7 @@ impl MultiSNP4Client {
     }
 }
 
-#[derive(Clone)]
-pub struct BearerTokenInterceptor {
-    token: String,
-}
 
-impl BearerTokenInterceptor {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self {
-            token: token.into(),
-        }
-    }
-}
-
-impl Interceptor for BearerTokenInterceptor {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = format!("Bearer {}", self.token);
-        request.metadata_mut().insert(
-            "authorization",
-            token
-                .parse()
-                .map_err(|_| Status::invalid_argument("Invalid authorization header value"))?,
-        );
-        Ok(request)
-    }
-}
 
 #[derive(Debug)]
 pub enum BatchError {

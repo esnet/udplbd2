@@ -5,6 +5,7 @@ pub mod constants;
 pub mod dataplane;
 pub mod db;
 pub mod errors;
+pub mod grpc_common;
 pub mod healthcheck;
 pub mod macaddr;
 pub mod metrics;

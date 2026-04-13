@@ -1,26 +1,27 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Tonic gRPC client for the smartnic-config gRPC API
 
-use crate::proto::smartnic::cfg_v2::{
-    smartnic_config_client::SmartnicConfigClient, BatchRequest, BatchResponse, DefaultsRequest,
-    DefaultsResponse, DeviceInfo, DeviceInfoRequest, DeviceStatus, DeviceStatusRequest, HostConfig,
-    HostConfigRequest, HostConfigResponse, HostStatsRequest, HostStatsResponse, ModuleGpioRequest,
-    ModuleGpioResponse, ModuleInfoRequest, ModuleInfoResponse, ModuleMemRequest, ModuleMemResponse,
-    ModuleStatusRequest, ModuleStatusResponse, PortConfig, PortConfigRequest, PortConfigResponse,
-    PortStatsRequest, PortStatsResponse, PortStatusRequest, PortStatusResponse, ServerConfig,
-    ServerConfigRequest, ServerStatus, ServerStatusRequest, StatsMetric, StatsRequest,
-    StatsResponse, SwitchConfig, SwitchConfigRequest, SwitchConfigResponse, SwitchStatsRequest,
-    SwitchStatsResponse,
+use crate::{
+    grpc_common::{create_grpc_channel, BearerTokenInterceptor},
+    proto::smartnic::cfg_v2::{
+        smartnic_config_client::SmartnicConfigClient, BatchRequest, BatchResponse, DefaultsRequest,
+        DefaultsResponse, DeviceInfo, DeviceInfoRequest, DeviceStatus, DeviceStatusRequest,
+        HostConfig, HostConfigRequest, HostConfigResponse, HostStatsRequest, HostStatsResponse,
+        ModuleGpioRequest, ModuleGpioResponse, ModuleInfoRequest, ModuleInfoResponse,
+        ModuleMemRequest, ModuleMemResponse, ModuleStatusRequest, ModuleStatusResponse, PortConfig,
+        PortConfigRequest, PortConfigResponse, PortStatsRequest, PortStatsResponse,
+        PortStatusRequest, PortStatusResponse, ServerConfig, ServerConfigRequest, ServerStatus,
+        ServerStatusRequest, StatsMetric, StatsRequest, StatsResponse, SwitchConfig,
+        SwitchConfigRequest, SwitchConfigResponse, SwitchStatsRequest, SwitchStatsResponse,
+    },
 };
 use futures::{future::join_all, StreamExt};
 use tonic::{
-    service::{interceptor::InterceptedService, Interceptor},
-    transport::{Channel, ClientTlsConfig, Certificate},
+    service::interceptor::InterceptedService,
+    transport::Channel,
     Request, Status,
 };
 use std::path::PathBuf;
-
-use tracing::{debug, info};
 
 #[derive(Debug, Clone)]
 pub struct SNCfgClient {
@@ -33,32 +34,10 @@ impl SNCfgClient {
         addr: &str,
         device_id: i32,
         verify: bool,
-	ca_file: Option<PathBuf>,
+        ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
-        let mut channel = Channel::from_shared(addr.to_string()).unwrap();
-
-        if addr.starts_with("https://") {
-            let tls_config: ClientTlsConfig;
-            if let Some(ca_file) = ca_file {
-                let ca_file_str = ca_file.to_string_lossy();
-                info!("sn-cfg client for {addr} only trusting configured CA in {ca_file_str}");
-
-                let pem = std::fs::read_to_string(ca_file).expect("Failed to read CA certificate");
-                let cert = Certificate::from_pem(pem);
-                tls_config = ClientTlsConfig::new().ca_certificate(cert);
-            } else {
-                debug!("sn-cfg client for {addr} has no ca cert provided, trusting system root CAs");
-                tls_config = ClientTlsConfig::new().with_enabled_roots();
-            }
-            if !verify {
-                // TODO: Support disabling TLS verification if needed
-                unimplemented!()
-            }
-            channel = channel.tls_config(tls_config)?;
-        }
-
-        let channel = channel.connect().await?;
+        let channel = create_grpc_channel(addr, verify, ca_file, "sn-cfg").await?;
         let interceptor = BearerTokenInterceptor::new(auth_token);
 
         Ok(Self {
@@ -1445,32 +1424,6 @@ impl MultiSNCfgClient {
             .ok_or_else(|| Status::failed_precondition("No clients available"))?
             .get_server_status()
             .await
-    }
-}
-
-#[derive(Clone)]
-pub struct BearerTokenInterceptor {
-    token: String,
-}
-
-impl BearerTokenInterceptor {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self {
-            token: token.into(),
-        }
-    }
-}
-
-impl Interceptor for BearerTokenInterceptor {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = format!("Bearer {}", self.token);
-        request.metadata_mut().insert(
-            "authorization",
-            token
-                .parse()
-                .map_err(|_| Status::invalid_argument("Invalid authorization header value"))?,
-        );
-        Ok(request)
     }
 }
 
