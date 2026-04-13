@@ -126,6 +126,6 @@ deploy_alpha:
   stage: deploy
   variables:
     AAP_JOB_TEMPLATE: 747
-    AAP_LIMIT: node3.fpga.es.net
+    AAP_LIMIT: node2.fpga.es.net
   rules:
     - if: $CI_COMMIT_BRANCH == "develop"

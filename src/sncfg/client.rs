@@ -2,7 +2,7 @@
 //! Tonic gRPC client for the smartnic-config gRPC API
 
 use crate::{
-    grpc_common::{create_grpc_channel, BearerTokenInterceptor},
+    grpc_common::{create_grpc_channel, fan_out, stream_collect, BearerTokenInterceptor},
     proto::smartnic::cfg_v2::{
         smartnic_config_client::SmartnicConfigClient, BatchRequest, BatchResponse, DefaultsRequest,
         DefaultsResponse, DeviceInfo, DeviceInfoRequest, DeviceStatus, DeviceStatusRequest,
@@ -15,13 +15,9 @@ use crate::{
         SwitchConfigRequest, SwitchConfigResponse, SwitchStatsRequest, SwitchStatsResponse,
     },
 };
-use futures::{future::join_all, StreamExt};
-use tonic::{
-    service::interceptor::InterceptedService,
-    transport::Channel,
-    Request, Status,
-};
+use futures::StreamExt;
 use std::path::PathBuf;
+use tonic::{service::interceptor::InterceptedService, transport::Channel, Request, Status};
 
 #[derive(Debug, Clone)]
 pub struct SNCfgClient {
@@ -50,62 +46,26 @@ impl SNCfgClient {
         let request = Request::new(DeviceInfoRequest {
             dev_id: self.device_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_device_info"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_device_info(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_device_info"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut device_infos = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            if let Some(info) = response.info {
-                device_infos.push(info);
-            }
-        }
-
-        Ok(device_infos)
+        stream_collect(
+            "get_device_info",
+            request,
+            |r| self.api.get_device_info(r),
+            |resp| resp.info,
+        )
+        .await
     }
 
     pub async fn get_device_status(&mut self) -> Result<Vec<DeviceStatus>, Status> {
         let request = Request::new(DeviceStatusRequest {
             dev_id: self.device_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_device_status"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_device_status(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_device_status"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut statuses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            if let Some(status) = response.status {
-                statuses.push(status);
-            }
-        }
-
-        Ok(statuses)
+        stream_collect(
+            "get_device_status",
+            request,
+            |r| self.api.get_device_status(r),
+            |resp| resp.status,
+        )
+        .await
     }
 
     pub async fn set_defaults(&mut self, profile: i32) -> Result<Vec<DefaultsResponse>, Status> {
@@ -113,27 +73,7 @@ impl SNCfgClient {
             dev_id: self.device_id,
             profile,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_defaults"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_defaults(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_defaults"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect("set_defaults", request, |r| self.api.set_defaults(r), Some).await
     }
 
     // --- HostConfig ---
@@ -146,29 +86,13 @@ impl SNCfgClient {
             host_id,
             config: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_host_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_host_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_host_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_host_config",
+            request,
+            |r| self.api.get_host_config(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn set_host_config(
@@ -181,27 +105,13 @@ impl SNCfgClient {
             host_id,
             config: Some(config),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_host_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_host_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_host_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "set_host_config",
+            request,
+            |r| self.api.set_host_config(r),
+            Some,
+        )
+        .await
     }
 
     // --- HostStats ---
@@ -211,29 +121,13 @@ impl SNCfgClient {
             host_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_host_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_host_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_host_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_host_stats",
+            request,
+            |r| self.api.get_host_stats(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn clear_host_stats(
@@ -245,27 +139,13 @@ impl SNCfgClient {
             host_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_host_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_host_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_host_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "clear_host_stats",
+            request,
+            |r| self.api.clear_host_stats(r),
+            Some,
+        )
+        .await
     }
 
     // --- ModuleGpio ---
@@ -278,27 +158,13 @@ impl SNCfgClient {
             mod_id,
             gpio: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_module_gpio"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_module_gpio(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_module_gpio"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "get_module_gpio",
+            request,
+            |r| self.api.get_module_gpio(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn set_module_gpio(
@@ -311,27 +177,13 @@ impl SNCfgClient {
             mod_id,
             gpio: Some(gpio),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_module_gpio"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_module_gpio(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_module_gpio"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "set_module_gpio",
+            request,
+            |r| self.api.set_module_gpio(r),
+            Some,
+        )
+        .await
     }
 
     // --- ModuleInfo ---
@@ -343,27 +195,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             mod_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_module_info"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_module_info(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_module_info"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "get_module_info",
+            request,
+            |r| self.api.get_module_info(r),
+            Some,
+        )
+        .await
     }
 
     // --- ModuleMem ---
@@ -377,27 +215,13 @@ impl SNCfgClient {
             mod_id,
             mem: Some(mem),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_module_mem"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_module_mem(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_module_mem"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "get_module_mem",
+            request,
+            |r| self.api.get_module_mem(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn set_module_mem(
@@ -410,27 +234,13 @@ impl SNCfgClient {
             mod_id,
             mem: Some(mem),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_module_mem"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_module_mem(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_module_mem"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "set_module_mem",
+            request,
+            |r| self.api.set_module_mem(r),
+            Some,
+        )
+        .await
     }
 
     // --- ModuleStatus ---
@@ -442,27 +252,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             mod_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_module_status"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_module_status(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_module_status"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "get_module_status",
+            request,
+            |r| self.api.get_module_status(r),
+            Some,
+        )
+        .await
     }
 
     // --- PortConfig ---
@@ -476,27 +272,13 @@ impl SNCfgClient {
             port_id,
             config: Some(config),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_port_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_port_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_port_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "set_port_config",
+            request,
+            |r| self.api.set_port_config(r),
+            Some,
+        )
+        .await
     }
 
     // --- PortStats ---
@@ -509,27 +291,13 @@ impl SNCfgClient {
             port_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_port_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_port_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_port_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "clear_port_stats",
+            request,
+            |r| self.api.clear_port_stats(r),
+            Some,
+        )
+        .await
     }
 
     // --- Stats ---
@@ -538,27 +306,7 @@ impl SNCfgClient {
             dev_id: self.device_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect("clear_stats", request, |r| self.api.clear_stats(r), Some).await
     }
 
     // --- SwitchConfig ---
@@ -570,27 +318,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             config: Some(config),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_switch_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_switch_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_switch_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "set_switch_config",
+            request,
+            |r| self.api.set_switch_config(r),
+            Some,
+        )
+        .await
     }
 
     // --- SwitchStats ---
@@ -599,27 +333,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_switch_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_switch_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_switch_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-        Ok(responses)
+        stream_collect(
+            "clear_switch_stats",
+            request,
+            |r| self.api.clear_switch_stats(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_port_config(
@@ -631,29 +351,13 @@ impl SNCfgClient {
             port_id,
             config: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_port_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_port_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_port_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_port_config",
+            request,
+            |r| self.api.get_port_config(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_port_status(
@@ -664,29 +368,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             port_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_port_status"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_port_status(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_port_status"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_port_status",
+            request,
+            |r| self.api.get_port_status(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_port_stats(&mut self, port_id: i32) -> Result<Vec<PortStatsResponse>, Status> {
@@ -695,29 +383,13 @@ impl SNCfgClient {
             port_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_port_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_port_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_port_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_port_stats",
+            request,
+            |r| self.api.get_port_stats(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_switch_config(&mut self) -> Result<Vec<SwitchConfigResponse>, Status> {
@@ -725,29 +397,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             config: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_switch_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_switch_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_switch_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_switch_config",
+            request,
+            |r| self.api.get_switch_config(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_switch_stats(&mut self) -> Result<Vec<SwitchStatsResponse>, Status> {
@@ -755,29 +411,13 @@ impl SNCfgClient {
             dev_id: self.device_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_switch_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_switch_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_switch_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect(
+            "get_switch_stats",
+            request,
+            |r| self.api.get_switch_stats(r),
+            Some,
+        )
+        .await
     }
 
     pub async fn get_stats(&mut self) -> Result<Vec<StatsMetric>, Status> {
@@ -785,110 +425,57 @@ impl SNCfgClient {
             dev_id: self.device_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut metrics = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            if let Some(stats) = response.stats {
-                metrics.extend(stats.metrics);
-            }
-        }
-
-        Ok(metrics)
+        // Each response carries a nested list of metrics; flatten them all.
+        let responses = stream_collect(
+            "get_stats",
+            request,
+            |r| self.api.get_stats(r),
+            |resp| resp.stats,
+        )
+        .await?;
+        Ok(responses.into_iter().flat_map(|s| s.metrics).collect())
     }
 
     pub async fn get_server_config(&mut self) -> Result<ServerConfig, Status> {
         let request = Request::new(ServerConfigRequest { config: None });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_server_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_server_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_server_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut config = None;
-
-        while let Some(response) = stream.message().await? {
-            config = response.config;
-        }
-
-        config.ok_or_else(|| Status::not_found("No server config found"))
+        let mut configs = stream_collect(
+            "get_server_config",
+            request,
+            |r| self.api.get_server_config(r),
+            |resp| resp.config,
+        )
+        .await?;
+        configs
+            .pop()
+            .ok_or_else(|| Status::not_found("No server config found"))
     }
 
     pub async fn set_server_config(&mut self, config: ServerConfig) -> Result<(), Status> {
         let request = Request::new(ServerConfigRequest {
             config: Some(config),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_server_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_server_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_server_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        while stream.message().await?.is_some() {}
-
+        stream_collect(
+            "set_server_config",
+            request,
+            |r| self.api.set_server_config(r),
+            |_| None::<()>,
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn get_server_status(&mut self) -> Result<ServerStatus, Status> {
         let request = Request::new(ServerStatusRequest {});
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_server_status"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_server_status(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_server_status"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut status = None;
-
-        while let Some(response) = stream.message().await? {
-            status = response.status;
-        }
-
-        status.ok_or_else(|| Status::not_found("No server status found"))
+        let mut statuses = stream_collect(
+            "get_server_status",
+            request,
+            |r| self.api.get_server_status(r),
+            |resp| resp.status,
+        )
+        .await?;
+        statuses
+            .pop()
+            .ok_or_else(|| Status::not_found("No server status found"))
     }
 
     pub async fn batch(
@@ -938,38 +525,26 @@ impl MultiSNCfgClient {
         &mut self,
         profile: i32,
     ) -> Result<Vec<Vec<DefaultsResponse>>, Vec<Result<Vec<DefaultsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_defaults(profile))
-            .collect();
-
-        let results: Vec<Result<Vec<DefaultsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_defaults(profile))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_host_config(
         &mut self,
         host_id: i32,
     ) -> Result<Vec<Vec<HostConfigResponse>>, Vec<Result<Vec<HostConfigResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_host_config(host_id))
-            .collect();
-
-        let results: Vec<Result<Vec<HostConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_host_config(host_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn set_host_config(
@@ -977,76 +552,52 @@ impl MultiSNCfgClient {
         host_id: i32,
         config: HostConfig,
     ) -> Result<Vec<Vec<HostConfigResponse>>, Vec<Result<Vec<HostConfigResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_host_config(host_id, config.clone()))
-            .collect();
-
-        let results: Vec<Result<Vec<HostConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_host_config(host_id, config.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_host_stats(
         &mut self,
         host_id: i32,
     ) -> Result<Vec<Vec<HostStatsResponse>>, Vec<Result<Vec<HostStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_host_stats(host_id))
-            .collect();
-
-        let results: Vec<Result<Vec<HostStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_host_stats(host_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_host_stats(
         &mut self,
         host_id: i32,
     ) -> Result<Vec<Vec<HostStatsResponse>>, Vec<Result<Vec<HostStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_host_stats(host_id))
-            .collect();
-
-        let results: Vec<Result<Vec<HostStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.clear_host_stats(host_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_module_gpio(
         &mut self,
         mod_id: i32,
     ) -> Result<Vec<Vec<ModuleGpioResponse>>, Vec<Result<Vec<ModuleGpioResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_module_gpio(mod_id))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleGpioResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_module_gpio(mod_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn set_module_gpio(
@@ -1054,38 +605,26 @@ impl MultiSNCfgClient {
         mod_id: i32,
         gpio: crate::proto::smartnic::cfg_v2::ModuleGpio,
     ) -> Result<Vec<Vec<ModuleGpioResponse>>, Vec<Result<Vec<ModuleGpioResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_module_gpio(mod_id, gpio))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleGpioResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_module_gpio(mod_id, gpio))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_module_info(
         &mut self,
         mod_id: i32,
     ) -> Result<Vec<Vec<ModuleInfoResponse>>, Vec<Result<Vec<ModuleInfoResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_module_info(mod_id))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleInfoResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_module_info(mod_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_module_mem(
@@ -1093,19 +632,13 @@ impl MultiSNCfgClient {
         mod_id: i32,
         mem: crate::proto::smartnic::cfg_v2::ModuleMem,
     ) -> Result<Vec<Vec<ModuleMemResponse>>, Vec<Result<Vec<ModuleMemResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_module_mem(mod_id, mem.clone()))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleMemResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_module_mem(mod_id, mem.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn set_module_mem(
@@ -1113,19 +646,13 @@ impl MultiSNCfgClient {
         mod_id: i32,
         mem: crate::proto::smartnic::cfg_v2::ModuleMem,
     ) -> Result<Vec<Vec<ModuleMemResponse>>, Vec<Result<Vec<ModuleMemResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_module_mem(mod_id, mem.clone()))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleMemResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_module_mem(mod_id, mem.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_module_status(
@@ -1133,19 +660,13 @@ impl MultiSNCfgClient {
         mod_id: i32,
     ) -> Result<Vec<Vec<ModuleStatusResponse>>, Vec<Result<Vec<ModuleStatusResponse>, Status>>>
     {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_module_status(mod_id))
-            .collect();
-
-        let results: Vec<Result<Vec<ModuleStatusResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_module_status(mod_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn set_port_config(
@@ -1153,56 +674,32 @@ impl MultiSNCfgClient {
         port_id: i32,
         config: PortConfig,
     ) -> Result<Vec<Vec<PortConfigResponse>>, Vec<Result<Vec<PortConfigResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_port_config(port_id, config))
-            .collect();
-
-        let results: Vec<Result<Vec<PortConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_port_config(port_id, config))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_port_stats(
         &mut self,
         port_id: i32,
     ) -> Result<Vec<Vec<PortStatsResponse>>, Vec<Result<Vec<PortStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_port_stats(port_id))
-            .collect();
-
-        let results: Vec<Result<Vec<PortStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.clear_port_stats(port_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_stats(
         &mut self,
     ) -> Result<Vec<Vec<StatsResponse>>, Vec<Result<Vec<StatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_stats())
-            .collect();
-
-        let results: Vec<Result<Vec<StatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(self.clients.iter_mut().map(|c| c.clear_stats()).collect()).await
     }
 
     pub async fn set_switch_config(
@@ -1210,185 +707,119 @@ impl MultiSNCfgClient {
         config: SwitchConfig,
     ) -> Result<Vec<Vec<SwitchConfigResponse>>, Vec<Result<Vec<SwitchConfigResponse>, Status>>>
     {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_switch_config(config.clone()))
-            .collect();
-
-        let results: Vec<Result<Vec<SwitchConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_switch_config(config.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_switch_stats(
         &mut self,
     ) -> Result<Vec<Vec<SwitchStatsResponse>>, Vec<Result<Vec<SwitchStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_switch_stats())
-            .collect();
-
-        let results: Vec<Result<Vec<SwitchStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.clear_switch_stats())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_port_config(
         &mut self,
         port_id: i32,
     ) -> Result<Vec<Vec<PortConfigResponse>>, Vec<Result<Vec<PortConfigResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_port_config(port_id))
-            .collect();
-
-        let results: Vec<Result<Vec<PortConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_port_config(port_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_port_status(
         &mut self,
         port_id: i32,
     ) -> Result<Vec<Vec<PortStatusResponse>>, Vec<Result<Vec<PortStatusResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_port_status(port_id))
-            .collect();
-
-        let results: Vec<Result<Vec<PortStatusResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_port_status(port_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_port_stats(
         &mut self,
         port_id: i32,
     ) -> Result<Vec<Vec<PortStatsResponse>>, Vec<Result<Vec<PortStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_port_stats(port_id))
-            .collect();
-
-        let results: Vec<Result<Vec<PortStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_port_stats(port_id))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_switch_config(
         &mut self,
     ) -> Result<Vec<Vec<SwitchConfigResponse>>, Vec<Result<Vec<SwitchConfigResponse>, Status>>>
     {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_switch_config())
-            .collect();
-
-        let results: Vec<Result<Vec<SwitchConfigResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_switch_config())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_switch_stats(
         &mut self,
     ) -> Result<Vec<Vec<SwitchStatsResponse>>, Vec<Result<Vec<SwitchStatsResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_switch_stats())
-            .collect();
-
-        let results: Vec<Result<Vec<SwitchStatsResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_switch_stats())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_device_info(
         &mut self,
     ) -> Result<Vec<Vec<DeviceInfo>>, Vec<Result<Vec<DeviceInfo>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_device_info())
-            .collect();
-
-        let results: Vec<Result<Vec<DeviceInfo>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_device_info())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_device_status(
         &mut self,
     ) -> Result<Vec<Vec<DeviceStatus>>, Vec<Result<Vec<DeviceStatus>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_device_status())
-            .collect();
-
-        let results: Vec<Result<Vec<DeviceStatus>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_device_status())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_stats(
         &mut self,
     ) -> Result<Vec<Vec<StatsMetric>>, Vec<Result<Vec<StatsMetric>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_stats())
-            .collect();
-
-        let results: Vec<Result<Vec<StatsMetric>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(self.clients.iter_mut().map(|c| c.get_stats()).collect()).await
     }
 
     pub async fn get_server_config(&mut self) -> Result<ServerConfig, Status> {
@@ -1403,19 +834,13 @@ impl MultiSNCfgClient {
         &mut self,
         config: ServerConfig,
     ) -> Result<Vec<()>, Vec<Result<(), Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_server_config(config.clone()))
-            .collect();
-
-        let results: Vec<Result<(), Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_server_config(config.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_server_status(&mut self) -> Result<ServerStatus, Status> {
