@@ -16,7 +16,7 @@ use crate::proto::loadbalancer::v1::{
     FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest,
     LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply, RemoveSendersRequest,
     ReserveLoadBalancerReply, ReserveLoadBalancerRequest, ResetLoadBalancerReply,
-    ResetLoadBalancerRequest, WorkerStatus,
+    ResetLoadBalancerRequest, SlotRange, WorkerStatus,
 };
 use crate::util::is_valid_name;
 
@@ -27,7 +27,10 @@ impl LoadBalancerService {
     ) -> Result<Response<ReserveLoadBalancerReply>, Status> {
         let token = Self::extract_token(request.metadata())?;
         let remote_addr = request.remote_addr();
-        let grpc_authority = request.extensions().get::<crate::api::GrpcAuthority>().cloned();
+        let grpc_authority = request
+            .extensions()
+            .get::<crate::api::GrpcAuthority>()
+            .cloned();
         let request = request.into_inner();
 
         let all_lbs = self
@@ -213,9 +216,7 @@ impl LoadBalancerService {
         };
 
         let (data_min_port, data_max_port) = if self.mock_mode {
-            let port = mapped_v4_port
-                .or(mapped_v6_port)
-                .unwrap_or(19522) as u32;
+            let port = mapped_v4_port.or(mapped_v6_port).unwrap_or(19522) as u32;
             (port, port)
         } else {
             (16384, 32767)
@@ -236,7 +237,10 @@ impl LoadBalancerService {
         let (grpc_host, grpc_port) = match &grpc_authority {
             Some(auth) => {
                 if let Some(idx) = auth.0.rfind(':') {
-                    (auth.0[..idx].to_string(), auth.0[idx + 1..].parse::<u16>().ok())
+                    (
+                        auth.0[..idx].to_string(),
+                        auth.0[idx + 1..].parse::<u16>().ok(),
+                    )
                 } else {
                     (auth.0.clone(), None)
                 }
@@ -252,11 +256,27 @@ impl LoadBalancerService {
             grpc_host,
             grpc_port,
             lb_id: Some(lb_id.clone()),
-            sync_addr_v4: if sync_ipv4_address.is_empty() { None } else { Some(sync_ipv4_address.clone()) },
-            sync_addr_v6: if sync_ipv6_address.is_empty() { None } else { Some(sync_ipv6_address.clone()) },
+            sync_addr_v4: if sync_ipv4_address.is_empty() {
+                None
+            } else {
+                Some(sync_ipv4_address.clone())
+            },
+            sync_addr_v6: if sync_ipv6_address.is_empty() {
+                None
+            } else {
+                Some(sync_ipv6_address.clone())
+            },
             sync_udp_port: Some(sync_udp_port as u16),
-            data_addr_v4: if data_ipv4_address.is_empty() { None } else { Some(data_ipv4_address.clone()) },
-            data_addr_v6: if data_ipv6_address.is_empty() { None } else { Some(data_ipv6_address.clone()) },
+            data_addr_v4: if data_ipv4_address.is_empty() {
+                None
+            } else {
+                Some(data_ipv4_address.clone())
+            },
+            data_addr_v6: if data_ipv6_address.is_empty() {
+                None
+            } else {
+                Some(data_ipv6_address.clone())
+            },
             data_min_port: data_min_port as u16,
             data_max_port: data_max_port as u16,
             tls_enabled: self.config.server.tls.enable,
@@ -344,9 +364,7 @@ impl LoadBalancerService {
         };
 
         let (data_min_port, data_max_port) = if self.mock_mode {
-            let port = mapped_v4_port
-                .or(mapped_v6_port)
-                .unwrap_or(19522) as u32;
+            let port = mapped_v4_port.or(mapped_v6_port).unwrap_or(19522) as u32;
             (port, port)
         } else {
             (16384, 32767)
@@ -429,7 +447,7 @@ impl LoadBalancerService {
             .map_err(|e| Status::internal(format!("Failed to get senders: {e}")))?;
 
         // Try to get the latest epoch; if it fails, use 0/defaults
-        let (current_epoch, current_predicted_event_number, slot_counts) =
+        let (current_epoch, current_predicted_event_number, slot_counts, epoch_slots) =
             match self.db.get_latest_epoch(reservation_id).await {
                 Ok(latest_epoch) => {
                     let mut slot_counts = HashMap::new();
@@ -440,9 +458,10 @@ impl LoadBalancerService {
                         latest_epoch.id as u64,
                         latest_epoch.boundary_event,
                         slot_counts,
+                        latest_epoch.slots,
                     )
                 }
-                Err(_) => (0, 0, HashMap::new()),
+                Err(_) => (0, 0, HashMap::new(), Vec::new()),
             };
 
         let mut workers = Vec::new();
@@ -457,11 +476,11 @@ impl LoadBalancerService {
             let slots_assigned = slot_counts.get(&(session.id as u16)).unwrap_or(&0);
 
             // Fetch health issues for this session (all active issues)
-            let session_health_issues = self
-                .db
-                .list_session_healthcheck_events(session.id)
-                .await
-                .map_err(|e| Status::internal(format!("Failed to get health issues: {e}")))?;
+            let session_health_issues =
+                self.db
+                    .list_session_healthcheck_events(session.id)
+                    .await
+                    .map_err(|e| Status::internal(format!("Failed to get health issues: {e}")))?;
 
             let health_issues = session_health_issues
                 .into_iter()
@@ -481,6 +500,47 @@ impl LoadBalancerService {
                     }
                 })
                 .collect();
+
+            // Fetch slot demands for this session from the database
+            let demands = sqlx::query!(
+                "SELECT slot_index, slot_length FROM slot_demand WHERE session_id = ?1 AND deleted_at IS NULL",
+                session.id
+            )
+            .fetch_all(&self.db.read_pool)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get slot demands: {e}")))?;
+
+            let slot_demands: Vec<SlotRange> = demands
+                .into_iter()
+                .map(|row| SlotRange {
+                    index: row.slot_index as i32,
+                    length: row.slot_length as u32,
+                })
+                .collect();
+
+            // Compute contiguous slot ranges assigned to this session from the latest epoch
+            let session_u16 = session.id as u16;
+            let slots: Vec<SlotRange> = {
+                let mut ranges = Vec::new();
+                let mut i = 0;
+                while i < epoch_slots.len() {
+                    if epoch_slots[i] == session_u16 {
+                        let start = i as i32;
+                        let mut len: usize = 1;
+                        while (i + len) < epoch_slots.len() && epoch_slots[i + len] == session_u16 {
+                            len += 1;
+                        }
+                        ranges.push(SlotRange {
+                            index: start,
+                            length: len as u32,
+                        });
+                        i += len;
+                    } else {
+                        i += 1;
+                    }
+                }
+                ranges
+            };
 
             workers.push(WorkerStatus {
                 name: session.name,
@@ -508,8 +568,8 @@ impl LoadBalancerService {
                     as i64,
                 total_bytes_recv: state.as_ref().map_or(0, |s| s.total_bytes_recv) as i64,
                 total_packets_recv: state.as_ref().map_or(0, |s| s.total_packets_recv) as i64,
-                slot_demands: Vec::new(), // TODO: fetch from database
-                slots: Vec::new(),        // TODO: use latest epoch data
+                slot_demands,
+                slots,
                 health_issues,
                 session_id: session.id,
             });

@@ -425,7 +425,7 @@ impl LoadBalancerDB {
             // 3e) Archive + delete each "deleted_at" table
             for &table in &tables_with_deleted_at {
                 let n = archive_old_rows_by_column(
-                    &mut *tx,
+                    &mut tx,
                     table,
                     &deleted_col_lists[table],
                     "deleted_at",
@@ -439,7 +439,7 @@ impl LoadBalancerDB {
             // 3f) Archive + delete each "created_at" table
             for &table in &tables_with_created_at {
                 let n = archive_old_rows_by_column(
-                    &mut *tx,
+                    &mut tx,
                     table,
                     &created_col_lists[table],
                     "created_at",
@@ -452,7 +452,7 @@ impl LoadBalancerDB {
 
             // 3g) Prune session_state (keep 5 most‐recent per active session)
             let n = archive_prune_keeping_recent(
-                &mut *tx,
+                &mut tx,
                 session_table,
                 &session_col_list,
                 "session",
@@ -466,7 +466,7 @@ impl LoadBalancerDB {
 
             // 3h) Prune event_number (keep 5 most‐recent per active reservation)
             let n = archive_prune_keeping_recent(
-                &mut *tx,
+                &mut tx,
                 event_table,
                 &event_col_list,
                 "reservation",
@@ -499,17 +499,15 @@ impl LoadBalancerDB {
 
         // STEP 4: If archiving is disabled, do plain DELETEs.
         for &table in &tables_with_deleted_at {
-            let n =
-                delete_old_rows_by_column(&self.write_pool, table, "deleted_at", older_than_ms)
-                    .await?;
+            let n = delete_old_rows_by_column(&self.write_pool, table, "deleted_at", older_than_ms)
+                .await?;
             total_deleted += n;
             *per_table.entry(table).or_insert(0) += n;
         }
 
         for &table in &tables_with_created_at {
-            let n =
-                delete_old_rows_by_column(&self.write_pool, table, "created_at", older_than_ms)
-                    .await?;
+            let n = delete_old_rows_by_column(&self.write_pool, table, "created_at", older_than_ms)
+                .await?;
             total_deleted += n;
             *per_table.entry(table).or_insert(0) += n;
         }
