@@ -1,14 +1,17 @@
-/* Basic Reset & Dark Theme Variables */
+/* ==========================================================================
+   1. CSS Variables / Reset
+   ========================================================================== */
+
 :root {
-    --bg-color: #1e1e1e;
-    --sidebar-bg: #252526;
-    --main-bg: #1c1c1c;
-    --card-bg: #2d2d2d;
-    --text-color: #cccccc;
-    --text-secondary-color: #999999;
+    --bg-color: #181818;
+    --sidebar-bg: #202020;
+    --main-bg: #1a1a1a;
+    --card-bg: #242424;
+    --text-color: #d0d0d0;
+    --text-secondary-color: #a0a0a0;
     --accent-color: #007aff;
     --accent-hover-color: #0056b3;
-    --border-color: #444444;
+    --border-color: #3a3a3a;
     --success-color: #34c759;
     --warning-color: #ffcc00;
     --danger-color: #ff3b30;
@@ -17,9 +20,9 @@
     --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
     --sidebar-width: 280px;
     --right-sidebar-width: 320px;
-    --chart-text-color: #ffffff;
+    --chart-text-color: #d0d0d0;
     --chart-line-width: 2.5px;
-    --chart-text-size: 12px;
+    --chart-text-size: 13px;
 }
 
 * {
@@ -35,7 +38,6 @@ body {
     display: flex;
     height: 100vh;
     overflow: hidden;
-    /* Prevent body scroll */
 }
 
 h1,
@@ -50,6 +52,18 @@ ul {
     list-style: none;
 }
 
+/* ==========================================================================
+   2. Utilities
+   ========================================================================== */
+
+.hidden {
+    display: none !important;
+}
+
+/* ==========================================================================
+   3. Components: Buttons
+   ========================================================================== */
+
 button {
     font-family: inherit;
     cursor: pointer;
@@ -57,7 +71,7 @@ button {
     color: white;
     border: none;
     padding: 8px 15px;
-    border-radius: 5px;
+    border-radius: 2px;
     transition: background-color 0.2s ease;
 }
 
@@ -87,20 +101,121 @@ button:disabled {
     background-color: #cc2a23;
 }
 
-/* Container */
+/* ==========================================================================
+   4. Components: Cards
+   ========================================================================== */
+
+.card {
+    background-color: var(--card-bg);
+    border-radius: 2px;
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 25px;
+}
+
+/* ==========================================================================
+   5. Components: Shared Form Styles
+   ========================================================================== */
+
+.form-group {
+    margin-bottom: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    font-size: 0.98em;
+    color: var(--text-secondary-color);
+    margin-bottom: 2px;
+    font-weight: 500;
+}
+
+.form-input,
+.form-select,
+#reservation-view input[type="text"],
+#reservation-view textarea,
+#reservation-view select,
+#token-management-view input[type="text"],
+#token-management-view select {
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    background: var(--bg-color);
+    color: var(--text-color);
+    border-radius: 2px;
+    font-size: 0.95em;
+    font-family: inherit;
+    transition: border-color 0.2s ease;
+}
+
+.form-input:focus,
+.form-select:focus,
+#reservation-view input[type="text"]:focus,
+#reservation-view textarea:focus,
+#reservation-view select:focus,
+#token-management-view input[type="text"]:focus,
+#token-management-view select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+#reservation-view textarea {
+    resize: vertical;
+    min-height: 100px;
+    line-height: 1.5;
+}
+
+#reservation-view small,
+#token-management-view small {
+    font-size: 0.85em;
+    color: var(--text-secondary-color);
+    font-style: italic;
+    margin-top: -2px;
+}
+
+.form-actions {
+    margin-top: 24px;
+    display: flex;
+    gap: 10px;
+}
+
+.form-actions button {
+    padding: 10px 20px;
+}
+
+/* Token management specific overrides */
+#token-management-view input[type="text"],
+#token-management-view select {
+    padding: 8px 10px;
+    font-size: 1em;
+    margin-right: 6px;
+    margin-bottom: 0;
+    min-width: 90px;
+}
+
+#token-management-view .form-actions {
+    margin-top: 10px;
+}
+
+/* ==========================================================================
+   6. Layout: Container
+   ========================================================================== */
+
 .container {
     display: flex;
     width: 100%;
     height: 100%;
 }
 
-/* Sidebar Base Styles */
+/* ==========================================================================
+   7. Layout: Sidebar Base
+   ========================================================================== */
+
 .sidebar {
     height: 100vh;
     overflow-y: auto;
     background-color: var(--sidebar-bg);
     padding: 20px 0;
-    /* No horizontal padding initially */
     display: flex;
     flex-direction: column;
     border-right: 1px solid var(--border-color);
@@ -109,14 +224,16 @@ button:disabled {
 .sidebar h2 {
     font-size: 1.1em;
     padding: 0 20px;
-    /* Add padding for titles */
     margin-bottom: 15px;
     color: var(--text-secondary-color);
     text-transform: uppercase;
     letter-spacing: 0.5px;
 }
 
-/* Left Sidebar Specifics */
+/* ==========================================================================
+   8. Layout: Left Sidebar
+   ========================================================================== */
+
 .left-sidebar {
     width: var(--sidebar-width);
     flex-shrink: 0;
@@ -128,14 +245,11 @@ button:disabled {
 
 .left-sidebar .load-balancers-list {
     flex-grow: 1;
-    /* Takes available space */
     overflow-y: auto;
-    /* Scroll only this section if needed */
 }
 
 .left-sidebar .tools-section {
     flex-shrink: 0;
-    /* Doesn't shrink */
     border-top: 1px solid var(--border-color);
     padding-top: 15px;
     margin-top: 15px;
@@ -160,10 +274,8 @@ button:disabled {
 
 .left-sidebar li.active {
     background-color: rgba(0, 122, 255, 0.2);
-    /* Accent color background */
     border-left-color: var(--accent-color);
     color: #fff;
-    /* Brighter text */
 }
 
 .left-sidebar li.disabled-lb {
@@ -205,7 +317,6 @@ button:disabled {
 .lb-info {
     flex-grow: 1;
     overflow: hidden;
-    /* Prevent long text from breaking layout */
     white-space: nowrap;
     text-overflow: ellipsis;
 }
@@ -213,12 +324,10 @@ button:disabled {
 .lb-name {
     font-weight: 500;
     color: var(--text-color);
-    /* Ensure name is clear */
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
 
 .left-sidebar .tool-button {
     background: none;
@@ -243,7 +352,6 @@ button:disabled {
 .left-sidebar .tool-button i {
     margin-right: 10px;
     width: 15px;
-    /* Align icons */
     text-align: center;
     color: var(--text-secondary-color);
 }
@@ -252,26 +360,29 @@ button:disabled {
     color: var(--accent-color);
 }
 
+/* ==========================================================================
+   9. Layout: Main Content Area
+   ========================================================================== */
 
-/* Main Content Area */
 .main-content {
     flex-grow: 1;
     background-color: var(--main-bg);
     padding: 30px;
     height: 100vh;
     overflow-y: auto;
-    /* Allow scrolling within main content */
 }
 
 .content-view {
     display: none;
-    /* Hidden by default */
 }
 
 .content-view.active {
     display: block;
-    /* Show the active view */
 }
+
+/* ==========================================================================
+   10. Views: Placeholder
+   ========================================================================== */
 
 #placeholder-view {
     text-align: center;
@@ -283,19 +394,13 @@ button:disabled {
     color: #fff;
 }
 
+/* ==========================================================================
+   11. Views: Dashboard
+   ========================================================================== */
 
-/* Dashboard Specifics */
 #dashboard-lb-title {
     border-bottom: 1px solid var(--border-color);
     padding-bottom: 15px;
-    margin-bottom: 25px;
-}
-
-.card {
-    background-color: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
-    border: 1px solid var(--border-color);
     margin-bottom: 25px;
 }
 
@@ -310,7 +415,6 @@ button:disabled {
 .sender-management-panel,
 .management-tools {
     min-width: 0;
-    /* Prevent grid overflow */
 }
 
 .sender-management-panel h3,
@@ -331,12 +435,12 @@ button:disabled {
     background-color: var(--bg-color);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    border-radius: 4px 0 0 4px;
+    border-radius: 2px 0 0 2px;
     font-size: 0.9em;
 }
 
 .sender-add-form button {
-    border-radius: 0 4px 4px 0;
+    border-radius: 0 2px 2px 0;
     padding: 10px 15px;
 }
 
@@ -363,7 +467,7 @@ button:disabled {
     padding: 8px 10px;
     margin-bottom: 5px;
     background-color: rgba(0, 0, 0, 0.2);
-    border-radius: 4px;
+    border-radius: 2px;
     color: var(--text-color);
 }
 
@@ -394,70 +498,13 @@ button:disabled {
     justify-content: flex-start;
 }
 
-/* Reservation Form */
-#reservation-view .form-group {
-    margin-bottom: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-#reservation-view label {
-    font-size: 0.98em;
-    color: var(--text-secondary-color);
-    margin-bottom: 2px;
-    font-weight: 500;
-}
-
-#reservation-view input[type="text"],
-#reservation-view textarea,
-#reservation-view select {
-    padding: 10px 12px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-color);
-    color: var(--text-color);
-    border-radius: 4px;
-    font-size: 0.95em;
-    font-family: inherit;
-    transition: border-color 0.2s ease;
-}
-
-#reservation-view input[type="text"]:focus,
-#reservation-view textarea:focus,
-#reservation-view select:focus {
-    outline: none;
-    border-color: var(--accent-color);
-}
-
-#reservation-view textarea {
-    resize: vertical;
-    min-height: 100px;
-    line-height: 1.5;
-}
-
-#reservation-view small {
-    font-size: 0.85em;
-    color: var(--text-secondary-color);
-    font-style: italic;
-    margin-top: -2px;
-}
-
-#reservation-view .form-actions {
-    margin-top: 24px;
-    display: flex;
-    gap: 10px;
-}
-
-#reservation-view .form-actions button {
-    padding: 10px 20px;
-}
-
 /* Health Issues Panel */
 .health-issues-panel {
-    background-color: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
-    border: 1px solid var(--border-color);
+    background-color: transparent;
+    border-radius: 0;
+    padding: 20px 0;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
     margin-bottom: 25px;
 }
 
@@ -469,8 +516,8 @@ button:disabled {
 .health-issue {
     padding: 12px 15px;
     margin-bottom: 10px;
-    border-radius: 6px;
-    border-left: 4px solid;
+    border-radius: 2px;
+    border-left: 3px solid;
 }
 
 .health-issue:last-child {
@@ -507,7 +554,7 @@ button:disabled {
 .health-issue-severity {
     font-size: 0.85em;
     padding: 2px 8px;
-    border-radius: 4px;
+    border-radius: 2px;
     background-color: rgba(0, 0, 0, 0.3);
     text-transform: uppercase;
     font-weight: 500;
@@ -539,7 +586,142 @@ button:disabled {
     margin-right: 4px;
 }
 
-/* Charts Container */
+/* ==========================================================================
+   12. Views: Reservation
+   ========================================================================== */
+
+/* Reservation Result Styles (replaces inline styles) */
+.reservation-result-success {
+    margin-top: 20px;
+    padding: 20px;
+    background-color: var(--card-bg);
+    border: 1px solid var(--success-color);
+    border-radius: 2px;
+}
+
+.reservation-result-success .reservation-result-heading {
+    color: var(--success-color);
+    margin-top: 0;
+}
+
+.reservation-result-success .reservation-result-label {
+    margin-bottom: 15px;
+}
+
+.reservation-result-uri {
+    background-color: #1a1a1a;
+    padding: 12px;
+    border-radius: 2px;
+    margin-bottom: 15px;
+    overflow-x: auto;
+}
+
+.reservation-result-uri code {
+    color: #00ff00;
+    font-size: 14px;
+    word-break: break-all;
+}
+
+.reservation-result-warning {
+    background-color: #3a2a00;
+    border-left: 4px solid #ffcc00;
+    padding: 12px;
+    margin-bottom: 15px;
+}
+
+.reservation-result-warning p {
+    margin: 0;
+    color: #ffcc00;
+}
+
+/* ==========================================================================
+   13. Views: Token Management
+   ========================================================================== */
+
+#token-management-view .card,
+#system-info-view .card {
+    margin-bottom: 20px;
+}
+
+/* Permission Row */
+.permission-row {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+    margin-bottom: 8px;
+}
+
+#token-management-view .remove-permission-btn {
+    background: none;
+    color: var(--danger-color);
+    border: 1px solid var(--danger-color);
+    padding: 4px 8px;
+    border-radius: 2px;
+    font-size: 1em;
+    margin-left: 4px;
+    transition: background 0.2s, color 0.2s;
+}
+
+#token-management-view .remove-permission-btn:hover {
+    background: rgba(255, 59, 48, 0.15);
+    color: #fff;
+}
+
+.add-permission-btn {
+    margin-top: 8px;
+}
+
+/* Token Creation Result */
+#create-token-result.create-token-result {
+    margin-top: 12px;
+    font-size: 0.98em;
+    word-break: break-all;
+}
+
+#create-token-result.success-message {
+    color: var(--success-color);
+}
+
+#create-token-result.error-message {
+    color: var(--danger-color);
+}
+
+#create-token-result code {
+    background: var(--bg-color);
+    color: var(--accent-color);
+    border: 1px solid var(--border-color);
+    border-radius: 2px;
+    padding: 2px 6px;
+    font-size: 1em;
+    margin: 2px 0;
+    display: inline-block;
+}
+
+.token-result-label {
+    color: var(--success-color);
+}
+
+/* Child Tokens */
+#child-tokens-list li {
+    border-bottom: 1px solid var(--border-color);
+    padding: 10px 0;
+}
+
+#child-tokens-list li:last-child {
+    border-bottom: none;
+}
+
+#child-tokens-list button {
+    margin-left: 10px;
+    float: right;
+    font-size: 0.8em;
+    padding: 2px 6px;
+}
+
+/* ==========================================================================
+   14. Charts
+   ========================================================================== */
+
 .charts-container {
     width: 100%;
 }
@@ -581,34 +763,43 @@ button:disabled {
 }
 
 .chart-container {
-    background-color: var(--card-bg);
-    border-radius: 8px;
-    padding: 20px;
-    border: 1px solid var(--border-color);
-    min-height: 350px;
-    margin-bottom: 25px;
+    background-color: var(--main-bg);
+    border-radius: 0;
+    padding: 20px 0 40px 0;
+    border: none;
+    border-bottom: 1px solid var(--border-color);
+    min-height: 400px;
+    margin-bottom: 40px;
     width: 100%;
     display: flex;
     flex-direction: column;
 }
 
 .chart-container h3 {
-    margin-bottom: 15px;
-    font-size: 1.1em;
-    color: var(--text-secondary-color);
+    margin-bottom: 20px;
+    margin-top: 0;
+    padding-bottom: 10px;
+    font-size: 1.2em;
+    color: var(--text-color);
+    border-bottom: 1px solid var(--border-color);
 }
 
-/* Style uPlot charts */
+/* uPlot Styles */
 .uplot {
     width: 100%;
+    height: 350px;
     flex-grow: 1;
 }
 
-/* Dark theme adjustments for uPlot */
+.u-axis {
+    min-width: 100px;
+}
+
 .u-legend .u-series>*,
 .u-axis text {
     color: var(--chart-text-color) !important;
     font-size: var(--chart-text-size) !important;
+    font-weight: 500;
 }
 
 .u-legend .u-marker {
@@ -619,7 +810,20 @@ button:disabled {
     stroke-width: var(--chart-line-width) !important;
 }
 
-/* Right Sidebar */
+.u-axis .u-label {
+    font-size: var(--chart-text-size) !important;
+    color: var(--text-secondary-color) !important;
+}
+
+.u-axis .u-grid path {
+    stroke: var(--border-color) !important;
+    opacity: 0.3;
+}
+
+/* ==========================================================================
+   15. Right Sidebar (Receivers)
+   ========================================================================== */
+
 .right-sidebar {
     width: var(--right-sidebar-width);
     flex-shrink: 0;
@@ -673,9 +877,8 @@ button:disabled {
     color: var(--danger-color);
     padding: 3px 8px;
     font-size: 0.8em;
-    border-radius: 4px;
+    border-radius: 2px;
     margin-top: -5px;
-    /* Align better */
 }
 
 .deregister-btn:hover {
@@ -703,6 +906,7 @@ button:disabled {
     background: transparent;
     border: 1px solid var(--border-color);
     color: var(--text-secondary-color);
+    border-radius: 2px;
 }
 
 .filter-button:hover {
@@ -730,252 +934,30 @@ button:disabled {
     background-color: rgba(255, 255, 255, 0.05);
 }
 
-/* Token/System Info Views */
-#token-management-view .card,
-#system-info-view .card {
-    margin-bottom: 20px;
-}
+/* ==========================================================================
+   16. Modals
+   ========================================================================== */
 
-/* --- Token Creation Form Styles --- */
-#token-management-view .form-group {
-    margin-bottom: 18px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-}
-
-#token-management-view label {
-    font-size: 0.98em;
-    color: var(--text-secondary-color);
-    margin-bottom: 2px;
-}
-
-#token-management-view input[type="text"],
-#token-management-view select {
-    padding: 8px 10px;
-    border: 1px solid var(--border-color);
-    background: var(--bg-color);
-    color: var(--text-color);
-    border-radius: 4px;
-    font-size: 1em;
-    margin-right: 6px;
-    margin-bottom: 0;
-    min-width: 90px;
-}
-
-#token-management-view input[type="text"]:focus,
-#token-management-view select:focus {
-    outline: none;
-    border-color: var(--accent-color);
-}
-
-#token-management-view .form-actions {
-    margin-top: 10px;
-    display: flex;
-    gap: 10px;
-}
-
-#token-management-view .permission-row {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    margin-bottom: 8px;
-}
-
-#token-management-view .remove-permission-btn {
-    background: none;
-    color: var(--danger-color);
-    border: 1px solid var(--danger-color);
-    padding: 4px 8px;
-    border-radius: 4px;
-    font-size: 1em;
-    margin-left: 4px;
-    transition: background 0.2s, color 0.2s;
-}
-
-#token-management-view .remove-permission-btn:hover {
-    background: rgba(255, 59, 48, 0.15);
-    color: #fff;
-}
-
-#create-token-result.create-token-result {
-    margin-top: 12px;
-    font-size: 0.98em;
-    word-break: break-all;
-}
-
-#create-token-result.success-message {
-    color: var(--success-color);
-}
-
-#create-token-result.error-message {
-    color: var(--danger-color);
-}
-
-#create-token-result code {
-    background: var(--bg-color);
-    color: var(--accent-color);
-    border: 1px solid var(--border-color);
-    border-radius: 3px;
-    padding: 2px 6px;
-    font-size: 1em;
-    margin: 2px 0;
-    display: inline-block;
-}
-
-pre {
-    background-color: var(--bg-color);
-    padding: 15px;
-    border-radius: 5px;
-    color: var(--text-color);
-    font-family: "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
-    font-size: 0.85em;
-    white-space: pre-wrap;
-    /* Allow wrapping */
-    word-wrap: break-word;
-    border: 1px solid var(--border-color);
-    max-height: 300px;
-    overflow-y: auto;
-}
-
-#child-tokens-list li {
-    border-bottom: 1px solid var(--border-color);
-    padding: 10px 0;
-}
-
-#child-tokens-list li:last-child {
-    border-bottom: none;
-}
-
-#child-tokens-list button {
-    /* Revoke button */
-    margin-left: 10px;
-    float: right;
-    font-size: 0.8em;
-    padding: 2px 6px;
-}
-
-/* Loading Indicators */
-.loading {
-    padding: 20px;
-    text-align: center;
-    color: var(--text-secondary-color);
-    font-style: italic;
-    width: 100%;
-    /* Ensure it takes width */
-}
-
-#initial-load-indicator {
-    margin-top: 30px;
-}
-
-/* Formatted Data/List Containers */
-.formatted-data {
-    line-height: 1.6;
-    font-size: 0.95em;
-}
-
-.formatted-data p {
-    margin-bottom: 8px;
-    color: var(--text-color);
-}
-
-.formatted-data strong {
-    color: #ffffff;
-    min-width: 100px;
-    /* Align labels somewhat */
-    display: inline-block;
-    margin-right: 10px;
-}
-
-.formatted-data code {
-    background-color: var(--bg-color);
-    padding: 2px 5px;
-    border-radius: 3px;
-    font-family: "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
-    font-size: 0.9em;
-    border: 1px solid var(--border-color);
-}
-
-.formatted-list {
-    list-style: none;
-    padding: 0;
-}
-
-.formatted-list li {
-    border-bottom: 1px solid var(--border-color);
-    padding: 15px 0;
-    margin-bottom: 10px;
-}
-
-.formatted-list li:last-child {
-    border-bottom: none;
-    margin-bottom: 0;
-}
-
-.formatted-list h4 {
-    /* Child token name */
-    font-size: 1.1em;
-    margin-bottom: 8px;
-    display: inline-block;
-    /* Keep button on same line */
-}
-
-.formatted-list .revoke-child-btn {
-    /* Style revoke button */
-    margin-left: 15px;
-    float: right;
-    /* Position button to the right */
-    font-size: 0.8em;
-    padding: 2px 6px;
-    vertical-align: middle;
-    /* Align with heading */
-}
-
-.formatted-list .permissions-list {
-    margin-top: 10px;
-    padding-left: 15px;
-    font-size: 0.9em;
-}
-
-.formatted-list .permissions-list span {
-    display: block;
-    color: var(--text-secondary-color);
-    margin-bottom: 3px;
-}
-
-.formatted-list .permissions-list strong {
-    color: var(--text-color);
-}
-
-/* Modal Styles */
 .modal {
     display: none;
-    /* Hidden by default */
     position: fixed;
-    /* Stay in place */
     z-index: 1000;
-    /* Sit on top */
     left: 0;
     top: 0;
     width: 100%;
     height: 100%;
     overflow: auto;
-    /* Enable scroll if needed */
     background-color: rgba(0, 0, 0, 0.6);
-    /* Black w/ opacity */
 }
 
 .modal-content {
     background-color: var(--card-bg);
     margin: 15% auto;
-    /* 15% from the top and centered */
     padding: 30px;
     border: 1px solid var(--border-color);
     width: 80%;
-    /* Could be more specific */
     max-width: 500px;
-    border-radius: 8px;
+    border-radius: 2px;
     position: relative;
 }
 
@@ -986,13 +968,12 @@ pre {
 
 .modal-content input[type="text"] {
     width: calc(100% - 22px);
-    /* Account for padding/border */
     padding: 10px;
     margin-bottom: 20px;
     background-color: var(--bg-color);
     border: 1px solid var(--border-color);
     color: var(--text-color);
-    border-radius: 4px;
+    border-radius: 2px;
     font-size: 1em;
 }
 
@@ -1012,7 +993,10 @@ pre {
     cursor: pointer;
 }
 
-/* Toast container and toast styles */
+/* ==========================================================================
+   17. Notifications: Toasts
+   ========================================================================== */
+
 #toast-container {
     position: fixed;
     top: 20px;
@@ -1028,7 +1012,7 @@ pre {
     background-color: var(--card-bg);
     color: var(--text-color);
     padding: 12px 20px;
-    border-radius: 6px;
+    border-radius: 2px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     font-size: 0.9em;
     opacity: 1;
@@ -1057,7 +1041,10 @@ pre {
     opacity: 0;
 }
 
-/* Load Balancer Alert Styles */
+/* ==========================================================================
+   18. Notifications: Load Balancer Alerts
+   ========================================================================== */
+
 #lb-alert-area {
     position: fixed;
     bottom: 20px;
@@ -1071,7 +1058,7 @@ pre {
     color: white;
     padding: 12px 20px;
     margin-bottom: 10px;
-    border-radius: 6px;
+    border-radius: 2px;
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.5);
     font-size: 0.9em;
     opacity: 1;
@@ -1081,4 +1068,106 @@ pre {
 
 .lb-alert.fade-out {
     opacity: 0;
+}
+
+/* ==========================================================================
+   19. Utilities: Loading, Formatted Data
+   ========================================================================== */
+
+.loading {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary-color);
+    font-style: italic;
+    width: 100%;
+}
+
+#initial-load-indicator {
+    margin-top: 30px;
+}
+
+pre {
+    background-color: var(--bg-color);
+    padding: 15px;
+    border-radius: 2px;
+    color: var(--text-color);
+    font-family: "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 0.85em;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    border: 1px solid var(--border-color);
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.formatted-data {
+    line-height: 1.6;
+    font-size: 0.95em;
+}
+
+.formatted-data p {
+    margin-bottom: 8px;
+    color: var(--text-color);
+}
+
+.formatted-data strong {
+    color: #ffffff;
+    min-width: 100px;
+    display: inline-block;
+    margin-right: 10px;
+}
+
+.formatted-data code {
+    background-color: var(--bg-color);
+    padding: 2px 5px;
+    border-radius: 2px;
+    font-family: "SF Mono", Menlo, Monaco, Consolas, "Courier New", monospace;
+    font-size: 0.9em;
+    border: 1px solid var(--border-color);
+}
+
+.formatted-list {
+    list-style: none;
+    padding: 0;
+}
+
+.formatted-list li {
+    border-bottom: 1px solid var(--border-color);
+    padding: 15px 0;
+    margin-bottom: 10px;
+}
+
+.formatted-list li:last-child {
+    border-bottom: none;
+    margin-bottom: 0;
+}
+
+.formatted-list h4 {
+    font-size: 1.1em;
+    margin-bottom: 8px;
+    display: inline-block;
+}
+
+.formatted-list .revoke-child-btn {
+    margin-left: 15px;
+    float: right;
+    font-size: 0.8em;
+    padding: 2px 6px;
+    vertical-align: middle;
+}
+
+.formatted-list .permissions-list {
+    margin-top: 10px;
+    padding-left: 15px;
+    font-size: 0.9em;
+}
+
+.formatted-list .permissions-list span {
+    display: block;
+    color: var(--text-secondary-color);
+    margin-bottom: 3px;
+}
+
+.formatted-list .permissions-list strong {
+    color: var(--text-color);
 }

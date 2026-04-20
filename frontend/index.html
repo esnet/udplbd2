@@ -36,7 +36,7 @@
             <div id="placeholder-view" class="content-view active">
                 <h1>udplbd</h1>
                 <p>Select a Load Balancer or Tool from the left sidebar.</p>
-                <p class="loading" id="initial-load-indicator" style="display: none;">Loading requested view...</p>
+                <p class="loading hidden" id="initial-load-indicator">Loading requested view...</p>
             </div>
 
             <div id="reservation-view" class="content-view">
@@ -90,7 +90,7 @@
                 <h2 id="dashboard-lb-title">Load Balancer Dashboard</h2>
 
                 <!-- Health Issues Panel -->
-                <div id="health-issues-panel" class="health-issues-panel card" style="display: none;">
+                <div id="health-issues-panel" class="health-issues-panel card hidden">
                     <h3><i class="fas fa-exclamation-triangle"></i> Health Issues</h3>
                     <div id="health-issues-list"></div>
                 </div>
@@ -118,8 +118,6 @@
                         <div class="tool-actions">
                             <button id="generate-child-token-btn" class="action-button"><i class="fas fa-key"></i>
                                 Generate Child Token</button>
-                            <!-- <button id="full-reset-btn" class="action-button danger-button"><i
-                                    class="fas fa-exclamation-triangle"></i> Clear Senders and Receivers</button> -->
                             <button id="free-lb-btn" class="action-button danger-button"><i class="fas fa-trash"></i>
                                 Free Load Balancer Reservation</button>
                         </div>
@@ -147,7 +145,7 @@
 
             <div id="token-management-view" class="content-view">
                 <h2>Token Management</h2>
-                <div class="loading" id="token-view-loading" style="display: none;">Loading token data...</div>
+                <div class="loading hidden" id="token-view-loading">Loading token data...</div>
                 <div id="token-view-content">
                     <div class="card" id="create-token-card">
                         <h3>Create New Token</h3>
@@ -162,8 +160,8 @@
                                 <div id="permissions-list">
                                     <!-- Permission rows will be added here -->
                                 </div>
-                                <button type="button" id="add-permission-btn" class="action-button"
-                                    style="margin-top:8px;"><i class="fas fa-plus"></i> Add Permission</button>
+                                <button type="button" id="add-permission-btn" class="action-button add-permission-btn"><i
+                                        class="fas fa-plus"></i> Add Permission</button>
                             </div>
                             <div class="form-actions">
                                 <button type="submit" id="create-token-submit-btn" class="action-button"><i
@@ -185,7 +183,7 @@
 
             <div id="system-info-view" class="content-view">
                 <h2>System Information</h2>
-                <div class="loading" id="system-view-loading" style="display: none;">Loading system info...</div>
+                <div class="loading hidden" id="system-view-loading">Loading system info...</div>
                 <div id="system-view-content">
                     <div class="card">
                         <h3>Version Details</h3>
@@ -200,8 +198,7 @@
                 <h2>Receivers</h2>
                 <br>
                 <div class="filter-controls">
-                    <button id="clear-receiver-filter" class="filter-button" title="Clear filter"
-                        style="display: none;">
+                    <button id="clear-receiver-filter" class="filter-button hidden" title="Clear filter">
                         Clear Filter
                     </button>
                 </div>
@@ -235,7 +232,7 @@
     <div id="lb-alert-area"></div>
 
     <script src="https://unpkg.com/uplot/dist/uPlot.iife.min.js"></script>
-    <script src="/app.js"></script>
+    <script type="module" src="/js/main.js"></script>
 </body>
 
 </html>

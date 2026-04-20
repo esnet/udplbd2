@@ -31,7 +31,20 @@ use crate::proto::loadbalancer::v1::{
 // Embeds file content directly into the binary at compile time.
 const INDEX_HTML: &str = include_str!("../../frontend/index.html");
 const STYLE_CSS: &str = include_str!("../../frontend/style.css");
-const APP_JS: &str = include_str!("../../frontend/app.js");
+
+// JS modules (ES module architecture)
+const JS_MAIN: &str = include_str!("../../frontend/js/main.js");
+const JS_STATE: &str = include_str!("../../frontend/js/state.js");
+const JS_API: &str = include_str!("../../frontend/js/api.js");
+const JS_UI: &str = include_str!("../../frontend/js/ui.js");
+const JS_AUTH: &str = include_str!("../../frontend/js/auth.js");
+const JS_CHARTS: &str = include_str!("../../frontend/js/charts.js");
+const JS_ROUTER: &str = include_str!("../../frontend/js/router.js");
+const JS_SIDEBAR: &str = include_str!("../../frontend/js/sidebar.js");
+const JS_VIEWS_DASHBOARD: &str = include_str!("../../frontend/js/views/dashboard.js");
+const JS_VIEWS_RESERVATION: &str = include_str!("../../frontend/js/views/reservation.js");
+const JS_VIEWS_TOKENS: &str = include_str!("../../frontend/js/views/tokens.js");
+const JS_VIEWS_SYSTEM: &str = include_str!("../../frontend/js/views/system.js");
 
 type AppState = Arc<LoadBalancerService>;
 
@@ -206,12 +219,50 @@ async fn serve_css() -> Response {
         .unwrap()
 }
 
-async fn serve_js() -> Response {
+/// Serves a JavaScript module file with the correct MIME type.
+fn serve_js_module(content: &'static str) -> Response {
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/javascript")
-        .body(APP_JS.into())
+        .body(content.into())
         .unwrap()
+}
+
+async fn serve_js_main() -> Response {
+    serve_js_module(JS_MAIN)
+}
+async fn serve_js_state() -> Response {
+    serve_js_module(JS_STATE)
+}
+async fn serve_js_api() -> Response {
+    serve_js_module(JS_API)
+}
+async fn serve_js_ui() -> Response {
+    serve_js_module(JS_UI)
+}
+async fn serve_js_auth() -> Response {
+    serve_js_module(JS_AUTH)
+}
+async fn serve_js_charts() -> Response {
+    serve_js_module(JS_CHARTS)
+}
+async fn serve_js_router() -> Response {
+    serve_js_module(JS_ROUTER)
+}
+async fn serve_js_sidebar() -> Response {
+    serve_js_module(JS_SIDEBAR)
+}
+async fn serve_js_views_dashboard() -> Response {
+    serve_js_module(JS_VIEWS_DASHBOARD)
+}
+async fn serve_js_views_reservation() -> Response {
+    serve_js_module(JS_VIEWS_RESERVATION)
+}
+async fn serve_js_views_tokens() -> Response {
+    serve_js_module(JS_VIEWS_TOKENS)
+}
+async fn serve_js_views_system() -> Response {
+    serve_js_module(JS_VIEWS_SYSTEM)
 }
 
 /// Query parameters for the timeseries endpoint
@@ -255,7 +306,19 @@ pub fn rest_endpoint_router(service: AppState) -> Router {
         .fallback(serve_index)
         .route("/", get(serve_index))
         .route("/style.css", get(serve_css))
-        .route("/app.js", get(serve_js))
+        // JS modules
+        .route("/js/main.js", get(serve_js_main))
+        .route("/js/state.js", get(serve_js_state))
+        .route("/js/api.js", get(serve_js_api))
+        .route("/js/ui.js", get(serve_js_ui))
+        .route("/js/auth.js", get(serve_js_auth))
+        .route("/js/charts.js", get(serve_js_charts))
+        .route("/js/router.js", get(serve_js_router))
+        .route("/js/sidebar.js", get(serve_js_sidebar))
+        .route("/js/views/dashboard.js", get(serve_js_views_dashboard))
+        .route("/js/views/reservation.js", get(serve_js_views_reservation))
+        .route("/js/views/tokens.js", get(serve_js_views_tokens))
+        .route("/js/views/system.js", get(serve_js_views_system))
         .route("/metrics", get(metrics_handler))
         .nest("/api/v1", api_router)
         .with_state(service)
