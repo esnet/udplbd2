@@ -79,6 +79,8 @@ server:
     # This should be enabled in production
     enable: false
     # [Path, optional] TLS certificate file (required if enable: true)
+    # Certificates are automatically reloaded when the file changes on disk,
+    # enabling zero-downtime renewal (e.g., certbot, Kubernetes secrets).
     cert_file: "x509/server_cert.pem"
     # [Path, optional] TLS private key file (required if enable: true)
     key_file: "x509/server_key.pem"
