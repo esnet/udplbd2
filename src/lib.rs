@@ -40,7 +40,7 @@ use crate::errors::{Error, Result};
 use crate::proto::loadbalancer::v1::load_balancer_server::LoadBalancerServer;
 use crate::reservation::ReservationManager;
 use crate::sncfg::client::{MultiSNCfgClient, SNCfgClient};
-use crate::sncfg::setup::{auto_configure_smartnics, smallest_mac_address};
+use crate::sncfg::setup::smallest_mac_address;
 use crate::snp4::client::{MultiSNP4Client, SNP4Client};
 
 /// Build SNCfg clients from the configuration
@@ -234,8 +234,6 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
         );
     }
 
-    auto_configure_smartnics(&mut cfg_clients).await?;
-
     let reservations = db.list_reservations().await?;
     let mut is_empty = false;
     if reservations.is_empty() {
@@ -254,6 +252,7 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
     let mut manager = ReservationManager::new(
         db.clone(),
         smartnic_clients,
+        cfg_clients,
         config.get_controller_duration()?,
         config.get_controller_offset()?,
         config
@@ -521,6 +520,7 @@ pub async fn start_mocked_server(
     let mut manager = ReservationManager::new(
         db.clone(),
         MultiSNP4Client::new(vec![sim_client]),
+        MultiSNCfgClient::new(vec![]),
         sim_config.get_controller_duration()?,
         sim_config.get_controller_offset()?,
         sim_config

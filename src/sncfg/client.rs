@@ -22,7 +22,9 @@ use tonic::{service::interceptor::InterceptedService, transport::Channel, Reques
 #[derive(Debug, Clone)]
 pub struct SNCfgClient {
     api: SmartnicConfigClient<InterceptedService<Channel, BearerTokenInterceptor>>,
-    device_id: i32,
+    /// Address of the sn-cfg gRPC server (e.g. `"192.0.2.1:50100"`).
+    pub addr: String,
+    pub device_id: i32,
 }
 
 impl SNCfgClient {
@@ -38,8 +40,14 @@ impl SNCfgClient {
 
         Ok(Self {
             api: SmartnicConfigClient::with_interceptor(channel, interceptor),
+            addr: addr.to_string(),
             device_id,
         })
+    }
+
+    /// A short human-readable label for log messages, e.g. `"192.0.2.1:50100 (device 0)"`.
+    pub fn label(&self) -> String {
+        format!("{} (device {})", self.addr, self.device_id)
     }
 
     pub async fn get_device_info(&mut self) -> Result<Vec<DeviceInfo>, Status> {
@@ -519,6 +527,16 @@ impl MultiSNCfgClient {
     #[must_use]
     pub fn new(clients: Vec<SNCfgClient>) -> Self {
         Self { clients }
+    }
+
+    /// Returns a comma-separated string of labels for all managed clients,
+    /// suitable for use in log messages (e.g. `"192.0.2.1:50100 (device 0), 192.0.2.2:50100 (device 0)"`).
+    pub fn client_labels(&self) -> String {
+        self.clients
+            .iter()
+            .map(|c| c.label())
+            .collect::<Vec<_>>()
+            .join(", ")
     }
 
     pub async fn set_defaults(

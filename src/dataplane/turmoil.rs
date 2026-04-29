@@ -121,6 +121,7 @@ pub mod tester {
     use crate::db::LoadBalancerDB;
     use crate::errors::{Error, Result};
     use crate::reservation::turmoil::ReservationManager;
+    use crate::sncfg::client::MultiSNCfgClient;
     use crate::snp4::client::{MultiSNP4Client, SNP4Client};
     use serde::{Deserialize, Serialize};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
@@ -380,6 +381,7 @@ pub mod tester {
                                     let mut manager = ReservationManager::new(
                                         db.clone(),
                                         MultiSNP4Client::new(vec![sim_client]),
+                                        MultiSNCfgClient::new(vec![]),
                                         conf.get_controller_duration().unwrap(),
                                         conf.get_controller_offset().unwrap(),
                                         "00:00:00:00:00:01".parse().unwrap(),

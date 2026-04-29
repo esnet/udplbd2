@@ -3,6 +3,8 @@ use crate::db::LoadBalancerDB;
 use crate::errors::{Error, Result};
 use crate::metrics::LB_IS_ACTIVE;
 use crate::proto::smartnic::p4_v2::TableRule;
+use crate::sncfg::client::MultiSNCfgClient;
+use crate::sncfg::setup::auto_configure_smartnics;
 use crate::snp4::client::MultiSNP4Client;
 use crate::snp4::rules::{
     compare_rule_sets, deserialize_table_rules, serialize_table_rules, Layer2InputPacketFilterRule,
@@ -27,6 +29,7 @@ use tracing::{debug, error, info, trace, warn};
 pub struct ReservationManager {
     db: Arc<LoadBalancerDB>,
     pub(crate) snp4: MultiSNP4Client,
+    sncfg: MultiSNCfgClient,
     active_reservations: Arc<Mutex<HashMap<i64, ActiveReservation>>>,
     tick_interval: Duration,
     tick_offset: Duration,
@@ -41,9 +44,11 @@ pub struct ReservationManager {
 
 impl ReservationManager {
     #[must_use]
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         db: Arc<LoadBalancerDB>,
         snp4: MultiSNP4Client,
+        sncfg: MultiSNCfgClient,
         tick_interval: Duration,
         tick_offset: Duration,
         mac: MacAddr6,
@@ -53,6 +58,7 @@ impl ReservationManager {
         Self {
             db,
             snp4,
+            sncfg,
             active_reservations: Arc::new(Mutex::new(HashMap::new())),
             tick_interval,
             tick_offset,
@@ -156,6 +162,7 @@ impl ReservationManager {
         self.shutdown_tx = Some(tx.clone());
         let db = self.db.clone();
         let mut snp4 = self.snp4.clone();
+        let mut sncfg = self.sncfg.clone();
         let active = self.active_reservations.clone();
         let current = self.current_rules.clone();
         let tick_interval = self.tick_interval;
@@ -166,6 +173,7 @@ impl ReservationManager {
             if let Err(e) = ReservationManager::run(
                 db,
                 &mut snp4,
+                &mut sncfg,
                 active,
                 current,
                 tick_interval,
@@ -320,6 +328,7 @@ impl ReservationManager {
     pub async fn run(
         db: Arc<LoadBalancerDB>,
         snp4: &mut MultiSNP4Client,
+        sncfg: &mut MultiSNCfgClient,
         active: Arc<Mutex<HashMap<i64, ActiveReservation>>>,
         current: Arc<Mutex<Vec<TableRule>>>,
         tick_interval: Duration,
@@ -334,6 +343,11 @@ impl ReservationManager {
         loop {
             tokio::select! {
                 _ = interval.tick() => {
+                    // 0) Ensure FPGA configuration is correct; only applies changes that differ.
+                    if let Err(e) = auto_configure_smartnics(sncfg).await {
+                        warn!("FPGA configuration check failed: {}", e);
+                    }
+
                     // 2) Acquire lock for expired/cleanup and curr update
                     let mut res_map = active.lock().await;
                     let start = std::time::Instant::now();

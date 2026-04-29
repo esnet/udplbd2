@@ -131,10 +131,9 @@ pub async fn run_test(
 
     let mut tasks = vec![];
     let mut receiver_names = vec![];
-    let mut current_port = port;
     let cancel_token = CancellationToken::new();
 
-    for receiver_config in receivers {
+    for (current_port, receiver_config) in (port..).zip(receivers) {
         eprintln!("register {}", receiver_config.name);
         receiver_names.push(receiver_config.name.clone());
         let recv_event_context = meta_event_manager.create_context(receiver_config.name.clone());
@@ -198,7 +197,6 @@ pub async fn run_test(
             count
         });
         tasks.push(task);
-        current_port += 1;
     }
 
     // Allow an epoch to pass

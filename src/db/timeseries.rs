@@ -1071,13 +1071,10 @@ impl LoadBalancerDB {
                 let value = match m {
                     "fill_percent" => row.fill_percent as f32,
                     "control_signal" => row.control_signal as f32,
-                    "is_ready" => {
-                        if row.is_ready {
+                    "is_ready"
+                        if row.is_ready => {
                             1.0
-                        } else {
-                            0.0
                         }
-                    }
                     "total_events_recv" => row.total_events_recv as f32,
                     "total_events_reassembled" => row.total_events_reassembled as f32,
                     "total_events_reassembly_err" => row.total_events_reassembly_err as f32,
