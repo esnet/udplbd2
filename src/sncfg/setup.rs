@@ -10,19 +10,19 @@ use crate::proto::smartnic::cfg_v2::{
 use crate::sncfg::client::MultiSNCfgClient;
 use macaddr::MacAddr6;
 use std::str::FromStr;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 /// Automatically configure all SmartNIC FPGAs using the provided MultiSNCfgClient.
 /// This function is idempotent: it reads the current configuration from each FPGA and
 /// only applies changes for settings that differ from the desired state.
 pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<()> {
-    let fpgas = clients.client_labels();
+    let sncfg = clients.client_labels();
 
     // Gather device info for summary
     let device_infos = match clients.get_device_info().await {
         Ok(devs) => devs,
         Err(e) => {
-            error!(fpgas, "failed to get device info: {:#?}", e);
+            error!(sncfg, "failed to get device info: {:#?}", e);
             return Err(crate::errors::Error::Runtime(
                 "failed to get device info, check token?".to_string(),
             ));
@@ -65,62 +65,58 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
                 .any(|resp| resp.config.as_ref() != Some(&desired_switch_config))
         }
         Err(e) => {
-            warn!(fpgas, "failed to read switch config, will apply desired config: {:#?}", e);
+            warn!(
+                sncfg,
+                "failed to read switch config, will apply desired config: {:#?}", e
+            );
             true
         }
     };
+
+    let mut changed = false;
 
     if needs_switch_update {
         clients
             .set_switch_config(desired_switch_config)
             .await
             .map_err(|_| crate::errors::Error::Runtime("failed to set switch config".to_string()))?;
-        info!(fpgas, "switch config applied");
+        info!(sncfg, "switch config applied");
+        changed = true;
     }
 
     // 2. Host (DMA) config: read then write only if different.
-    // The `reset` flag on HostDmaConfig is a write-only trigger; we strip it when comparing
-    // against the current state and only include it when we actually need to write.
+    // The `reset` flag on HostDmaConfig is a write-only trigger; the FPGA always reports it as
+    // false. We compare only the function entries we own; the FPGA may report additional entries
+    // for other function types which we leave untouched.
     let mut base_queue = 0u32;
     let num_queues_per_func = 1u32;
     for host_id in 0..=1i32 {
-        let desired_dma = HostDmaConfig {
-            functions: vec![HostFunctionDmaConfig {
-                func_id: Some(HostFunctionId {
-                    ftype: HostFunctionType::HostFuncPhysical as i32,
-                    index: 0,
-                }),
-                base_queue,
-                num_queues: num_queues_per_func,
-            }],
-            // reset is a write-only trigger; for comparison purposes the FPGA reports it as
-            // false after the reset completes, so we compare with false here.
-            reset: false,
+        let desired_func = HostFunctionDmaConfig {
+            func_id: Some(HostFunctionId {
+                ftype: HostFunctionType::HostFuncPhysical as i32,
+                index: 0,
+            }),
+            base_queue,
+            num_queues: num_queues_per_func,
         };
         base_queue += num_queues_per_func;
 
         let needs_host_update = match clients.get_host_config(host_id).await {
             Ok(per_client_resps) => per_client_resps.iter().flatten().any(|resp| {
-                // Normalize: strip reset flag from current config before comparing.
-                let current = resp.config.as_ref().map(|c| HostConfig {
-                    dma: c.dma.as_ref().map(|d| HostDmaConfig {
-                        reset: false,
-                        ..d.clone()
-                    }),
-                    flow_control: c.flow_control,
-                });
-                let desired_host_config = HostConfig {
-                    dma: Some(desired_dma.clone()),
-                    flow_control: None,
-                };
-                current.as_ref() != Some(&desired_host_config)
+                // Check only that our desired function entry is present and correct; ignore
+                // other function entries and the flow_control field.
+                let current_funcs = resp
+                    .config
+                    .as_ref()
+                    .and_then(|c| c.dma.as_ref())
+                    .map(|d| d.functions.as_slice())
+                    .unwrap_or(&[]);
+                !current_funcs.contains(&desired_func)
             }),
             Err(e) => {
                 warn!(
-                    fpgas,
-                    host_id,
-                    "failed to read host config, will apply desired config: {:#?}",
-                    e
+                    sncfg,
+                    host_id, "failed to read host config, will apply desired config: {:#?}", e
                 );
                 true
             }
@@ -129,8 +125,8 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
         if needs_host_update {
             let host_config = HostConfig {
                 dma: Some(HostDmaConfig {
+                    functions: vec![desired_func],
                     reset: true,
-                    ..desired_dma
                 }),
                 flow_control: None,
             };
@@ -140,13 +136,14 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
                 .map_err(|_| {
                     crate::errors::Error::Runtime("failed to set host config".to_string())
                 })?;
-            info!(fpgas, host_id, "host config applied");
+            info!(sncfg, host_id, "host config applied");
+            changed = true;
         }
     }
 
     // 3. Port config: read then write only if different.
     for port_id in 0..=1i32 {
-        let desired_port_config = PortConfig {
+        let write_port_config = PortConfig {
             state: PortState::Enable as i32,
             fec: 0,
             loopback: 0,
@@ -154,16 +151,18 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
         };
 
         let needs_port_update = match clients.get_port_config(port_id).await {
-            Ok(per_client_resps) => per_client_resps
-                .iter()
-                .flatten()
-                .any(|resp| resp.config.as_ref() != Some(&desired_port_config)),
+            Ok(per_client_resps) => per_client_resps.iter().flatten().any(|resp| {
+                let Some(c) = resp.config.as_ref() else {
+                    return true;
+                };
+                // Port is correctly configured when it is enabled; we don't manage fec/loopback
+                // beyond what the FPGA normalises them to after our initial write.
+                c.state != write_port_config.state
+            }),
             Err(e) => {
                 warn!(
-                    fpgas,
-                    port_id,
-                    "failed to read port config, will apply desired config: {:#?}",
-                    e
+                    sncfg,
+                    port_id, "failed to read port config, will apply desired config: {:#?}", e
                 );
                 true
             }
@@ -171,12 +170,13 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
 
         if needs_port_update {
             clients
-                .set_port_config(port_id, desired_port_config)
+                .set_port_config(port_id, write_port_config)
                 .await
                 .map_err(|_| {
                     crate::errors::Error::Runtime("failed to set port config".to_string())
                 })?;
-            info!(fpgas, port_id, "port config applied");
+            info!(sncfg, port_id, "port config applied");
+            changed = true;
         }
     }
 
@@ -226,8 +226,12 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
     }
     if hw_versions.len() > 1 || fw_versions.len() > 1 {
         summary.push_str(" [WARNING: version mismatch]");
+        info!(sncfg, "{}", summary);
+    } else if changed {
+        info!(sncfg, "{}", summary);
+    } else {
+        debug!(sncfg, "{}", summary);
     }
-    info!(fpgas, "{}", summary);
 
     Ok(())
 }
@@ -235,13 +239,13 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
 /// Returns the smallest MAC address from all sn-cfg clients.
 /// Returns None if no MAC addresses are found or if parsing fails for all.
 pub async fn smallest_mac_address(clients: &mut MultiSNCfgClient) -> Result<Option<MacAddr6>> {
-    let fpgas = clients.client_labels();
+    let sncfg = clients.client_labels();
 
     // Get device info from all clients
     let device_infos = match clients.get_device_info().await {
         Ok(devs) => devs,
         Err(e) => {
-            error!(fpgas, "failed to get device info: {:#?}", e);
+            error!(sncfg, "failed to get device info: {:#?}", e);
             return Err(crate::errors::Error::Runtime(
                 "failed to get device info, check token?".to_string(),
             ));
