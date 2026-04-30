@@ -15,7 +15,8 @@ use tracing::{debug, error, info, warn};
 /// Automatically configure all SmartNIC FPGAs using the provided MultiSNCfgClient.
 /// This function is idempotent: it reads the current configuration from each FPGA and
 /// only applies changes for settings that differ from the desired state.
-pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<()> {
+/// Returns `true` if any changes were applied.
+pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<bool> {
     let sncfg = clients.client_labels();
 
     // Gather device info for summary
@@ -233,7 +234,7 @@ pub async fn auto_configure_smartnics(clients: &mut MultiSNCfgClient) -> Result<
         debug!(sncfg, "{}", summary);
     }
 
-    Ok(())
+    Ok(changed)
 }
 
 /// Returns the smallest MAC address from all sn-cfg clients.

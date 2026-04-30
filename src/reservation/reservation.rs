@@ -344,8 +344,15 @@ impl ReservationManager {
             tokio::select! {
                 _ = interval.tick() => {
                     // 0) Ensure FPGA configuration is correct; only applies changes that differ.
-                    if let Err(e) = auto_configure_smartnics(sncfg).await {
-                        warn!("FPGA configuration check failed: {}", e);
+                    // If anything was reconfigured, wipe the cached rule state so the update
+                    // path does a full clear-and-reload rather than diffing against stale state.
+                    match auto_configure_smartnics(sncfg).await {
+                        Ok(true) => {
+                            info!("FPGA configuration changed: attempting full rule reload");
+                            current.lock().await.clear();
+                        }
+                        Ok(false) => {}
+                        Err(e) => warn!("FPGA configuration check failed: {}", e),
                     }
 
                     // 2) Acquire lock for expired/cleanup and curr update
