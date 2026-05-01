@@ -152,6 +152,7 @@ fn setup_logging(level: &str) -> Result<()> {
         .with_target(level == "trace")
         .with_thread_ids(level == "trace")
         .with_thread_names(level == "trace")
+        .with_writer(std::io::stderr)
         .init();
     Ok(())
 }

@@ -166,6 +166,9 @@ pub struct DoctorArgs {
     /// Expect packets to still contain LB headers.
     #[arg(long)]
     pub lb: bool,
+    /// Output results as JUnit XML instead of JSON.
+    #[arg(long)]
+    pub junit: bool,
 }
 
 #[derive(Args, Debug)]
@@ -358,11 +361,36 @@ impl DataplaneCli {
                 };
                 let results =
                     doctor_multi(&url, addresses, port, args.mtu, args.lb).await;
-                for res in results {
+                let mut had_errors = false;
+                for (address, res) in results {
                     match res {
-                        Ok(output) => println!("{output}"),
-                        Err(e) => eprintln!("doctor error: {e}"),
+                        Ok(output) => {
+                            if !output.is_ok() {
+                                had_errors = true;
+                            }
+                            if args.junit {
+                                println!("{}", output.to_junit_xml());
+                            } else {
+                                println!("{output}");
+                            }
+                        }
+                        Err(e) => {
+                            had_errors = true;
+                            if args.junit {
+                                println!(
+                                    "{}",
+                                    crate::dataplane::doctor::DoctorOutput::error_xml(
+                                        &address, &e
+                                    )
+                                );
+                            } else {
+                                eprintln!("doctor error: {e}");
+                            }
+                        }
                     }
+                }
+                if had_errors {
+                    std::process::exit(1);
                 }
             }
             DataplaneCommand::Test(args) => {

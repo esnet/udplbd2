@@ -89,6 +89,242 @@ impl fmt::Display for DoctorOutput {
     }
 }
 
+impl DoctorOutput {
+    /// Renders the doctor results as JUnit XML.
+    ///
+    /// Each strategy maps to a `<testsuite>` and each individual check
+    /// maps to a `<testcase>`.  A failing check produces a `<failure>`
+    /// element containing the error message.
+    pub fn to_junit_xml(&self) -> String {
+        let mut suites = String::new();
+
+        suites.push_str(&self.dynamic.to_junit_suite(&self.address));
+        suites.push_str(&self.static_strategy.to_junit_suite(&self.address));
+        suites.push_str(&self.explicit.to_junit_suite(&self.address));
+
+        format!("<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<testsuites>\n{suites}</testsuites>\n")
+    }
+
+    /// Produces a valid JUnit XML document representing a fatal error that
+    /// prevented any tests from running (e.g. unable to connect to the control
+    /// plane).  This ensures consumers always receive well-formed XML.
+    pub fn error_xml(address: &str, error: &dyn std::fmt::Display) -> String {
+        let msg = xml_escape(&error.to_string());
+        let classname = xml_escape(&format!("ejfat.doctor.{address}"));
+        format!(
+            "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n\
+             <testsuites>\n\
+             \x20 <testsuite name=\"doctor\" tests=\"1\" failures=\"1\" errors=\"0\">\n\
+             \x20   <testcase classname=\"{classname}\" name=\"connect\">\n\
+             \x20     <failure message=\"{msg}\" />\n\
+             \x20   </testcase>\n\
+             \x20 </testsuite>\n\
+             </testsuites>\n"
+        )
+    }
+}
+
+/// Escapes special XML characters in attribute values and text content.
+fn xml_escape(s: &str) -> String {
+    s.replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+        .replace('\'', "&apos;")
+}
+
+fn junit_testcase(classname: &str, name: &str, failure: Option<&str>) -> String {
+    match failure {
+        None => format!(
+            "    <testcase classname=\"{}\" name=\"{}\" />\n",
+            xml_escape(classname),
+            xml_escape(name)
+        ),
+        Some(msg) => format!(
+            "    <testcase classname=\"{}\" name=\"{}\">\n      <failure message=\"{}\" />\n    </testcase>\n",
+            xml_escape(classname),
+            xml_escape(name),
+            xml_escape(msg)
+        ),
+    }
+}
+
+impl DynamicStrategyOutput {
+    fn to_junit_suite(&self, address: &str) -> String {
+        let classname = format!("ejfat.doctor.{address}.dynamic");
+
+        let mut cases = String::new();
+        let mut failures = 0u32;
+
+        // first packet – no hard pass/fail threshold, always passes
+        cases.push_str(&junit_testcase(&classname, "first_packet", None));
+
+        // data_id
+        if self.data_id_correct {
+            cases.push_str(&junit_testcase(&classname, "data_id", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "data_id",
+                Some("data id was incorrect"),
+            ));
+        }
+
+        // packet loss (informational – no failure threshold enforced)
+        cases.push_str(&junit_testcase(&classname, "packet_loss", None));
+
+        // dynamic receiver
+        cases.push_str(&junit_testcase(&classname, "dynamic_receiver", None));
+
+        // distribution
+        cases.push_str(&junit_testcase(&classname, "distribution", None));
+
+        // split events
+        cases.push_str(&junit_testcase(&classname, "split_events", None));
+
+        // remove/add sender
+        if self.remove_add_sender_ok {
+            cases.push_str(&junit_testcase(&classname, "remove_add_sender", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "remove_add_sender",
+                Some("add_senders failed after remove_senders"),
+            ));
+        }
+
+        // overview
+        if self.overview_found && self.overview_errors.is_empty() {
+            cases.push_str(&junit_testcase(&classname, "overview", None));
+        } else {
+            failures += 1;
+            let msg = if self.overview_errors.is_empty() {
+                "lb not found in overview".to_string()
+            } else {
+                self.overview_errors.join("; ")
+            };
+            cases.push_str(&junit_testcase(&classname, "overview", Some(&msg)));
+        }
+
+        // deregister
+        if self.deregister_ok {
+            cases.push_str(&junit_testcase(&classname, "deregister", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "deregister",
+                Some("deregister failed"),
+            ));
+        }
+
+        // top-level errors
+        for err in &self.errors {
+            failures += 1;
+            cases.push_str(&junit_testcase(&classname, "cleanup", Some(err)));
+        }
+
+        let tests = 9usize.saturating_add(self.errors.len());
+        format!(
+            "  <testsuite name=\"dynamic\" tests=\"{tests}\" failures=\"{failures}\" errors=\"0\">\n{cases}  </testsuite>\n"
+        )
+    }
+}
+
+impl StaticStrategyOutput {
+    fn to_junit_suite(&self, address: &str) -> String {
+        let classname = format!("ejfat.doctor.{address}.static");
+
+        let mut cases = String::new();
+        let mut failures = 0u32;
+
+        cases.push_str(&junit_testcase(&classname, "first_packet", None));
+
+        if self.set_demands_ok {
+            cases.push_str(&junit_testcase(&classname, "set_slot_demands", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "set_slot_demands",
+                Some("set_slot_demands RPC failed"),
+            ));
+        }
+
+        // distribution checks (informational)
+        cases.push_str(&junit_testcase(&classname, "initial_distribution", None));
+        cases.push_str(&junit_testcase(&classname, "updated_distribution", None));
+
+        for err in &self.errors {
+            failures += 1;
+            cases.push_str(&junit_testcase(&classname, "cleanup", Some(err)));
+        }
+
+        let tests = 4usize.saturating_add(self.errors.len());
+        format!(
+            "  <testsuite name=\"static\" tests=\"{tests}\" failures=\"{failures}\" errors=\"0\">\n{cases}  </testsuite>\n"
+        )
+    }
+}
+
+impl ExplicitStrategyOutput {
+    fn to_junit_suite(&self, address: &str) -> String {
+        let classname = format!("ejfat.doctor.{address}.explicit");
+
+        let mut cases = String::new();
+        let mut failures = 0u32;
+
+        cases.push_str(&junit_testcase(&classname, "first_packet", None));
+        cases.push_str(&junit_testcase(&classname, "initial_slot_coverage", None));
+        cases.push_str(&junit_testcase(&classname, "full_slot_coverage", None));
+
+        for err in &self.errors {
+            failures += 1;
+            cases.push_str(&junit_testcase(&classname, "cleanup", Some(err)));
+        }
+
+        let tests = 3usize.saturating_add(self.errors.len());
+        format!(
+            "  <testsuite name=\"explicit\" tests=\"{tests}\" failures=\"{failures}\" errors=\"0\">\n{cases}  </testsuite>\n"
+        )
+    }
+}
+
+impl DynamicStrategyOutput {
+    /// Returns true if the dynamic strategy test passed without errors.
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty()
+            && self.overview_errors.is_empty()
+            && self.data_id_correct
+            && self.deregister_ok
+            && self.remove_add_sender_ok
+            && self.overview_found
+    }
+}
+
+impl StaticStrategyOutput {
+    /// Returns true if the static strategy test passed without errors.
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty() && self.set_demands_ok
+    }
+}
+
+impl ExplicitStrategyOutput {
+    /// Returns true if the explicit strategy test passed without errors.
+    pub fn is_ok(&self) -> bool {
+        self.errors.is_empty()
+    }
+}
+
+impl DoctorOutput {
+    /// Returns true if all strategy tests passed without errors.
+    pub fn is_ok(&self) -> bool {
+        self.dynamic.is_ok() && self.static_strategy.is_ok() && self.explicit.is_ok()
+    }
+}
+
 async fn test_dynamic_strategy(
     url: &str,
     ip_address: IpAddr,
@@ -853,14 +1089,18 @@ pub async fn doctor(
     })
 }
 
-/// Run the doctor test for multiple addresses, returning a Vec of results.
+/// Run the doctor test for multiple addresses, returning a Vec of `(address, result)` pairs.
+///
+/// The address string is always returned alongside the result so callers can
+/// produce meaningful output even when the test fails before a `DoctorOutput`
+/// can be constructed.
 pub async fn doctor_multi(
     url: &str,
     addresses: Vec<String>,
     port: u16,
     mtu: usize,
     with_lb_headers: bool,
-) -> Vec<Result<DoctorOutput>> {
+) -> Vec<(String, Result<DoctorOutput>)> {
     let mut results = Vec::new();
 
     for addr in &addresses {
@@ -869,7 +1109,7 @@ pub async fn doctor_multi(
             .expect("Invalid IP address in doctor_multi");
 
         let res = doctor(url, ip_addr, port, mtu, with_lb_headers).await;
-        results.push(res);
+        results.push((addr.clone(), res));
     }
     results
 }
