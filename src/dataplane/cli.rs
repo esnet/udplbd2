@@ -19,6 +19,7 @@ use super::turmoil::tester::run_turmoil_test;
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
 use crate::dataplane::doctor::doctor_multi;
+use crate::util::find_open_udp_port;
 use crate::dataplane::meta_events::MetaEventContext;
 use crate::dataplane::meta_events::MetaEventType;
 use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
@@ -89,12 +90,12 @@ pub enum DataplaneCommand {
 
 #[derive(Args, Debug)]
 pub struct RecvArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Directory to store command outputs.
     #[arg(short, long)]
     pub output: Option<String>,
@@ -153,12 +154,12 @@ pub struct SendArgs {
 
 #[derive(Args, Debug)]
 pub struct DoctorArgs {
-    /// One or more IP addresses to test (comma-separated or repeated).
+    /// One or more IP addresses to test (comma-separated or repeated). Defaults to addresses from the server config.
     #[arg(short, long, value_delimiter = ',')]
     pub addresses: Vec<String>,
-    /// UDP port to listen on.
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// MTU.
     #[arg(long, default_value = "1500")]
     pub mtu: usize,
@@ -169,12 +170,12 @@ pub struct DoctorArgs {
 
 #[derive(Args, Debug)]
 pub struct TestArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Path to the test configuration file.
     #[arg(value_name = "CONFIG")]
     pub config: String,
@@ -189,12 +190,12 @@ pub struct SimArgs {
 
 #[derive(Args, Debug)]
 pub struct PrintArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
 }
 
 /// New arguments for processing a PCAP file.
@@ -230,12 +231,12 @@ pub struct PingArgs {
 
 #[derive(Args, Debug)]
 pub struct ZeroMockArgs {
-    /// IP address to register with.
+    /// IP address to register with. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to register with.
+    pub address: Option<String>,
+    /// UDP port to register with. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Name of the backend.
     #[arg(long, default_value = "zero-mock")]
     pub name: String,
@@ -292,9 +293,24 @@ impl DataplaneCli {
             });
         }
 
+        // Resolve default address from the first server listen address.
+        let default_address = || -> Result<String> {
+            let addr = config.server.listen.first().ok_or_else(|| {
+                Error::Config("no listen address in server config".to_string())
+            })?;
+            Ok(addr.ip().to_string())
+        };
+
         match &self.command {
             DataplaneCommand::Recv(args) => {
-                // Parse slot demands
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let slot_demands = parse_slot_demands(&args.slots)?;
                 receive_files(
                     url.to_string(),
@@ -306,8 +322,8 @@ impl DataplaneCli {
                     args.ki,
                     args.kd,
                     args.mtu,
-                    args.address.clone(),
-                    args.port,
+                    address,
+                    port,
                     args.lb,
                     args.minf,
                     args.maxf,
@@ -331,8 +347,17 @@ impl DataplaneCli {
                 .await?;
             }
             DataplaneCommand::Doctor(args) => {
+                let addresses = if args.addresses.is_empty() {
+                    vec![default_address()?]
+                } else {
+                    args.addresses.clone()
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let results =
-                    doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb).await;
+                    doctor_multi(&url, addresses, port, args.mtu, args.lb).await;
                 for res in results {
                     match res {
                         Ok(output) => println!("{output}"),
@@ -341,13 +366,21 @@ impl DataplaneCli {
                 }
             }
             DataplaneCommand::Test(args) => {
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let config_file = tester::load_config_from_json(&args.config)?;
-                let ip_addr: std::net::IpAddr = args.address.parse().expect("Invalid IP address");
+                let ip_addr: std::net::IpAddr = address.parse().expect("invalid ip address");
                 let output = tester::run_test(
                     url.to_string(),
                     config_file,
                     ip_addr,
-                    args.port,
+                    port,
                     &meta_event_manager,
                     "dynamic".to_string(), // TODO: support additional strategies
                 )
@@ -355,7 +388,15 @@ impl DataplaneCli {
                 println!("{output}");
             }
             DataplaneCommand::Print(args) => {
-                print_udp_payloads(&args.address, args.port).await?;
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
+                print_udp_payloads(&address, port).await?;
             }
             DataplaneCommand::Sim(args) => {
                 let config =
@@ -406,12 +447,20 @@ impl DataplaneCli {
                 stats_command(config).await?;
             }
             DataplaneCommand::ZeroMockRecv(args) => {
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let slot_demands = parse_slot_demands(&args.slots)?;
                 start_zero_mock_receiver(
                     url.to_string(),
                     args.name.clone(),
-                    args.address.clone(),
-                    args.port,
+                    address,
+                    port,
                     args.weight,
                     args.minf,
                     args.maxf,

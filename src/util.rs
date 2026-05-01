@@ -2,6 +2,20 @@
 //! Misc. helper functions
 use std::net::{IpAddr, Ipv6Addr};
 
+/// Finds an available UDP port in the range `[10000, 40000)` by attempting to bind
+/// each candidate in order until one succeeds.
+pub async fn find_open_udp_port() -> std::io::Result<u16> {
+    for port in 10000u16..40000 {
+        if tokio::net::UdpSocket::bind(("0.0.0.0", port)).await.is_ok() {
+            return Ok(port);
+        }
+    }
+    Err(std::io::Error::new(
+        std::io::ErrorKind::AddrInUse,
+        "no available udp port in range 10000-40000",
+    ))
+}
+
 use tracing::warn;
 
 /// Returns true if the name is a valid DNS name (letters, digits, hyphens, periods) plus slashes, underscores, colons
@@ -360,7 +374,10 @@ pub fn resolve_slot_ranges<T: Clone>(
         let end = start + range_len;
         for &(occ_start, occ_end) in &occupied {
             if start < occ_end && end > occ_start {
-                return Err(format!("Slot demand conflict at range [{}, {})", start, end));
+                return Err(format!(
+                    "Slot demand conflict at range [{}, {})",
+                    start, end
+                ));
             }
         }
         // Insert new range into occupied, keep sorted
@@ -378,10 +395,7 @@ mod slot_range_tests {
     #[test]
     fn test_resolve_empty_existing() {
         let existing: Vec<(i32, i32)> = vec![];
-        let demands = vec![
-            (1, 0, 128u32),
-            (2, -1, 128u32),
-        ];
+        let demands = vec![(1, 0, 128u32), (2, -1, 128u32)];
         let result = resolve_slot_ranges(&existing, demands).unwrap();
         assert_eq!(result, vec![(1, 0, 128), (2, 128, 128)]);
     }
