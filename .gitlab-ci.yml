@@ -150,3 +150,9 @@ doctor_node4_cicd9:
     AAP_LIMIT: node4.fpga.es.net
   rules:
     - if: $CI_COMMIT_BRANCH == "develop"
+  after_script:
+    - |
+      printf $(cat output/stdout.txt | grep 'doctor\.stdout' | cut -d: -f2) > output/doctor.xml
+  artifacts:
+    reports:
+      junit: output/doctor.xml
