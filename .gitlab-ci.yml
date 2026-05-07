@@ -156,4 +156,4 @@ doctor_node4_cicd9:
       printf "${xml_str:2:${#xml_str}-3}\n" > doctor.xml
   artifacts:
     reports:
-      junit: output/doctor.xml
+      junit: doctor.xml
