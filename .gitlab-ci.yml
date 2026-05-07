@@ -152,7 +152,7 @@ doctor_node4_cicd9:
     - if: $CI_COMMIT_BRANCH == "develop"
   after_script:
     - |
-      xml_str=$(printf "$(printf "$(grep 'doctor\.stdout' output.txt | cut -d: -f2)\n")\n")
+      xml_str=$(printf "$(printf "$(grep 'doctor\.stdout' stdout.txt | cut -d: -f2)\n")\n")
       printf "${xml_str:2:${#xml_str}-3}\n" > doctor.xml
   artifacts:
     reports:
