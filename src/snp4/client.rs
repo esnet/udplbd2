@@ -1,16 +1,17 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 //! Tonic gRPC client for the smartnic-p4 gRPC API
 use crate::{
+    grpc_common::{create_grpc_channel, fan_out, stream_collect, BearerTokenInterceptor},
     proto::smartnic::p4_v2::{batch_response, ErrorCode},
     snp4::rules::TableUpdate,
 };
-use futures::{future::join_all, StreamExt};
+use futures::StreamExt;
 use tonic::{
-    service::{interceptor::InterceptedService, Interceptor},
-    transport::{Certificate, Channel, ClientTlsConfig, Endpoint},
+    service::interceptor::InterceptedService,
+    transport::{Channel, Endpoint},
     Request, Status,
 };
-use tracing::{debug, info, trace, warn};
+use tracing::{debug, trace, warn};
 
 use crate::proto::smartnic::p4_v2::{
     batch_request, smartnic_p4_client::SmartnicP4Client, BatchOperation, BatchRequest,
@@ -38,29 +39,7 @@ impl SNP4Client {
         ca_file: Option<PathBuf>,
         auth_token: impl Into<String>,
     ) -> Result<Self, tonic::transport::Error> {
-        let mut channel = Channel::from_shared(addr.to_string()).unwrap();
-
-        if addr.starts_with("https://") {
-            let tls_config: ClientTlsConfig;
-            if let Some(ca_file) = ca_file {
-                let ca_file_str = ca_file.to_string_lossy();
-                info!("sn-p4 client for {addr} only trusting configured CA in {ca_file_str}");
-
-                let pem = std::fs::read_to_string(ca_file).expect("Failed to read CA certificate");
-                let cert = Certificate::from_pem(pem);
-                tls_config = ClientTlsConfig::new().ca_certificate(cert);
-            } else {
-                debug!("sn-p4 client for {addr} has no ca cert provided, trusting system root CAs");
-                tls_config = ClientTlsConfig::new().with_enabled_roots();
-            }
-            if !verify {
-                // TODO
-                unimplemented!()
-            }
-            channel = channel.tls_config(tls_config)?;
-        }
-
-        let channel = channel.connect().await?;
+        let channel = create_grpc_channel(addr, verify, ca_file, "sn-p4").await?;
         let interceptor = BearerTokenInterceptor::new(auth_token);
 
         Ok(Self {
@@ -89,27 +68,7 @@ impl SNP4Client {
             dev_id: self.device_id,
             pipeline_id: self.pipeline_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_pipeline_info"])
-            .inc();
-        let mut stream = self
-            .api
-            .get_pipeline_info(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_pipeline_info"])
-                    .inc();
-            })?
-            .into_inner();
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect("get_pipeline_info", request, |r| self.api.get_pipeline_info(r), Some).await
     }
 
     pub async fn clear_tables(&mut self) -> Result<Vec<TableResponse>, Status> {
@@ -119,12 +78,10 @@ impl SNP4Client {
         );
 
         let mut all_responses = Vec::new();
-
         for _ in 0..self.clear_table_repeats {
             let responses = self.clear_tables_once().await?;
             all_responses.extend(responses);
         }
-
         Ok(all_responses)
     }
 
@@ -132,29 +89,9 @@ impl SNP4Client {
         let request = Request::new(TableRequest {
             dev_id: self.device_id,
             pipeline_id: self.pipeline_id,
-            table_name: String::new(), // Empty for all tables
+            table_name: String::new(),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_table"])
-            .inc();
-        let mut stream = self
-            .api
-            .clear_table(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_table"])
-                    .inc();
-            })?
-            .into_inner();
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect("clear_table", request, |r| self.api.clear_table(r), Some).await
     }
 
     /// Clear the table multiple times as configured by clear_table_repeats.
@@ -165,12 +102,10 @@ impl SNP4Client {
         );
 
         let mut all_responses = Vec::new();
-
         for _ in 0..self.clear_table_repeats {
             let responses = self.clear_table_once(table_name).await?;
             all_responses.extend(responses);
         }
-
         Ok(all_responses)
     }
 
@@ -180,29 +115,7 @@ impl SNP4Client {
             pipeline_id: self.pipeline_id,
             table_name: table_name.to_string(),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_table"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_table(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_table"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut responses = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            responses.push(response);
-        }
-
-        Ok(responses)
+        stream_collect("clear_table", request, |r| self.api.clear_table(r), Some).await
     }
 
     pub async fn batch(
@@ -358,31 +271,13 @@ impl SNP4Client {
         let request = Request::new(DeviceInfoRequest {
             dev_id: self.device_id,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_device_info"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_device_info(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_device_info"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut device_infos = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            if let Some(info) = response.info {
-                device_infos.push(info);
-            }
-        }
-
-        Ok(device_infos)
+        stream_collect(
+            "get_device_info",
+            request,
+            |r| self.api.get_device_info(r),
+            |resp| resp.info,
+        )
+        .await
     }
 
     pub async fn get_pipeline_stats(&mut self) -> Result<Vec<StatsMetric>, Status> {
@@ -391,31 +286,15 @@ impl SNP4Client {
             pipeline_id: self.pipeline_id,
             filters: None,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_pipeline_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_pipeline_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_pipeline_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut stats = Vec::new();
-
-        while let Some(response) = stream.message().await? {
-            if let Some(pipeline_stats) = response.stats {
-                stats.extend(pipeline_stats.metrics);
-            }
-        }
-
-        Ok(stats)
+        // Each response carries a nested list of metrics; flatten them all.
+        let responses = stream_collect(
+            "get_pipeline_stats",
+            request,
+            |r| self.api.get_pipeline_stats(r),
+            |resp| resp.stats,
+        )
+        .await?;
+        Ok(responses.into_iter().flat_map(|s| s.metrics).collect())
     }
 
     pub async fn clear_pipeline_stats(&mut self) -> Result<(), Status> {
@@ -431,24 +310,13 @@ impl SNP4Client {
             pipeline_id: self.pipeline_id,
             filters,
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["clear_pipeline_stats"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .clear_pipeline_stats(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["clear_pipeline_stats"])
-                    .inc();
-            })?
-            .into_inner();
-
-        while stream.message().await?.is_some() {}
-
+        stream_collect(
+            "clear_pipeline_stats",
+            request,
+            |r| self.api.clear_pipeline_stats(r),
+            |_| None::<()>,
+        )
+        .await?;
         Ok(())
     }
 
@@ -528,29 +396,16 @@ impl SNP4Client {
 
     pub async fn get_server_config(&mut self) -> Result<ServerConfig, Status> {
         let request = Request::new(ServerConfigRequest { config: None });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_server_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_server_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_server_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut config = None;
-
-        while let Some(response) = stream.message().await? {
-            config = response.config;
-        }
-
-        config.ok_or_else(|| Status::not_found("No server config found"))
+        let mut configs = stream_collect(
+            "get_server_config",
+            request,
+            |r| self.api.get_server_config(r),
+            |resp| resp.config,
+        )
+        .await?;
+        configs
+            .pop()
+            .ok_or_else(|| Status::not_found("No server config found"))
     }
 
     pub async fn set_server_config(
@@ -566,52 +421,28 @@ impl SNP4Client {
                 }),
             }),
         });
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["set_server_config"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .set_server_config(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["set_server_config"])
-                    .inc();
-            })?
-            .into_inner();
-
-        while stream.message().await?.is_some() {}
-
+        stream_collect(
+            "set_server_config",
+            request,
+            |r| self.api.set_server_config(r),
+            |_| None::<()>,
+        )
+        .await?;
         Ok(())
     }
 
     pub async fn get_server_status(&mut self) -> Result<ServerStatus, Status> {
         let request = Request::new(ServerStatusRequest {});
-
-        crate::metrics::SMARTNIC_GRPC
-            .with_label_values(&["get_server_status"])
-            .inc();
-
-        let mut stream = self
-            .api
-            .get_server_status(request)
-            .await
-            .inspect_err(|_| {
-                crate::metrics::SMARTNIC_GRPC_ERRORS
-                    .with_label_values(&["get_server_status"])
-                    .inc();
-            })?
-            .into_inner();
-
-        let mut status = None;
-
-        while let Some(response) = stream.message().await? {
-            status = response.status;
-        }
-
-        status.ok_or_else(|| Status::not_found("No server status found"))
+        let mut statuses = stream_collect(
+            "get_server_status",
+            request,
+            |r| self.api.get_server_status(r),
+            |resp| resp.status,
+        )
+        .await?;
+        statuses
+            .pop()
+            .ok_or_else(|| Status::not_found("No server status found"))
     }
 }
 
@@ -633,11 +464,9 @@ impl MultiSNP4Client {
         let futures: Vec<_> = self
             .clients
             .iter_mut()
-            .map(|client| client.bulk_update(updates))
+            .map(|c| c.bulk_update(updates))
             .collect();
-
-        let results: Vec<Result<Vec<BatchResponse>, BatchError>> = join_all(futures).await;
-
+        let results = futures::future::join_all(futures).await;
         if results.iter().all(|r| r.is_ok()) {
             Ok(results.into_iter().map(Result::unwrap).collect())
         } else {
@@ -649,73 +478,49 @@ impl MultiSNP4Client {
         &mut self,
     ) -> Result<Vec<Vec<PipelineInfoResponse>>, Vec<Result<Vec<PipelineInfoResponse>, Status>>>
     {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_pipeline_info())
-            .collect();
-
-        let results: Vec<Result<Vec<PipelineInfoResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_pipeline_info())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_tables(
         &mut self,
     ) -> Result<Vec<Vec<TableResponse>>, Vec<Result<Vec<TableResponse>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_tables())
-            .collect();
-
-        let results: Vec<Result<Vec<TableResponse>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.clear_tables())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_device_info(
         &mut self,
     ) -> Result<Vec<Vec<DeviceInfo>>, Vec<Result<Vec<DeviceInfo>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_device_info())
-            .collect();
-
-        let results: Vec<Result<Vec<DeviceInfo>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_device_info())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_pipeline_stats(
         &mut self,
     ) -> Result<Vec<Vec<StatsMetric>>, Vec<Result<Vec<StatsMetric>, Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.get_pipeline_stats())
-            .collect();
-
-        let results: Vec<Result<Vec<StatsMetric>, Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.get_pipeline_stats())
+                .collect(),
+        )
+        .await
     }
 
     pub async fn clear_pipeline_stats(&mut self) -> Result<(), Vec<Result<(), Status>>> {
@@ -726,19 +531,14 @@ impl MultiSNP4Client {
         &mut self,
         filters: Option<crate::proto::smartnic::p4_v2::StatsFilters>,
     ) -> Result<(), Vec<Result<(), Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.clear_pipeline_stats_with_filters(filters.clone()))
-            .collect();
-
-        let results: Vec<Result<(), Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.clear_pipeline_stats_with_filters(filters.clone()))
+                .collect(),
+        )
+        .await
+        .map(|_| ())
     }
 
     /// Clear stats for specific metric names at a specific index across all clients.
@@ -748,19 +548,21 @@ impl MultiSNP4Client {
         metric_names: &[&str],
         index: u32,
     ) -> Result<(), Vec<Result<(), Status>>> {
+        // Collect owned strings so the closures don't borrow `metric_names`
+        // with a lifetime shorter than the async futures.
+        let names: Vec<String> = metric_names.iter().map(|s| s.to_string()).collect();
         let futures: Vec<_> = self
             .clients
             .iter_mut()
-            .map(|client| client.clear_stats_by_names_and_index(metric_names, index))
+            .map(|c| {
+                let names = names.clone();
+                async move {
+                    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                    c.clear_stats_by_names_and_index(&name_refs, index).await
+                }
+            })
             .collect();
-
-        let results: Vec<Result<(), Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(())
-        } else {
-            Err(results)
-        }
+        fan_out(futures).await.map(|_| ())
     }
 
     // These remain unchanged as they only use the first client
@@ -777,19 +579,13 @@ impl MultiSNP4Client {
         enables: Vec<ServerDebugFlag>,
         disables: Vec<ServerDebugFlag>,
     ) -> Result<Vec<()>, Vec<Result<(), Status>>> {
-        let futures: Vec<_> = self
-            .clients
-            .iter_mut()
-            .map(|client| client.set_server_config(enables.clone(), disables.clone()))
-            .collect();
-
-        let results: Vec<Result<(), Status>> = join_all(futures).await;
-
-        if results.iter().all(|r| r.is_ok()) {
-            Ok(results.into_iter().map(Result::unwrap).collect())
-        } else {
-            Err(results)
-        }
+        fan_out(
+            self.clients
+                .iter_mut()
+                .map(|c| c.set_server_config(enables.clone(), disables.clone()))
+                .collect(),
+        )
+        .await
     }
 
     pub async fn get_server_status(&mut self) -> Result<ServerStatus, Status> {
@@ -798,32 +594,6 @@ impl MultiSNP4Client {
             .ok_or_else(|| Status::failed_precondition("No clients available"))?
             .get_server_status()
             .await
-    }
-}
-
-#[derive(Clone)]
-pub struct BearerTokenInterceptor {
-    token: String,
-}
-
-impl BearerTokenInterceptor {
-    pub fn new(token: impl Into<String>) -> Self {
-        Self {
-            token: token.into(),
-        }
-    }
-}
-
-impl Interceptor for BearerTokenInterceptor {
-    fn call(&mut self, mut request: Request<()>) -> Result<Request<()>, Status> {
-        let token = format!("Bearer {}", self.token);
-        request.metadata_mut().insert(
-            "authorization",
-            token
-                .parse()
-                .map_err(|_| Status::invalid_argument("Invalid authorization header value"))?,
-        );
-        Ok(request)
     }
 }
 

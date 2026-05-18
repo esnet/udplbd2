@@ -233,7 +233,7 @@ impl Reassembler {
     fn discard_stale_buffers(&mut self, n: usize) {
         let mut timestamp_keys: Vec<((u64, u16), u64)> =
             self.buffers.keys().map(|key| (*key, key.0)).collect();
-        timestamp_keys.sort_by(|a, b| a.1.cmp(&b.1));
+        timestamp_keys.sort_by_key(|a| a.1);
         for (key, _timestamp) in timestamp_keys.into_iter().take(n) {
             self.buffers.remove(&key);
         }
@@ -299,12 +299,8 @@ pub async fn listen_and_reassemble_with_offset(
                         }
                         Ok(_) => {
                             stats.total_events_dequeued += 1;
-                            if reasm.meta_event_context.is_some() {
-                                reasm
-                                    .meta_event_context
-                                    .as_ref()
-                                    .unwrap()
-                                    .emit(MetaEventType::Reassemble { tick });
+                            if let Some(ctx) = &reasm.meta_event_context {
+                                ctx.emit(MetaEventType::Reassemble { tick });
                             }
                         }
                     }

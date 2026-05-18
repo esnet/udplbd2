@@ -13,6 +13,7 @@ stages:
   - test
   - push
   - deploy
+  - doctor
 
 include:
   - project: "security/container-scanning"
@@ -33,7 +34,9 @@ include:
 .build_environment:
   image: rust:latest
   before_script:
-    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev sqlite3 libssl-dev musl-tools
+    - apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install
+      --no-install-recommends --assume-yes protobuf-compiler libprotobuf-dev
+      sqlite3 libssl-dev musl-tools
     - rustup target add x86_64-unknown-linux-musl
     - cargo install sqlx-cli cargo-audit
     - export "DATABASE_URL=sqlite:///tmp/udplbd.db"
@@ -126,6 +129,40 @@ deploy_alpha:
   stage: deploy
   variables:
     AAP_JOB_TEMPLATE: 747
-    AAP_LIMIT: node3.fpga.es.net
+    AAP_LIMIT: node2.fpga.es.net
   rules:
     - if: $CI_COMMIT_BRANCH == "develop"
+
+deploy_node4_cicd9:
+  extends: .aap_run
+  stage: deploy
+  variables:
+    AAP_JOB_TEMPLATE: 882
+    AAP_LIMIT: node4.fpga.es.net
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+
+doctor_node4_cicd9:
+  extends: .aap_run
+  stage: doctor
+  variables:
+    AAP_JOB_TEMPLATE: 883
+    AAP_LIMIT: node4.fpga.es.net
+  rules:
+    - if: $CI_COMMIT_BRANCH == "develop"
+  after_script:
+    - |
+      python3 <<'PY'
+      import re
+      with open("stdout.txt") as f:
+          txt = f.read()
+      m = re.search(r'"doctor\.stdout":\s*"(.*)"\s*\n\}', txt, re.DOTALL)
+      if not m:
+          raise SystemExit("doctor.stdout not found in stdout.txt")
+      xml = m.group(1).encode('utf-8').decode('unicode_escape').encode('utf-8').decode('unicode_escape')
+      with open("doctor.xml", "w") as f:
+          f.write(xml)
+      PY
+  artifacts:
+    reports:
+      junit: doctor.xml

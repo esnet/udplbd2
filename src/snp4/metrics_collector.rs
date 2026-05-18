@@ -93,6 +93,15 @@ async fn synchronize_scopes(
     for (domain, zone, block) in db_scope_set.keys() {
         if !metric_scopes.contains_key(&(domain.clone(), zone.clone(), block.clone())) {
             scopes_changed = true;
+            // Delete scope
+            sqlx::query!(
+                "DELETE FROM stat_scope WHERE domain = ? AND zone = ? AND block = ?",
+                domain,
+                zone,
+                block
+            )
+            .execute(&db.write_pool)
+            .await?;
             warn!(
                 "metric scope removed: domain={}, zone={}, block={}",
                 domain, zone, block

@@ -1,37 +1,38 @@
 // SPDX-License-Identifier: BSD-3-Clause-LBNL
 // src/dataplane/cli.rs
 use clap::{Args, Parser, Subcommand};
+use std::collections::HashMap;
 use std::io;
+use std::net::IpAddr;
 use std::process::Stdio;
 use std::sync::Arc;
 use std::{fs::File, mem::size_of, path::Path};
+
 use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 use tokio::net::UdpSocket;
 use tokio::process::Command;
 use tokio::sync::Semaphore;
+use tracing::info;
 use zerocopy::FromBytes;
 
+use super::turmoil::tester::run_turmoil_test;
 use crate::api::client::{ControlPlaneClient, EjfatUrl}; // Reuse for URL parsing
 use crate::config::Config;
 use crate::dataplane::doctor::doctor_multi;
+use crate::util::find_open_udp_port;
 use crate::dataplane::meta_events::MetaEventContext;
+use crate::dataplane::meta_events::MetaEventType;
+use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
 use crate::dataplane::protocol::EjfatEvent;
+use crate::dataplane::protocol::LBHeader;
 use crate::dataplane::protocol::{
     LBPayload, ReassemblyPayload, LB_HEADER_SIZE, REASSEMBLY_HEADER_SIZE,
 };
+use crate::dataplane::receiver::{Receiver, ZeroMockReceiver};
 use crate::dataplane::sender::Sender;
 use crate::dataplane::tester;
 use crate::errors::{Error, Result};
-
-use crate::dataplane::meta_events::MetaEventType;
-use crate::dataplane::pcap::{reassemble_from_pcap, PcapReassemblyReport};
-use crate::dataplane::protocol::LBHeader;
-use crate::dataplane::receiver::{Receiver, ZeroMockReceiver};
-
 use crate::macaddr::get_mac_addr;
-use std::net::IpAddr;
-
-use super::turmoil::tester::run_turmoil_test;
 
 /// Dataplane commands for testing the EJFAT protocol.
 ///
@@ -83,16 +84,18 @@ pub enum DataplaneCommand {
     Stats(StatsArgs),
     /// Start a zero mock receiver that registers and sends zero control signals without opening a port.
     ZeroMockRecv(ZeroMockArgs),
+    /// Ping all configured load balancer addresses.
+    Ping(PingArgs),
 }
 
 #[derive(Args, Debug)]
 pub struct RecvArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Directory to store command outputs.
     #[arg(short, long)]
     pub output: Option<String>,
@@ -155,12 +158,12 @@ pub struct SendArgs {
 
 #[derive(Args, Debug)]
 pub struct DoctorArgs {
-    /// One or more IP addresses to test (comma-separated or repeated).
+    /// One or more IP addresses to test (comma-separated or repeated). Defaults to addresses from the server config.
     #[arg(short, long, value_delimiter = ',')]
     pub addresses: Vec<String>,
-    /// UDP port to listen on.
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// MTU.
     #[arg(long, default_value = "1500")]
     pub mtu: usize,
@@ -170,16 +173,19 @@ pub struct DoctorArgs {
     /// Test LB chaining (reserves two LBs and chains them).
     #[arg(long)]
     pub chain: bool,
+    /// Output results as JUnit XML instead of JSON.
+    #[arg(long)]
+    pub junit: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct TestArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Path to the test configuration file.
     #[arg(value_name = "CONFIG")]
     pub config: String,
@@ -194,12 +200,12 @@ pub struct SimArgs {
 
 #[derive(Args, Debug)]
 pub struct PrintArgs {
-    /// IP address to listen on.
+    /// IP address to listen on. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to listen on.
+    pub address: Option<String>,
+    /// UDP port to listen on. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
 }
 
 /// New arguments for processing a PCAP file.
@@ -224,13 +230,23 @@ pub struct MacAddrArgs {
 pub struct StatsArgs {}
 
 #[derive(Args, Debug)]
+pub struct PingArgs {
+    /// Number of ping packets to send to each address
+    #[arg(short, long, default_value = "1")]
+    pub count: usize,
+    /// Timeout in seconds for each ping
+    #[arg(short, long, default_value = "5")]
+    pub timeout: u64,
+}
+
+#[derive(Args, Debug)]
 pub struct ZeroMockArgs {
-    /// IP address to register with.
+    /// IP address to register with. Defaults to the first address in the server config.
     #[arg(short, long)]
-    pub address: String,
-    /// UDP port to register with.
+    pub address: Option<String>,
+    /// UDP port to register with. Defaults to an available ephemeral port.
     #[arg(short, long)]
-    pub port: u16,
+    pub port: Option<u16>,
     /// Name of the backend.
     #[arg(long, default_value = "zero-mock")]
     pub name: String,
@@ -287,9 +303,24 @@ impl DataplaneCli {
             });
         }
 
+        // Resolve default address from the first server listen address.
+        let default_address = || -> Result<String> {
+            let addr = config.server.listen.first().ok_or_else(|| {
+                Error::Config("no listen address in server config".to_string())
+            })?;
+            Ok(addr.ip().to_string())
+        };
+
         match &self.command {
             DataplaneCommand::Recv(args) => {
-                // Parse slot demands
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let slot_demands = parse_slot_demands(&args.slots)?;
                 receive_files(
                     url.to_string(),
@@ -301,8 +332,8 @@ impl DataplaneCli {
                     args.ki,
                     args.kd,
                     args.mtu,
-                    args.address.clone(),
-                    args.port,
+                    address,
+                    port,
                     args.lb,
                     args.minf,
                     args.maxf,
@@ -326,8 +357,12 @@ impl DataplaneCli {
                         .expect("At least one address required for --chain")
                         .parse()
                         .expect("Invalid IP address");
+                    let port = match args.port {
+                        Some(p) => p,
+                        None => find_open_udp_port().await?,
+                    };
                     match crate::dataplane::doctor::test_chain(
-                        &url, ip_addr, args.port, args.mtu, args.lb,
+                        &url, ip_addr, port, args.mtu, args.lb,
                     )
                     .await
                     {
@@ -340,25 +375,66 @@ impl DataplaneCli {
                         Err(e) => eprintln!("chain doctor error: {e}"),
                     }
                 } else {
+                    let addresses = if args.addresses.is_empty() {
+                        vec![default_address()?]
+                    } else {
+                        args.addresses.clone()
+                    };
+                    let port = match args.port {
+                        Some(p) => p,
+                        None => find_open_udp_port().await?,
+                    };
                     let results =
-                        doctor_multi(&url, args.addresses.clone(), args.port, args.mtu, args.lb)
-                            .await;
-                    for res in results {
+                        doctor_multi(&url, addresses, port, args.mtu, args.lb).await;
+                    let mut had_errors = false;
+                    for (address, res) in results {
                         match res {
-                            Ok(output) => println!("{output}"),
-                            Err(e) => eprintln!("doctor error: {e}"),
+                            Ok(output) => {
+                                if !output.is_ok() {
+                                    had_errors = true;
+                                }
+                                if args.junit {
+                                    println!("{}", output.to_junit_xml());
+                                } else {
+                                    println!("{output}");
+                                }
+                            }
+                            Err(e) => {
+                                had_errors = true;
+                                if args.junit {
+                                    println!(
+                                        "{}",
+                                        crate::dataplane::doctor::DoctorOutput::error_xml(
+                                            &address, &e
+                                        )
+                                    );
+                                } else {
+                                    eprintln!("doctor error: {e}");
+                                }
+                            }
                         }
+                    }
+                    if had_errors {
+                        std::process::exit(1);
                     }
                 }
             }
             DataplaneCommand::Test(args) => {
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let config_file = tester::load_config_from_json(&args.config)?;
-                let ip_addr: std::net::IpAddr = args.address.parse().expect("Invalid IP address");
+                let ip_addr: std::net::IpAddr = address.parse().expect("invalid ip address");
                 let output = tester::run_test(
                     url.to_string(),
                     config_file,
                     ip_addr,
-                    args.port,
+                    port,
                     &meta_event_manager,
                     "dynamic".to_string(), // TODO: support additional strategies
                 )
@@ -366,7 +442,15 @@ impl DataplaneCli {
                 println!("{output}");
             }
             DataplaneCommand::Print(args) => {
-                print_udp_payloads(&args.address, args.port).await?;
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
+                print_udp_payloads(&address, port).await?;
             }
             DataplaneCommand::Sim(args) => {
                 let config =
@@ -417,18 +501,29 @@ impl DataplaneCli {
                 stats_command(config).await?;
             }
             DataplaneCommand::ZeroMockRecv(args) => {
+                let address = match &args.address {
+                    Some(a) => a.clone(),
+                    None => default_address()?,
+                };
+                let port = match args.port {
+                    Some(p) => p,
+                    None => find_open_udp_port().await?,
+                };
                 let slot_demands = parse_slot_demands(&args.slots)?;
                 start_zero_mock_receiver(
                     url.to_string(),
                     args.name.clone(),
-                    args.address.clone(),
-                    args.port,
+                    address,
+                    port,
                     args.weight,
                     args.minf,
                     args.maxf,
                     slot_demands,
                 )
                 .await?;
+            }
+            DataplaneCommand::Ping(args) => {
+                ping_lb_addresses(config, args.count, args.timeout).await?;
             }
         }
         Ok(())
@@ -778,4 +873,135 @@ async fn start_zero_mock_receiver(
     println!("\nstopping zero mock receiver...");
 
     Ok(())
+}
+
+struct PingResult {
+    addr: String,
+    success: bool,
+    output: String,
+}
+
+impl std::fmt::Display for PingResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.success {
+            write!(f, "  \x1b[32m✓\x1b[0m {} reachable: ", self.addr)?;
+            for line in self.output.lines() {
+                if line.contains("packets transmitted") || line.contains("packet loss") {
+                    writeln!(f, "{}", line.trim())?;
+                }
+            }
+        } else {
+            write!(f, "  \x1b[31m✗\x1b[0m {} unreachable: ", self.addr)?;
+            for line in self.output.lines().take(3) {
+                if !line.trim().is_empty() {
+                    writeln!(f, "  {}", line.trim())?;
+                }
+            }
+        }
+        Ok(())
+    }
+}
+
+struct LBPingResult {
+    ipv4: Option<PingResult>,
+    ipv6: Option<PingResult>,
+}
+
+async fn ping_lb_addresses(config: &Config, count: usize, timeout: u64) -> Result<()> {
+    if config.lb.instances.is_empty() {
+        println!("no load balancer instances configured");
+        return Ok(());
+    }
+
+    info!("pinging {} load balancers...\n", config.lb.instances.len());
+
+    let mut tasks: HashMap<usize, (Option<_>, Option<_>)> = HashMap::new();
+    for (idx, instance) in config.lb.instances.iter().enumerate() {
+        let ipv4_task = instance
+            .ipv4
+            .map(|ipv4| tokio::spawn(ping_address(IpAddr::V4(ipv4), count, timeout)));
+
+        let ipv6_task = instance
+            .ipv6
+            .map(|ipv6| tokio::spawn(ping_address(IpAddr::V6(ipv6), count, timeout)));
+
+        tasks.insert(idx + 1, (ipv4_task, ipv6_task));
+    }
+
+    let mut completed_results: HashMap<usize, LBPingResult> = HashMap::new();
+    for (idx, (ipv4_task, ipv6_task)) in tasks {
+        let mut instance_result = LBPingResult {
+            ipv4: None,
+            ipv6: None,
+        };
+        instance_result.ipv4 = resolve_ping_task(ipv4_task).await;
+        instance_result.ipv6 = resolve_ping_task(ipv6_task).await;
+        completed_results.insert(idx, instance_result);
+    }
+
+    let mut sorted_results: Vec<_> = completed_results.into_iter().collect();
+    sorted_results.sort_by_key(|(idx, _)| *idx);
+
+    for (idx, instance) in sorted_results {
+        println!("LB {idx}");
+        if let Some(ref v4) = instance.ipv4 {
+            print!("{v4}");
+        }
+        if let Some(ref v6) = instance.ipv6 {
+            print!("{v6}");
+        }
+        println!();
+    }
+
+    Ok(())
+}
+
+async fn resolve_ping_task(
+    task: Option<tokio::task::JoinHandle<Result<PingResult>>>,
+) -> Option<PingResult> {
+    let task = task?;
+    let result = match task.await {
+        Ok(Ok(result)) => result,
+        Ok(Err(e)) => PingResult {
+            addr: "unknown".to_string(),
+            success: false,
+            output: format!("failed to ping: {e}"),
+        },
+        Err(join_err) => PingResult {
+            addr: "unknown".to_string(),
+            success: false,
+            output: format!("task failed: {join_err}"),
+        },
+    };
+    Some(result)
+}
+
+async fn ping_address(addr: IpAddr, count: usize, timeout: u64) -> Result<PingResult> {
+    let addr_str = addr.to_string();
+    let mut cmd = Command::new("ping");
+
+    #[cfg(target_os = "macos")]
+    {
+        cmd.arg("-c").arg(count.to_string());
+        cmd.arg("-W").arg((timeout * 1000).to_string());
+    }
+    #[cfg(target_os = "linux")]
+    {
+        cmd.arg("-c").arg(count.to_string());
+        cmd.arg("-W").arg(timeout.to_string());
+    }
+
+    cmd.arg(&addr_str);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    let output = cmd.output().await?;
+    let success = output.status.success();
+    let stdout = String::from_utf8_lossy(&output.stdout).to_string();
+
+    Ok(PingResult {
+        addr: addr_str,
+        success,
+        output: stdout,
+    })
 }

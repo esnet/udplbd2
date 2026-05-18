@@ -19,7 +19,8 @@ use crate::proto::loadbalancer::v1::{
     GetChainGraphRequest, GetLoadBalancerRequest, IpFamily, LoadBalancerStatusReply,
     LoadBalancerStatusRequest, PortRange, RemoveSendersReply, RemoveSendersRequest,
     ReserveLoadBalancerReply, ReserveLoadBalancerRequest, ResetLoadBalancerReply,
-    ResetLoadBalancerRequest, UnchainLoadBalancerReply, UnchainLoadBalancerRequest, WorkerStatus,
+    ResetLoadBalancerRequest, SlotRange, UnchainLoadBalancerReply, UnchainLoadBalancerRequest,
+    WorkerStatus,
 };
 use crate::util::is_valid_name;
 use tonic::transport::{Channel, ClientTlsConfig};
@@ -451,7 +452,7 @@ impl LoadBalancerService {
             .map_err(|e| Status::internal(format!("Failed to get senders: {e}")))?;
 
         // Try to get the latest epoch; if it fails, use 0/defaults
-        let (current_epoch, current_predicted_event_number, slot_counts) =
+        let (current_epoch, current_predicted_event_number, slot_counts, epoch_slots) =
             match self.db.get_latest_epoch(reservation_id).await {
                 Ok(latest_epoch) => {
                     let mut slot_counts = HashMap::new();
@@ -462,9 +463,10 @@ impl LoadBalancerService {
                         latest_epoch.id as u64,
                         latest_epoch.boundary_event,
                         slot_counts,
+                        latest_epoch.slots,
                     )
                 }
-                Err(_) => (0, 0, HashMap::new()),
+                Err(_) => (0, 0, HashMap::new(), Vec::new()),
             };
 
         let mut workers = Vec::new();
@@ -504,6 +506,47 @@ impl LoadBalancerService {
                 })
                 .collect();
 
+            // Fetch slot demands for this session from the database
+            let demands = sqlx::query!(
+                "SELECT slot_index, slot_length FROM slot_demand WHERE session_id = ?1 AND deleted_at IS NULL",
+                session.id
+            )
+            .fetch_all(&self.db.read_pool)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get slot demands: {e}")))?;
+
+            let slot_demands: Vec<SlotRange> = demands
+                .into_iter()
+                .map(|row| SlotRange {
+                    index: row.slot_index as i32,
+                    length: row.slot_length as u32,
+                })
+                .collect();
+
+            // Compute contiguous slot ranges assigned to this session from the latest epoch
+            let session_u16 = session.id as u16;
+            let slots: Vec<SlotRange> = {
+                let mut ranges = Vec::new();
+                let mut i = 0;
+                while i < epoch_slots.len() {
+                    if epoch_slots[i] == session_u16 {
+                        let start = i as i32;
+                        let mut len: usize = 1;
+                        while (i + len) < epoch_slots.len() && epoch_slots[i + len] == session_u16 {
+                            len += 1;
+                        }
+                        ranges.push(SlotRange {
+                            index: start,
+                            length: len as u32,
+                        });
+                        i += len;
+                    } else {
+                        i += 1;
+                    }
+                }
+                ranges
+            };
+
             workers.push(WorkerStatus {
                 name: session.name,
                 fill_percent: state.as_ref().map_or(0.0, |s| s.fill_percent) as f32,
@@ -530,8 +573,8 @@ impl LoadBalancerService {
                     as i64,
                 total_bytes_recv: state.as_ref().map_or(0, |s| s.total_bytes_recv) as i64,
                 total_packets_recv: state.as_ref().map_or(0, |s| s.total_packets_recv) as i64,
-                slot_demands: Vec::new(), // TODO: fetch from database
-                slots: Vec::new(),        // TODO: use latest epoch data
+                slot_demands,
+                slots,
                 health_issues,
                 session_id: session.id,
             });

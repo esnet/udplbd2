@@ -2,6 +2,7 @@
 bin/
 etc/
 .env
+.kilo
 etc/*
 __debug*
 .coverage*

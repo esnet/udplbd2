@@ -4,6 +4,7 @@ use crate::config::Config;
 use crate::proto::loadbalancer::v1::{
     CreateTokenRequest, RegisterRequest, ReserveLoadBalancerRequest,
 };
+use crate::sncfg::client::MultiSNCfgClient;
 use crate::snp4::client::MultiSNP4Client;
 use tokio::sync::Mutex;
 use tonic::metadata::MetadataValue;
@@ -25,6 +26,7 @@ pub async fn create_test_service_with_config(config: Config) -> (LoadBalancerSer
     let manager = Arc::new(Mutex::new(ReservationManager::new(
         db.clone(),
         clients,
+        MultiSNCfgClient::new(vec![]),
         Duration::from_secs(1),
         Duration::from_millis(1000),
         "00:1A:2B:3C:4D:5E".parse().unwrap(),
@@ -55,6 +57,7 @@ pub async fn create_test_service() -> (LoadBalancerService, i64, i64) {
     let manager = Arc::new(Mutex::new(ReservationManager::new(
         db.clone(),
         clients,
+        MultiSNCfgClient::new(vec![]),
         Duration::from_secs(1),
         Duration::from_millis(1000),
         "00:1A:2B:3C:4D:5E".parse().unwrap(),
@@ -1506,8 +1509,7 @@ async fn test_register_ip_validation_private_allowed() {
 
         let result = service.handle_register(request).await;
         // MAC address lookup will fail for these test IPs, but that's OK - it means the IP validation passed
-        if result.is_err() {
-            let err_stat = result.unwrap_err();
+        if let Err(err_stat) = result {
             assert!(
                 err_stat.message().contains("MAC") || err_stat.message().contains("mac"),
                 "Error should be about MAC address lookup, not IP validation, for {}: {}",
@@ -1543,8 +1545,7 @@ async fn test_register_ip_validation_public_allowed() {
     );
 
     let result = service.handle_register(request).await;
-    if result.is_err() {
-        let err_stat = result.unwrap_err();
+    if let Err(err_stat) = result {
         assert!(
             err_stat.message().contains("MAC") || err_stat.message().contains("mac"),
             "Error should be about MAC address lookup, not IP validation, for 8.8.8.8: {}",

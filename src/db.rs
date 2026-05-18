@@ -366,6 +366,7 @@ impl LoadBalancerDB {
             "slot_demand",
         ];
         let tables_with_created_at = ["stat_global_sample", "stat_lb_sample", "stat_member_sample"];
+
         let mut deleted_col_lists: HashMap<&str, String> = HashMap::new();
         for &table in &tables_with_deleted_at {
             let mut temp_cache = TableMetadataCache::new();
@@ -398,8 +399,7 @@ impl LoadBalancerDB {
             columns.join(", ")
         };
 
-        // STEP 3: If archiving is enabled, do everything in one write_pool transaction:
-        // but first DETACH any leftover "archive" alias from a previous failure.
+        // STEP 3: If archiving is enabled, do everything in one write_pool transaction.
         if let (Some(ref archive_path), true) = (&archive_path_opt, do_archive) {
             // 3a) DETACH "archive" unconditionally, ignoring any error (it might not be attached).
             let _ = sqlx::query("DETACH DATABASE archive")
@@ -422,303 +422,289 @@ impl LoadBalancerDB {
                 .await
                 .map_err(Error::Database)?;
 
-            // // 3e) Disable FK checks in archive
-            // sqlx::query("PRAGMA foreign_keys = OFF;")
-            //     .execute(&mut *tx)
-            //     .await
-            //     .map_err(Error::Database)?;
-
-            // 3e) For each simple "deleted_at" table:
+            // 3e) Archive + delete each "deleted_at" table
             for &table in &tables_with_deleted_at {
-                let col_list = &deleted_col_lists[table];
-
-                // 3e‐i) INSERT … SELECT into archive.<table>
-                let insert_sql = format!(
-                    "INSERT INTO archive.`{table}` ({col_list})
-                     SELECT {col_list} FROM main.`{table}` WHERE deleted_at < ?"
-                );
-                sqlx::query(&insert_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-
-                // 3e‐ii) DELETE from main.<table>
-                let delete_sql = format!("DELETE FROM `{table}` WHERE deleted_at < ?");
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(table).or_insert(0) += rows_deleted;
+                let n = archive_old_rows_by_column(
+                    &mut tx,
+                    table,
+                    &deleted_col_lists[table],
+                    "deleted_at",
+                    older_than_ms,
+                )
+                .await?;
+                total_deleted += n;
+                *per_table.entry(table).or_insert(0) += n;
             }
 
-            // 3f) For each "created_at" table:
+            // 3f) Archive + delete each "created_at" table
             for &table in &tables_with_created_at {
-                let col_list = &created_col_lists[table];
-
-                // 3f‐i) INSERT … SELECT into archive.<table>
-                let insert_sql = format!(
-                    "INSERT INTO archive.`{table}` ({col_list})
-                     SELECT {col_list} FROM main.`{table}` WHERE created_at < ?"
-                );
-                sqlx::query(&insert_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-
-                // 3f‐ii) DELETE from main.<table>
-                let delete_sql = format!("DELETE FROM `{table}` WHERE created_at < ?");
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(table).or_insert(0) += rows_deleted;
+                let n = archive_old_rows_by_column(
+                    &mut tx,
+                    table,
+                    &created_col_lists[table],
+                    "created_at",
+                    older_than_ms,
+                )
+                .await?;
+                total_deleted += n;
+                *per_table.entry(table).or_insert(0) += n;
             }
 
-            // 3g) Prune session_state (keep the 5 most‐recent per active session)
-            {
-                let col_list = &session_col_list;
-                let select_sql = format!(
-                    r#"
-                    SELECT {col_list} FROM `{session_table}`
-                    WHERE created_at < ?
-                      AND id NOT IN (
-                        SELECT id FROM (
-                          SELECT id FROM `{session_table}`
-                          WHERE session_id IN (
-                            SELECT id FROM `session` WHERE deleted_at IS NULL
-                          )
-                          ORDER BY created_at DESC
-                          LIMIT 5
-                        )
-                      )
-                    "#
-                );
-                let insert_sql =
-                    format!("INSERT INTO archive.`{session_table}` ({col_list}) {select_sql}");
-                sqlx::query(&insert_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
+            // 3g) Prune session_state (keep 5 most‐recent per active session)
+            let n = archive_prune_keeping_recent(
+                &mut tx,
+                session_table,
+                &session_col_list,
+                "session",
+                "session_id",
+                older_than_ms,
+                5,
+            )
+            .await?;
+            total_deleted += n;
+            *per_table.entry(session_table).or_insert(0) += n;
 
-                let delete_sql = format!(
-                    "DELETE FROM `{session_table}` WHERE created_at < ? AND id NOT IN (
-                        SELECT id FROM (
-                            SELECT id FROM `{session_table}`
-                            WHERE session_id IN (
-                                SELECT id FROM `session` WHERE deleted_at IS NULL
-                            )
-                            ORDER BY created_at DESC
-                            LIMIT 5
-                        )
-                      )"
-                );
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(session_table).or_insert(0) += rows_deleted;
-            }
+            // 3h) Prune event_number (keep 5 most‐recent per active reservation)
+            let n = archive_prune_keeping_recent(
+                &mut tx,
+                event_table,
+                &event_col_list,
+                "reservation",
+                "reservation_id",
+                older_than_ms,
+                5,
+            )
+            .await?;
+            total_deleted += n;
+            *per_table.entry(event_table).or_insert(0) += n;
 
-            // 3h) Prune event_number (keep the 5 most‐recent per active reservation)
-            {
-                let col_list = &event_col_list;
-                let select_sql = format!(
-                    r#"
-                    SELECT {col_list} FROM `{event_table}`
-                    WHERE created_at < ?
-                      AND id NOT IN (
-                        SELECT id FROM (
-                          SELECT id FROM `{event_table}`
-                          WHERE reservation_id IN (
-                            SELECT id FROM `reservation` WHERE deleted_at IS NULL
-                          )
-                          ORDER BY created_at DESC
-                          LIMIT 5
-                        )
-                      )
-                    "#
-                );
-                let insert_sql =
-                    format!("INSERT INTO archive.`{event_table}` ({col_list}) {select_sql}");
-                sqlx::query(&insert_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-
-                let delete_sql = format!(
-                    "DELETE FROM `{event_table}` WHERE created_at < ? AND id NOT IN (
-                        SELECT id FROM (
-                          SELECT id FROM `{event_table}`
-                          WHERE reservation_id IN (
-                            SELECT id FROM `reservation` WHERE deleted_at IS NULL
-                          )
-                          ORDER BY created_at DESC
-                          LIMIT 5
-                        )
-                      )"
-                );
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&mut *tx)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(event_table).or_insert(0) += rows_deleted;
-            }
-
-            // 3i) Re-enable FK checks (optional; archive is read-only after this)
+            // 3i) Re-enable FK checks, DETACH, and COMMIT
             let _ = sqlx::query("PRAGMA foreign_keys = ON;")
                 .execute(&mut *tx)
                 .await;
-
-            // 3j) DETACH and COMMIT once
             let _ = sqlx::query("DETACH DATABASE archive")
                 .execute(&mut *tx)
                 .await;
             tx.commit().await.map_err(Error::Database)?;
 
-            // 3k) Re-enable FK checks on main DB
+            // 3j) Re-enable FK checks on main DB
             sqlx::query("PRAGMA foreign_keys = ON;")
                 .execute(&self.write_pool)
                 .await
                 .map_err(Error::Database)?;
 
-            // 3l) VACUUM if anything was deleted
-            if total_deleted > 0 {
-                let vacuum_start = Instant::now();
-                sqlx::query("VACUUM")
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let vacuum_duration_ms = vacuum_start.elapsed().as_millis();
-                // Compose summary log
-                let mut summary = format!("archived {total_deleted} total rows");
-                if !per_table.is_empty() {
-                    let details: Vec<String> =
-                        per_table.iter().map(|(k, v)| format!("{v} {k}")).collect();
-                    summary.push_str(&format!(" ({})", details.join(", ")));
-                }
-                summary.push_str(&format!(" in {}ms", op_start.elapsed().as_millis()));
-                summary.push_str(&format!(", VACUUM took {vacuum_duration_ms}ms"));
-                info!("{}", summary);
-            }
-
+            vacuum_and_log(&self.write_pool, total_deleted, &per_table, op_start, true).await?;
             return Ok(());
         }
 
         // STEP 4: If archiving is disabled, do plain DELETEs.
-        {
-            // 4a) "deleted_at" tables
-            for &table in &tables_with_deleted_at {
-                let delete_sql = format!("DELETE FROM `{table}` WHERE deleted_at < ?");
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(table).or_insert(0) += rows_deleted;
-            }
-
-            // 4b) "created_at" tables
-            for &table in &tables_with_created_at {
-                let delete_sql = format!("DELETE FROM `{table}` WHERE created_at < ?");
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(table).or_insert(0) += rows_deleted;
-            }
-
-            // 4c) Prune session_state
-            {
-                let delete_sql = format!(
-                    "DELETE FROM `{session_table}` WHERE created_at < ? AND id NOT IN (
-                        SELECT id FROM (
-                            SELECT id FROM `{session_table}`
-                            WHERE session_id IN (
-                                SELECT id FROM `session` WHERE deleted_at IS NULL
-                            )
-                            ORDER BY created_at DESC
-                            LIMIT 5
-                        )
-                      )"
-                );
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(session_table).or_insert(0) += rows_deleted;
-            }
-
-            // 4d) Prune event_number
-            {
-                let delete_sql = format!(
-                    "DELETE FROM `{event_table}` WHERE created_at < ? AND id NOT IN (
-                        SELECT id FROM (
-                          SELECT id FROM `{event_table}`
-                          WHERE reservation_id IN (
-                              SELECT id FROM `reservation` WHERE deleted_at IS NULL
-                          )
-                          ORDER BY created_at DESC
-                          LIMIT 5
-                        )
-                      )"
-                );
-                let del_result = sqlx::query(&delete_sql)
-                    .bind(older_than_ms)
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let rows_deleted = del_result.rows_affected();
-                total_deleted += rows_deleted;
-                *per_table.entry(event_table).or_insert(0) += rows_deleted;
-            }
-
-            // 4e) VACUUM if needed
-            if total_deleted > 0 {
-                let vacuum_start = Instant::now();
-                sqlx::query("VACUUM")
-                    .execute(&self.write_pool)
-                    .await
-                    .map_err(Error::Database)?;
-                let vacuum_duration_ms = vacuum_start.elapsed().as_millis();
-                // Compose summary log
-                let mut summary = format!("deleted {total_deleted} total rows (no archive)");
-                if !per_table.is_empty() {
-                    let details: Vec<String> =
-                        per_table.iter().map(|(k, v)| format!("{v} {k}")).collect();
-                    summary.push_str(&format!(" ({})", details.join(", ")));
-                }
-                summary.push_str(&format!(" in {} ms", op_start.elapsed().as_millis()));
-                summary.push_str(&format!(", VACUUM took {vacuum_duration_ms} ms"));
-                info!("{}", summary);
-            }
-
-            Ok(())
+        for &table in &tables_with_deleted_at {
+            let n = delete_old_rows_by_column(&self.write_pool, table, "deleted_at", older_than_ms)
+                .await?;
+            total_deleted += n;
+            *per_table.entry(table).or_insert(0) += n;
         }
+
+        for &table in &tables_with_created_at {
+            let n = delete_old_rows_by_column(&self.write_pool, table, "created_at", older_than_ms)
+                .await?;
+            total_deleted += n;
+            *per_table.entry(table).or_insert(0) += n;
+        }
+
+        let n = prune_keeping_recent(
+            &self.write_pool,
+            session_table,
+            "session",
+            "session_id",
+            older_than_ms,
+            5,
+        )
+        .await?;
+        total_deleted += n;
+        *per_table.entry(session_table).or_insert(0) += n;
+
+        let n = prune_keeping_recent(
+            &self.write_pool,
+            event_table,
+            "reservation",
+            "reservation_id",
+            older_than_ms,
+            5,
+        )
+        .await?;
+        total_deleted += n;
+        *per_table.entry(event_table).or_insert(0) += n;
+
+        vacuum_and_log(&self.write_pool, total_deleted, &per_table, op_start, false).await?;
+        Ok(())
     }
+}
+
+// ---------------------------------------------------------------------------
+// Private helpers for cleanup_soft_deleted
+// ---------------------------------------------------------------------------
+
+/// Deletes rows older than `older_than_ms` from `table` using `column` as the timestamp.
+/// Returns the number of rows deleted.
+async fn delete_old_rows_by_column(
+    pool: &Pool<Sqlite>,
+    table: &str,
+    column: &str,
+    older_than_ms: i64,
+) -> Result<u64> {
+    let sql = format!("DELETE FROM `{table}` WHERE `{column}` < ?");
+    let result = sqlx::query(&sql)
+        .bind(older_than_ms)
+        .execute(pool)
+        .await
+        .map_err(Error::Database)?;
+    Ok(result.rows_affected())
+}
+
+/// Within an open transaction that has the archive DB ATTACHed as "archive":
+/// copies rows older than `older_than_ms` into `archive.<table>` then deletes
+/// them from `main.<table>`. Returns the number of rows deleted from main.
+async fn archive_old_rows_by_column(
+    tx: &mut sqlx::SqliteConnection,
+    table: &str,
+    columns_csv: &str,
+    column: &str,
+    older_than_ms: i64,
+) -> Result<u64> {
+    let insert_sql = format!(
+        "INSERT INTO archive.`{table}` ({columns_csv})
+         SELECT {columns_csv} FROM main.`{table}` WHERE `{column}` < ?"
+    );
+    sqlx::query(&insert_sql)
+        .bind(older_than_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+    let delete_sql = format!("DELETE FROM `{table}` WHERE `{column}` < ?");
+    let result = sqlx::query(&delete_sql)
+        .bind(older_than_ms)
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+    Ok(result.rows_affected())
+}
+
+/// Deletes rows from `table` that are older than `older_than_ms`, but keeps the
+/// `keep_n` most-recent rows per active parent entity (those whose `deleted_at IS NULL`
+/// in `parent_table`). Rows are linked via `fk_column` → `parent_table.id`.
+/// Returns the number of rows deleted.
+async fn prune_keeping_recent(
+    pool: &Pool<Sqlite>,
+    table: &str,
+    parent_table: &str,
+    fk_column: &str,
+    older_than_ms: i64,
+    keep_n: i64,
+) -> Result<u64> {
+    let sql = format!(
+        "DELETE FROM `{table}` WHERE created_at < ? AND id NOT IN (
+             SELECT id FROM (
+                 SELECT id FROM `{table}`
+                 WHERE `{fk_column}` IN (
+                     SELECT id FROM `{parent_table}` WHERE deleted_at IS NULL
+                 )
+                 ORDER BY created_at DESC
+                 LIMIT ?
+             )
+         )"
+    );
+    let result = sqlx::query(&sql)
+        .bind(older_than_ms)
+        .bind(keep_n)
+        .execute(pool)
+        .await
+        .map_err(Error::Database)?;
+    Ok(result.rows_affected())
+}
+
+/// Within an open transaction that has the archive DB ATTACHed as "archive":
+/// copies rows matching the pruning criteria into `archive.<table>` then deletes
+/// them from `main.<table>`. Keeps the `keep_n` most-recent rows per active parent
+/// entity (those whose `deleted_at IS NULL` in `parent_table`).
+/// Returns the number of rows deleted from main.
+async fn archive_prune_keeping_recent(
+    tx: &mut sqlx::SqliteConnection,
+    table: &str,
+    columns_csv: &str,
+    parent_table: &str,
+    fk_column: &str,
+    older_than_ms: i64,
+    keep_n: i64,
+) -> Result<u64> {
+    let predicate = format!(
+        "created_at < ? AND id NOT IN (
+             SELECT id FROM (
+                 SELECT id FROM `{table}`
+                 WHERE `{fk_column}` IN (
+                     SELECT id FROM `{parent_table}` WHERE deleted_at IS NULL
+                 )
+                 ORDER BY created_at DESC
+                 LIMIT ?
+             )
+         )"
+    );
+
+    let insert_sql = format!(
+        "INSERT INTO archive.`{table}` ({columns_csv})
+         SELECT {columns_csv} FROM `{table}` WHERE {predicate}"
+    );
+    sqlx::query(&insert_sql)
+        .bind(older_than_ms)
+        .bind(keep_n)
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+
+    let delete_sql = format!("DELETE FROM `{table}` WHERE {predicate}");
+    let result = sqlx::query(&delete_sql)
+        .bind(older_than_ms)
+        .bind(keep_n)
+        .execute(&mut *tx)
+        .await
+        .map_err(Error::Database)?;
+    Ok(result.rows_affected())
+}
+
+/// Runs VACUUM on `pool` (if `total_deleted > 0`) and logs a structured summary.
+/// `archived` controls whether the verb in the log line is "archived" or "deleted".
+async fn vacuum_and_log(
+    pool: &Pool<Sqlite>,
+    total_deleted: u64,
+    per_table: &BTreeMap<&'static str, u64>,
+    op_start: Instant,
+    archived: bool,
+) -> Result<()> {
+    if total_deleted == 0 {
+        return Ok(());
+    }
+    let vacuum_start = Instant::now();
+    sqlx::query("VACUUM")
+        .execute(pool)
+        .await
+        .map_err(Error::Database)?;
+    let vacuum_ms = vacuum_start.elapsed().as_millis();
+
+    let verb = if archived {
+        "archived"
+    } else {
+        "deleted (no archive)"
+    };
+    let mut summary = format!("{verb} {total_deleted} total rows");
+    if !per_table.is_empty() {
+        let details: Vec<String> = per_table.iter().map(|(k, v)| format!("{v} {k}")).collect();
+        summary.push_str(&format!(" ({})", details.join(", ")));
+    }
+    summary.push_str(&format!(" in {} ms", op_start.elapsed().as_millis()));
+    summary.push_str(&format!(", VACUUM took {vacuum_ms} ms"));
+    info!("{}", summary);
+    Ok(())
 }
 
 /// Holds cached column‐lists per table (populated on first use).
