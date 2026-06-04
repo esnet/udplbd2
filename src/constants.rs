@@ -10,3 +10,4 @@ pub const CALENDAR_SLOT_BITSIZE: usize = 9;
 pub const SLOTS_PER_EPOCH: usize = 512;
 pub const MAX_EPOCHS_PER_LB_INSTANCE: usize =
     (MAX_MEMBER_MAP_ROW / MAX_LB_INSTANCES) / SLOTS_PER_EPOCH;
+pub const COMPAT_TAG: &str = "0.3.1";

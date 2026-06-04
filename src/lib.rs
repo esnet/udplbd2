@@ -181,9 +181,13 @@ fn build_server_futures(
         };
 
         // Compose: gRPC route takes precedence, REST is fallback
-        let app = grpc_router
-            .fallback_service(rest_router)
-            .layer(axum::middleware::from_fn_with_state(*addr, fix_connect_info));
+        let app =
+            grpc_router
+                .fallback_service(rest_router)
+                .layer(axum::middleware::from_fn_with_state(
+                    *addr,
+                    fix_connect_info,
+                ));
 
         let tls_config = config.server.tls.clone();
         let server_future = serve_with_optional_tls(*addr, app, tls_config);
@@ -283,11 +287,7 @@ pub async fn start_server(config: &mut Config) -> Result<()> {
 ///
 /// A 2-second debounce window is used to coalesce rapid successive writes that
 /// commonly occur during certificate renewal (cert + key written separately).
-fn spawn_cert_watcher(
-    rustls_config: RustlsConfig,
-    cert_path: PathBuf,
-    key_path: PathBuf,
-) {
+fn spawn_cert_watcher(rustls_config: RustlsConfig, cert_path: PathBuf, key_path: PathBuf) {
     use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
     use std::sync::mpsc;
 
@@ -299,12 +299,19 @@ fn spawn_cert_watcher(
     tokio::spawn(async move {
         let (tx, rx) = mpsc::channel();
 
-        let cert_canonical = std::fs::canonicalize(&cert_path).unwrap_or_else(|_| cert_path.clone());
+        let cert_canonical =
+            std::fs::canonicalize(&cert_path).unwrap_or_else(|_| cert_path.clone());
         let key_canonical = std::fs::canonicalize(&key_path).unwrap_or_else(|_| key_path.clone());
 
         // Watch parent directories so we catch atomic replacements (symlink swaps, rename-over)
-        let cert_dir = cert_canonical.parent().unwrap_or(&cert_canonical).to_path_buf();
-        let key_dir = key_canonical.parent().unwrap_or(&key_canonical).to_path_buf();
+        let cert_dir = cert_canonical
+            .parent()
+            .unwrap_or(&cert_canonical)
+            .to_path_buf();
+        let key_dir = key_canonical
+            .parent()
+            .unwrap_or(&key_canonical)
+            .to_path_buf();
 
         let mut watcher = match RecommendedWatcher::new(tx, Config::default()) {
             Ok(w) => w,
@@ -315,7 +322,10 @@ fn spawn_cert_watcher(
         };
 
         if let Err(e) = watcher.watch(&cert_dir, RecursiveMode::NonRecursive) {
-            error!("failed to watch certificate directory {}: {e}", cert_dir.display());
+            error!(
+                "failed to watch certificate directory {}: {e}",
+                cert_dir.display()
+            );
             return;
         }
         // Only watch key_dir separately if it differs from cert_dir
@@ -356,10 +366,9 @@ fn spawn_cert_watcher(
                             canonical == cert_canonical_check || canonical == key_canonical_check
                         });
 
-                        let is_relevant = matches!(
-                            event.kind,
-                            EventKind::Create(_) | EventKind::Modify(_)
-                        ) && dominated_by_cert_or_key;
+                        let is_relevant =
+                            matches!(event.kind, EventKind::Create(_) | EventKind::Modify(_))
+                                && dominated_by_cert_or_key;
 
                         if is_relevant {
                             let now = std::time::Instant::now();
@@ -544,6 +553,13 @@ pub async fn start_mocked_server(
 
     try_join_all(server_futures).await?;
 
+    Ok(())
+}
+
+pub fn print_version() -> Result<()> {
+    println!("UDPLBD_COMMIT={}", env!("UDPLBD_BUILD", "unknown"));
+    println!("UDPLBD_VERSION={}", env!("CARGO_PKG_VERSION"));
+    println!("UDPLBD_COMPAT_VERSION={}", crate::constants::COMPAT_TAG);
     Ok(())
 }
 

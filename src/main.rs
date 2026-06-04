@@ -16,7 +16,8 @@ use std::path::PathBuf;
 use tracing_subscriber::EnvFilter;
 
 use udplbd::{
-    apply_static_config, config::Config, errors::Result, start_mocked_server, start_server,
+    apply_static_config, config::Config, errors::Result, print_version, start_mocked_server,
+    start_server,
 };
 
 /// udplbd - the control plane for EJFAT load balancers.
@@ -79,6 +80,9 @@ enum Commands {
 
     /// SmartNIC configuration commands.
     Sncfg(udplbd::sncfg::cli::SncfgCli),
+
+    /// Print the current version
+    Version,
 }
 
 /// Application entry point.
@@ -120,6 +124,7 @@ pub async fn cli_main(cli: Cli, config: &mut Config) -> Result<()> {
         Commands::Sncfg(sncfg_cli) => {
             sncfg_cli.run(config).await?;
         }
+        Commands::Version => print_version()?,
     }
     Ok(())
 }
