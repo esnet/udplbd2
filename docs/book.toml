@@ -1,0 +1,8 @@
+[book]
+title = "udplbd book"
+authors = ["Derek Howard <dhoward@es.net>"]
+language = "en"
+src = "src"
+
+[output.html]
+git-repository-url = "https://github.com/esnet/udplbd2"

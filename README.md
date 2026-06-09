@@ -14,6 +14,15 @@ It is written in Rust for memory safety and to minimize the possibility of data 
 an append-only schema design (configurable retention) to enable seamless recovery and the ability to inspect
 this historical state of the control plane. udplbd also integrates `turmoil` for testing in simulation.
 
+## Documentation
+
+Administrator documentation (installation, configuration, user management, observability, database administration, and troubleshooting) is in [`docs/`](docs/). To read it locally:
+
+```sh
+cargo install mdbook
+mdbook serve docs/
+```
+
 ## Features
 
 - **gRPC Server**: Manages dynamic load balancers.
