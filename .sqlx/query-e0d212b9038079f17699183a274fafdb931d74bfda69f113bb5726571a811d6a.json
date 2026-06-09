@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT slots\n            FROM epoch\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "slots",
+        "ordinal": 0,
+        "type_info": "Blob"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e0d212b9038079f17699183a274fafdb931d74bfda69f113bb5726571a811d6a"
+}

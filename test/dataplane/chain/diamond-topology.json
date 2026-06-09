@@ -1,0 +1,76 @@
+{
+    "sender": {
+        "rate": 200,
+        "event_count": 20000,
+        "event_size": 1500,
+        "node": "A"
+    },
+    "receivers": [
+        {
+            "name": "RB1",
+            "kp": 1.0,
+            "rate": 100,
+            "sp": 5,
+            "node": "B"
+        },
+        {
+            "name": "RC1",
+            "kp": 1.0,
+            "rate": 100,
+            "sp": 5,
+            "node": "C"
+        },
+        {
+            "name": "RD1",
+            "kp": 1.0,
+            "rate": 80,
+            "sp": 5,
+            "node": "D"
+        },
+        {
+            "name": "RD2",
+            "kp": 1.0,
+            "rate": 80,
+            "sp": 5,
+            "node": "D"
+        }
+    ],
+    "chain": {
+        "nodes": {
+            "A": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            },
+            "B": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            },
+            "C": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            },
+            "D": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            }
+        },
+        "edges": [
+            [
+                "A",
+                "B"
+            ],
+            [
+                "A",
+                "C"
+            ],
+            [
+                "B",
+                "D"
+            ],
+            [
+                "C",
+                "D"
+            ]
+        ]
+    }
+}

@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT message\n            FROM healthcheck_event\n            WHERE loadbalancer_id = ?1\n              AND resolved_at IS NULL\n            ORDER BY detected_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "message",
+        "ordinal": 0,
+        "type_info": "Text"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e29ad0a95044a7f4a65924a1269bd5db16cd5ca994c57fda77ce4663180b5c2f"
+}

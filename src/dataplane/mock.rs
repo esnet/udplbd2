@@ -153,8 +153,10 @@ impl MockLoadBalancer {
         let tick = lb_payload.header.tick.get();
 
         // Look up the epoch based on the tick.
-        let epoch = match state.get_epoch(self.lb_id, tick) {
-            Some(epoch) => epoch,
+        // get_epoch returns (epoch, slot_select_bit_cnt, slot_select_xor).
+        let (epoch, slot_select_bit_cnt, slot_select_xor) = match state.get_epoch(self.lb_id, tick)
+        {
+            Some(result) => result,
             None => {
                 debug!(
                     "no matching epoch found for lb_id {} with tick {}",
@@ -164,8 +166,19 @@ impl MockLoadBalancer {
             }
         };
 
-        // Calendar slot from lower 9 bits of tick.
-        let slot = (tick & 0x1FF) as u16;
+        // Compute the calendar slot.
+        //
+        // The P4 program normalizes the slot_select value across protocol versions:
+        //   v2: slot_select = tick[15:0]  (lower 16 bits of tick)
+        //   v3: slot_select = udplb_v3.slot_select
+        //
+        // Then applies: calendar_slot = (slot_select ^ slot_select_xor) & slot_select_mask
+        // where slot_select_mask = (1 << slot_select_bit_cnt) - 1
+        //
+        // get_slot_select() returns the raw slot_select value per version.
+        let raw_slot_select = lb_payload.header.get_slot_select();
+        let slot_select_mask: u16 = (1u16 << slot_select_bit_cnt) - 1;
+        let slot = (raw_slot_select ^ slot_select_xor) & slot_select_mask;
 
         // Look up the member ID from the calendar.
         let member_id = match state.get_member_id(self.lb_id, epoch, slot) {
@@ -183,27 +196,38 @@ impl MockLoadBalancer {
         let member = match state.get_member_info(self.lb_id, member_id) {
             Some(info) => info,
             None => {
-                debug!(
-                    "no member info for lb_id {} member_id {}",
-                    self.lb_id, member_id
-                );
+                if member_id != u16::MAX {
+                    debug!(
+                        "no member info for lb_id {} member_id {}",
+                        self.lb_id, member_id
+                    );
+                }
                 return None;
             }
         };
 
         // Handle MemberInfoAction
-        let dst_addr = match &member.action {
+        //
+        // The P4 program normalizes the port_select value across protocol versions:
+        //   v2: port_select = udplb_v2.entropy
+        //   v3: port_select = udplb_v3.port_select
+        //
+        // get_port_select() returns the appropriate field for the detected version.
+        let (dst_addr, keep_lb_header) = match &member.action {
             MemberInfoAction::Rewrite {
                 set_dest_mac_addr: _,
                 set_dest_ip_addr,
                 set_dest_udp_port,
                 set_entropy_bit_mask_width,
-                set_keep_lb_header: _,
+                set_keep_lb_header,
             } => {
-                let entropy_mask = (1u16 << *set_entropy_bit_mask_width) - 1;
+                let port_select_mask = (1u16 << *set_entropy_bit_mask_width) - 1;
                 let dst_port =
-                    *set_dest_udp_port + (lb_payload.header.entropy.get() & entropy_mask);
-                SocketAddr::new(*set_dest_ip_addr, dst_port)
+                    *set_dest_udp_port + (lb_payload.header.get_port_select() & port_select_mask);
+                (
+                    SocketAddr::new(*set_dest_ip_addr, dst_port),
+                    *set_keep_lb_header,
+                )
             }
             MemberInfoAction::Drop => {
                 // Drop the packet (do not forward)
@@ -257,7 +281,13 @@ impl MockLoadBalancer {
             }
         }
 
-        Some((lb_payload.body.to_vec(), dst_addr))
+        let payload = if keep_lb_header {
+            data.to_vec()
+        } else {
+            lb_payload.body.to_vec()
+        };
+
+        Some((payload, dst_addr))
     }
 }
 
@@ -289,7 +319,8 @@ struct MockDataplaneState {
 }
 
 impl MockDataplaneState {
-    fn get_epoch(&self, lb_id: u8, tick: u64) -> Option<u32> {
+    /// Returns `(epoch, slot_select_bit_cnt, slot_select_xor)` for the matching epoch rule.
+    fn get_epoch(&self, lb_id: u8, tick: u64) -> Option<(u32, u8, u16)> {
         let entries = self.epochs.get(&lb_id)?;
         // Find the first rule with the longest matching prefix.
         for entry in entries {
@@ -300,7 +331,11 @@ impl MockDataplaneState {
             };
 
             if (tick & mask) == (entry.match_event & mask) {
-                return Some(entry.set_epoch);
+                return Some((
+                    entry.set_epoch,
+                    entry.slot_select_bit_cnt,
+                    entry.slot_select_xor,
+                ));
             }
         }
         None
@@ -938,12 +973,12 @@ mod tests {
         }
 
         let state = dp.state.lock().await;
-        let epoch = state
+        let (epoch, _slot_select, _slot_xor) = state
             .get_epoch(1, 0x1234567812345678)
             .expect("Failed to match 32-bit prefix");
         assert_eq!(epoch, 1);
 
-        let epoch = state
+        let (epoch, _slot_select, _slot_xor) = state
             .get_epoch(1, 0x1234111111111111)
             .expect("Failed to match 16-bit prefix");
         assert_eq!(epoch, 2);

@@ -1155,6 +1155,187 @@ async fn test_revoke_token_child_cannot_revoke_parent() {
     );
 }
 
+// ChainLoadBalancer / UnchainLoadBalancer Tests
+
+#[tokio::test]
+async fn test_chain_load_balancer_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ChainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        ejfat_uri: "ejfat://token@host:18347/lb/1".to_string(),
+        ip_family: crate::proto::loadbalancer::v1::IpFamily::Ipv4.into(),
+        weight: 1.0,
+        min_factor: 0.5,
+        max_factor: 2.0,
+        slot_demands: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_chain_load_balancer(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_chain_load_balancer_dual_stack_rejected() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ChainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        ejfat_uri: "ejfat://token@host:18347/lb/1".to_string(),
+        ip_family: crate::proto::loadbalancer::v1::IpFamily::DualStack.into(),
+        weight: 1.0,
+        min_factor: 0.5,
+        max_factor: 2.0,
+        slot_demands: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let result = service.handle_chain_load_balancer(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("DUAL_STACK"),
+        "Expected DUAL_STACK rejection"
+    );
+}
+
+#[tokio::test]
+async fn test_chain_load_balancer_invalid_ejfat_uri() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ChainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        ejfat_uri: "not-a-valid-uri".to_string(),
+        ip_family: crate::proto::loadbalancer::v1::IpFamily::Ipv4.into(),
+        weight: 1.0,
+        min_factor: 0.5,
+        max_factor: 2.0,
+        slot_demands: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let result = service.handle_chain_load_balancer(request).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_chain_load_balancer_missing_lb_id_in_uri() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    // URI without /lb/<id>
+    let mut request = Request::new(crate::proto::loadbalancer::v1::ChainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        ejfat_uri: "ejfat://token@host:18347".to_string(),
+        ip_family: crate::proto::loadbalancer::v1::IpFamily::Ipv4.into(),
+        weight: 1.0,
+        min_factor: 0.5,
+        max_factor: 2.0,
+        slot_demands: vec![],
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let result = service.handle_chain_load_balancer(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("load balancer ID"),
+        "Expected error about missing LB ID"
+    );
+}
+
+#[tokio::test]
+async fn test_unchain_load_balancer_invalid_token() {
+    let (service, reservation_id, _) = create_test_service().await;
+    let mut request = Request::new(crate::proto::loadbalancer::v1::UnchainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        chain_id: "1".to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::from_static("Bearer invalid"),
+    );
+    let result = service.handle_unchain_load_balancer(request).await;
+    assert!(result.is_err());
+    let err = result.unwrap_err().to_string();
+    assert!(
+        err.contains("permission"),
+        "Expected error to contain 'permission', got: {}",
+        err
+    );
+}
+
+#[tokio::test]
+async fn test_unchain_load_balancer_wrong_reservation() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    // Create a chain for this reservation directly in the DB
+    let chain = service
+        .db
+        .create_upstream_chain(
+            reservation_id,
+            "host",
+            18347,
+            false,
+            "42",
+            "ejfat_token",
+            "session_token",
+            "sid",
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+
+    // Try to unchain with a different reservation ID
+    let mut request = Request::new(crate::proto::loadbalancer::v1::UnchainLoadBalancerRequest {
+        lb_id: "99999".to_string(), // wrong reservation
+        chain_id: chain.id.to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let result = service.handle_unchain_load_balancer(request).await;
+    assert!(result.is_err());
+}
+
+#[tokio::test]
+async fn test_unchain_load_balancer_nonexistent_chain() {
+    let (service, reservation_id, _) = create_test_service().await;
+    service.db.create_admin_token("test").await.unwrap();
+
+    let mut request = Request::new(crate::proto::loadbalancer::v1::UnchainLoadBalancerRequest {
+        lb_id: reservation_id.to_string(),
+        chain_id: "99999".to_string(),
+    });
+    request.metadata_mut().insert(
+        "authorization",
+        MetadataValue::try_from("Bearer test").unwrap(),
+    );
+    let result = service.handle_unchain_load_balancer(request).await;
+    assert!(result.is_err());
+    assert!(
+        result.unwrap_err().message().contains("not found"),
+        "Expected chain not found"
+    );
+}
+
 // IP Validation Tests
 
 #[tokio::test]

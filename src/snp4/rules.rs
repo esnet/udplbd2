@@ -288,11 +288,30 @@ pub struct EventIdToEpochRule {
     pub match_event: u64,
     pub match_event_prefix_len: u32,
     pub set_epoch: u32,
+    /// Number of significant bits used to compute the calendar slot.
+    /// Defaults to 9 (matching the P4 `do_assign_epoch` action default).
+    pub slot_select_bit_cnt: u8,
+    /// XOR value applied to the slot_select before masking.
+    /// Defaults to 0 (matching the P4 `do_assign_epoch` action default).
+    pub slot_select_xor: u16,
     pub priority: u32,
 }
 
 impl From<EventIdToEpochRule> for TableRule {
     fn from(r: EventIdToEpochRule) -> Self {
+        // Use the extended action when non-default slot selection options are set.
+        let (action_name, parameters) = if r.slot_select_bit_cnt == 9 && r.slot_select_xor == 0 {
+            ("do_assign_epoch".into(), vec![param(hex(r.set_epoch))])
+        } else {
+            (
+                "do_assign_epoch_with_slot_sel_opts".into(),
+                vec![
+                    param(hex(r.set_epoch)),
+                    param(hex(r.slot_select_bit_cnt as u32)),
+                    param(hex(r.slot_select_xor)),
+                ],
+            )
+        };
         TableRule {
             table_name: "epoch_assign_table".into(),
             matches: vec![
@@ -300,8 +319,8 @@ impl From<EventIdToEpochRule> for TableRule {
                 match_prefix(hex(r.match_event), r.match_event_prefix_len),
             ],
             action: Some(Action {
-                name: "do_assign_epoch".into(),
-                parameters: vec![param(hex(r.set_epoch))],
+                name: action_name,
+                parameters,
             }),
             priority: r.priority,
             replace: false,
@@ -323,7 +342,11 @@ impl TryFrom<TableRule> for EventIdToEpochRule {
         let action = rule
             .action
             .ok_or_else(|| Error::Config("Missing action".into()))?;
-        if action.name != "do_assign_epoch" || action.parameters.is_empty() {
+
+        let is_basic = action.name == "do_assign_epoch";
+        let is_extended = action.name == "do_assign_epoch_with_slot_sel_opts";
+
+        if (!is_basic && !is_extended) || action.parameters.is_empty() {
             return Err(Error::Config("Invalid action".into()));
         }
 
@@ -341,11 +364,25 @@ impl TryFrom<TableRule> for EventIdToEpochRule {
         let epoch = parse_hex_u32(&action.parameters[0].value)
             .ok_or_else(|| Error::Config("Invalid epoch".into()))?;
 
+        let (slot_select_bit_cnt, slot_select_xor) = if is_extended && action.parameters.len() >= 3
+        {
+            let bit_cnt = parse_hex_u8(&action.parameters[1].value)
+                .ok_or_else(|| Error::Config("Invalid slot_select_bit_cnt".into()))?;
+            let xor_val = parse_hex_u16(&action.parameters[2].value)
+                .ok_or_else(|| Error::Config("Invalid slot_select_xor".into()))?;
+            (bit_cnt, xor_val)
+        } else {
+            // Default values matching the P4 do_assign_epoch action
+            (9u8, 0u16)
+        };
+
         Ok(EventIdToEpochRule {
             match_lb_instance_id: lb_id,
             match_event: event,
             match_event_prefix_len: prefix_len,
             set_epoch: epoch,
+            slot_select_bit_cnt,
+            slot_select_xor,
             priority: rule.priority,
         })
     }

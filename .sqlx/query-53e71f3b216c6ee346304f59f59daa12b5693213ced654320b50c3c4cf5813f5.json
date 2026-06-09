@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT uc.id, uc.reservation_id, uc.upstream_grpc_host, uc.upstream_grpc_port,\n                uc.upstream_tls_enabled, uc.upstream_lb_id, uc.upstream_ejfat_token,\n                uc.upstream_session_token, uc.upstream_session_id,\n                uc.upstream_data_ipv4, uc.upstream_data_ipv6, uc.created_at, uc.deleted_at\n            FROM upstream_chain uc\n            JOIN reservation r ON uc.reservation_id = r.id\n            WHERE uc.deleted_at IS NULL AND r.deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_grpc_host",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_grpc_port",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_tls_enabled",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_lb_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_ejfat_token",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_session_token",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_session_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_data_ipv4",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_data_ipv6",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 12,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "53e71f3b216c6ee346304f59f59daa12b5693213ced654320b50c3c4cf5813f5"
+}

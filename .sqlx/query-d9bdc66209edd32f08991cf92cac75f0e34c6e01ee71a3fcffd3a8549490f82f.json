@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stat_global_sample (\n                sampled_at,\n                rx_rslt_drop_parse_fail,\n                rx_rslt_drop_mac_dst_miss,\n                rx_rslt_drop_not_ip,\n                rx_rslt_drop_ip_dst_miss,\n                rx_rslt_drop_arp_bad_tpa,\n                rx_rslt_drop_icmpv4_echo_bad_dst,\n                rx_rslt_drop_icmpv6_echo_bad_dst,\n                rx_rslt_drop_ipv6nd_neigh_sol_bad_target,\n                rx_rslt_ok_arp_req,\n                rx_rslt_ok_icmpv4_echo,\n                rx_rslt_ok_icmpv6_echo,\n                rx_rslt_ok_ipv6nd_neigh_sol,\n                rx_rslt_ok_host,\n                rx_rslt_ok_lb\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 15
+    },
+    "nullable": []
+  },
+  "hash": "d9bdc66209edd32f08991cf92cac75f0e34c6e01ee71a3fcffd3a8549490f82f"
+}

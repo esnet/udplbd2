@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO slot_demand (reservation_id, session_id, slot_index, slot_length, created_at) VALUES (?1, ?2, ?3, ?4, unixepoch('subsec') * 1000)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "a5b69c45b83955bfd26dac5a770ae3ee40d5b4b57cbf36983f845c68e0dc7319"
+}

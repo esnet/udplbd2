@@ -3,15 +3,16 @@ use crate::errors::Error;
 /// gRPC client for the udplbd gRPC API
 use crate::proto::loadbalancer::v1::{
     load_balancer_client::LoadBalancerClient, token_selector, AddSendersReply, AddSendersRequest,
-    CreateTokenReply, CreateTokenRequest, DeregisterReply, DeregisterRequest,
-    ExtendReservationReply, ExtendReservationRequest, FreeLoadBalancerReply,
-    FreeLoadBalancerRequest, GetLoadBalancerRequest, ListChildTokensReply,
-    ListChildTokensRequest, ListTokenPermissionsReply, ListTokenPermissionsRequest, OverviewReply,
-    OverviewRequest, PortRange, RegisterReply, RegisterRequest, RemoveSendersReply,
-    RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest,
-    ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
-    SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
-    SetSlotDemandsRequest, TokenPermission, TokenSelector, VersionReply, VersionRequest,
+    ChainLoadBalancerReply, ChainLoadBalancerRequest, CreateTokenReply, CreateTokenRequest,
+    DeregisterReply, DeregisterRequest, ExtendReservationReply, ExtendReservationRequest,
+    FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest, IpFamily,
+    ListChildTokensReply, ListChildTokensRequest, ListTokenPermissionsReply,
+    ListTokenPermissionsRequest, OverviewReply, OverviewRequest, PortRange, RegisterReply,
+    RegisterRequest, RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
+    ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply,
+    RevokeTokenRequest, SendStateReply, SendStateRequest, SessionSlotRanges, SetSlotDemandsReply,
+    SetSlotDemandsRequest, SlotRange, TokenPermission, TokenSelector, UnchainLoadBalancerReply,
+    UnchainLoadBalancerRequest, VersionReply, VersionRequest,
 };
 use prost_wkt_types::Timestamp;
 use serde::Serialize;
@@ -409,6 +410,50 @@ impl ControlPlaneClient {
             }),
         };
         self.client.revoke_token(request).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn chain_load_balancer(
+        &mut self,
+        lb_id: String,
+        ejfat_uri: String,
+        ip_family: IpFamily,
+        weight: f32,
+        min_factor: f32,
+        max_factor: f32,
+        slot_demands: Vec<SlotRange>,
+    ) -> std::result::Result<tonic::Response<ChainLoadBalancerReply>, tonic::Status> {
+        let request = ChainLoadBalancerRequest {
+            lb_id,
+            ejfat_uri,
+            ip_family: ip_family.into(),
+            weight,
+            min_factor,
+            max_factor,
+            slot_demands,
+        };
+        self.client.chain_load_balancer(request).await
+    }
+
+    pub async fn unchain_load_balancer(
+        &mut self,
+        lb_id: String,
+        chain_id: String,
+    ) -> std::result::Result<tonic::Response<UnchainLoadBalancerReply>, tonic::Status> {
+        let request = UnchainLoadBalancerRequest { lb_id, chain_id };
+        self.client.unchain_load_balancer(request).await
+    }
+
+    pub async fn get_chain_graph(
+        &mut self,
+        lb_id: String,
+        visited: Vec<String>,
+    ) -> std::result::Result<
+        tonic::Response<crate::proto::loadbalancer::v1::GetChainGraphReply>,
+        tonic::Status,
+    > {
+        let request = crate::proto::loadbalancer::v1::GetChainGraphRequest { lb_id, visited };
+        self.client.get_chain_graph(request).await
     }
 }
 

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE upstream_chain SET deleted_at = unixepoch('subsec') * 1000, upstream_ejfat_token = NULL WHERE reservation_id = ?1 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "b68ba47169c05fab59ead67c22e0bbe7c80a0e1bc24130420cffb0853e68a049"
+}

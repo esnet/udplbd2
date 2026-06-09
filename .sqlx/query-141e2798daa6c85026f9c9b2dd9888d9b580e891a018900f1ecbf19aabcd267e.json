@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO stat_lb_sample (\n                reservation_id,\n                sampled_at,\n                drop_bad_udplb_version,\n                drop_blocked_src,\n                drop_epoch_assign_miss,\n                drop_lb_calendar_miss,\n                drop_mbr_info_miss,\n                drop_no_udplb_hdr,\n                drop_not_ip,\n                rx_bytes,\n                rx_packets,\n                rx_v2,\n                rx_v3\n            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 13
+    },
+    "nullable": []
+  },
+  "hash": "141e2798daa6c85026f9c9b2dd9888d9b580e891a018900f1ecbf19aabcd267e"
+}

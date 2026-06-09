@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n        UPDATE healthcheck_event\n        SET resolved_at = ?1\n        WHERE event_type = 'receiver_packet_stall'\n          AND resolved_at IS NULL\n          AND (\n            -- Session has been deleted\n            session_id IN (SELECT id FROM session WHERE deleted_at IS NOT NULL)\n            OR\n            -- Session is now receiving packets\n            session_id IN (\n                SELECT session_id\n                FROM session_state\n                WHERE timestamp >= ?2\n                GROUP BY session_id\n                HAVING MAX(total_packets_recv) > MIN(total_packets_recv)\n            )\n          )\n        ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "c6175c3250b0029862228fa407ebc6aaf81ad1c5fb3a4d779ef893f5f6a01b96"
+}

@@ -1,0 +1,50 @@
+{
+    "sender": {
+        "rate": 500,
+        "event_count": 10000,
+        "event_size": 1500,
+        "node": "A"
+    },
+    "receivers": [
+        {
+            "name": "R1",
+            "kp": 1.0,
+            "rate": 50,
+            "sp": 5,
+            "node": "C"
+        },
+        {
+            "name": "R2",
+            "kp": 1.0,
+            "rate": 60,
+            "sp": 5,
+            "node": "C"
+        }
+    ],
+    "chain": {
+        "nodes": {
+            "A": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            },
+            "B": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            },
+            "C": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "dynamic"
+            }
+        },
+        "edges": [
+            [
+                "A",
+                "B"
+            ],
+            [
+                "B",
+                "C"
+            ]
+        ]
+    }
+}

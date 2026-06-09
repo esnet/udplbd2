@@ -1,0 +1,80 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, event_type, severity, loadbalancer_id, reservation_id, session_id,\n                   message, details, detected_at, resolved_at, created_at\n            FROM healthcheck_event\n            WHERE loadbalancer_id = ?1\n              AND resolved_at IS NULL\n            ORDER BY detected_at DESC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "event_type",
+        "ordinal": 1,
+        "type_info": "Text"
+      },
+      {
+        "name": "severity",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "loadbalancer_id",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "session_id",
+        "ordinal": 5,
+        "type_info": "Integer"
+      },
+      {
+        "name": "message",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "details",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "detected_at",
+        "ordinal": 8,
+        "type_info": "Integer"
+      },
+      {
+        "name": "resolved_at",
+        "ordinal": 9,
+        "type_info": "Integer"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 10,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      true,
+      true,
+      true,
+      false,
+      true,
+      false,
+      true,
+      false
+    ]
+  },
+  "hash": "2541e1abee143431388460e9c3ba79cdd9981b10e88a9a30cc7c54bfea325b02"
+}

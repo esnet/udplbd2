@@ -24,6 +24,8 @@ pub struct Sender {
     pub meta_event_context: Option<MetaEventContext>,
     pub total_packets_sent: u64,
     pub autosync: bool,
+    /// Protocol version to use when sending LB headers. Defaults to V3.
+    pub lb_version: LBHeaderVersion,
 }
 
 impl Sender {
@@ -53,6 +55,7 @@ impl Sender {
             meta_event_context,
             total_packets_sent: 0,
             autosync: true,
+            lb_version: LBHeaderVersion::V3,
         })
     }
 
@@ -151,6 +154,7 @@ impl Sender {
             meta_event_context,
             total_packets_sent: 0,
             autosync: false,
+            lb_version: LBHeaderVersion::V3,
         })
     }
 
@@ -202,8 +206,24 @@ impl Sender {
             let packet_bytes = &mut packet_buffer[..total_packet_size];
 
             let lb_payload = LBPayload::mut_from_bytes(packet_bytes).unwrap();
-            lb_payload.header.set_defaults();
-            lb_payload.header.tick.set(tick);
+
+            // Set the LB header according to the configured version.
+            match self.lb_version {
+                LBHeaderVersion::V3 => {
+                    lb_payload.header.set_defaults(); // sets version=3
+                    lb_payload.header.tick.set(tick);
+                    // For v3: slot_select = lower 16 bits of tick, port_select = 0 (no entropy)
+                    lb_payload.header.slot_select.set((tick & 0xFFFF) as u16);
+                    lb_payload.header.port_select.set(0);
+                }
+                LBHeaderVersion::V2 => {
+                    lb_payload.header.set_defaults_v2(); // sets version=2
+                    lb_payload.header.tick.set(tick);
+                    // For v2: slot_select field is reserved (0), port_select field is entropy
+                    lb_payload.header.slot_select.set(0); // reserved
+                    lb_payload.header.port_select.set(0); // entropy
+                }
+            }
 
             let reassembly_payload =
                 ReassemblyPayload::mut_from_bytes(&mut lb_payload.body).unwrap();

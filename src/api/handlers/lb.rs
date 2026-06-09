@@ -10,15 +10,20 @@ use tracing::{info, warn};
 
 use super::super::service::LoadBalancerService;
 use crate::api::client::EjfatUrl;
+use crate::api::client::{BearerInterceptor, ControlPlaneClient};
 use crate::db::models::{Permission, PermissionType, Resource};
 use crate::proto::loadbalancer::v1::{
-    AddSendersReply, AddSendersRequest, ExtendReservationReply, ExtendReservationRequest,
-    FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest,
-    LoadBalancerStatusReply, LoadBalancerStatusRequest, RemoveSendersReply, RemoveSendersRequest,
+    load_balancer_client::LoadBalancerClient, AddSendersReply, AddSendersRequest, ChainGraphEdge,
+    ChainLoadBalancerReply, ChainLoadBalancerRequest, ExtendReservationReply,
+    ExtendReservationRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest, GetChainGraphReply,
+    GetChainGraphRequest, GetLoadBalancerRequest, IpFamily, LoadBalancerStatusReply,
+    LoadBalancerStatusRequest, PortRange, RemoveSendersReply, RemoveSendersRequest,
     ReserveLoadBalancerReply, ReserveLoadBalancerRequest, ResetLoadBalancerReply,
-    ResetLoadBalancerRequest, SlotRange, WorkerStatus,
+    ResetLoadBalancerRequest, SlotRange, UnchainLoadBalancerReply, UnchainLoadBalancerRequest,
+    WorkerStatus,
 };
 use crate::util::is_valid_name;
+use tonic::transport::{Channel, ClientTlsConfig};
 
 impl LoadBalancerService {
     pub(crate) async fn handle_reserve_load_balancer(
@@ -721,6 +726,32 @@ impl LoadBalancerService {
             return Err(Status::permission_denied("Permission denied"));
         }
 
+        // Deregister from all upstream chains (best-effort)
+        if let Ok(chains) = self
+            .db
+            .list_upstream_chains_for_reservation(reservation_id)
+            .await
+        {
+            for chain in &chains {
+                if let Err(e) = crate::reservation::upstream::deregister_upstream(chain).await {
+                    warn!(
+                        "free_load_balancer: failed to deregister from upstream chain {}: {}",
+                        chain.id, e
+                    );
+                }
+            }
+            if let Err(e) = self
+                .db
+                .delete_upstream_chains_for_reservation(reservation_id)
+                .await
+            {
+                warn!(
+                    "free_load_balancer: failed to delete upstream chains for reservation {}: {}",
+                    reservation_id, e
+                );
+            }
+        }
+
         // Stop the reservation server
         self.manager
             .lock()
@@ -994,6 +1025,465 @@ impl LoadBalancerService {
             until: Some(prost_wkt_types::Timestamp::from(SystemTime::from(
                 new_until,
             ))),
+        }))
+    }
+
+    pub(crate) async fn handle_chain_load_balancer(
+        &self,
+        request: Request<ChainLoadBalancerRequest>,
+    ) -> Result<Response<ChainLoadBalancerReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+
+        let (ok, token_id) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::Update,
+            )
+            .await?;
+        if !ok {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "chain_load_balancer: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
+            );
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        // Parse the EJFAT URI
+        let ejfat_url: EjfatUrl = request
+            .ejfat_uri
+            .parse()
+            .map_err(|e| Status::invalid_argument(format!("Invalid EJFAT URI: {e}")))?;
+
+        let upstream_lb_id = ejfat_url
+            .lb_id
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("EJFAT URI must include a load balancer ID"))?
+            .clone();
+
+        let upstream_token = ejfat_url
+            .token
+            .as_ref()
+            .ok_or_else(|| Status::invalid_argument("EJFAT URI must include a token"))?
+            .clone();
+
+        let upstream_grpc_port = ejfat_url
+            .grpc_port
+            .ok_or_else(|| Status::invalid_argument("EJFAT URI must include a gRPC port"))?;
+
+        // Validate IP family
+        let ip_family = IpFamily::try_from(request.ip_family)
+            .map_err(|_| Status::invalid_argument("Invalid IP family"))?;
+        if ip_family == IpFamily::DualStack {
+            return Err(Status::invalid_argument(
+                "DUAL_STACK is not supported for ChainLoadBalancer, use IPV4 or IPV6",
+            ));
+        }
+
+        // Get the local reservation and its load balancer
+        let reservation = self
+            .db
+            .get_reservation(reservation_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get reservation: {e}")))?;
+
+        let lb = self
+            .db
+            .get_loadbalancer(reservation.loadbalancer_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get load balancer: {e}")))?;
+
+        // Get the LB's data plane address for the requested IP family
+        let address_map = self.config.mock.as_ref().map(|m| &m.address_map);
+
+        let (ip_address, data_port) = match ip_family {
+            IpFamily::Ipv4 => {
+                let ip = lb.unicast_ipv4_address.ok_or_else(|| {
+                    Status::failed_precondition(
+                        "Load balancer does not have an IPv4 address configured",
+                    )
+                })?;
+                if self.mock_mode {
+                    match address_map.and_then(|m| m.get(&IpAddr::V4(ip))) {
+                        Some(mapped) => (mapped.ip().to_string(), mapped.port()),
+                        None => (ip.to_string(), 19522),
+                    }
+                } else {
+                    (ip.to_string(), 19522)
+                }
+            }
+            IpFamily::Ipv6 => {
+                let ip = lb.unicast_ipv6_address.ok_or_else(|| {
+                    Status::failed_precondition(
+                        "Load balancer does not have an IPv6 address configured",
+                    )
+                })?;
+                if self.mock_mode {
+                    match address_map.and_then(|m| m.get(&IpAddr::V6(ip))) {
+                        Some(mapped) => (mapped.ip().to_string(), mapped.port()),
+                        None => (ip.to_string(), 19522),
+                    }
+                } else {
+                    (ip.to_string(), 19522)
+                }
+            }
+            _ => unreachable!(),
+        };
+
+        let port_range = if self.mock_mode {
+            PortRange::PortRange1
+        } else {
+            PortRange::PortRange16384
+        };
+
+        // Connect to the upstream control plane and register
+        let channel = if ejfat_url.tls_enabled {
+            let tls_config = ClientTlsConfig::new().with_enabled_roots();
+            Channel::from_shared(format!(
+                "https://{}:{}",
+                ejfat_url.grpc_host, upstream_grpc_port
+            ))
+            .map_err(|e| Status::internal(format!("Failed to create channel: {e}")))?
+            .tls_config(tls_config)
+            .map_err(|e| Status::internal(format!("Failed to configure TLS: {e}")))?
+            .connect()
+            .await
+            .map_err(|e| {
+                Status::unavailable(format!("Failed to connect to upstream control plane: {e}"))
+            })?
+        } else {
+            Channel::from_shared(format!(
+                "http://{}:{}",
+                ejfat_url.grpc_host, upstream_grpc_port
+            ))
+            .map_err(|e| Status::internal(format!("Failed to create channel: {e}")))?
+            .connect()
+            .await
+            .map_err(|e| {
+                Status::unavailable(format!("Failed to connect to upstream control plane: {e}"))
+            })?
+        };
+
+        let bearer_interceptor = BearerInterceptor {
+            token: upstream_token.clone(),
+        };
+        let client = LoadBalancerClient::with_interceptor(channel, bearer_interceptor);
+        let mut upstream_client =
+            ControlPlaneClient::new(client, Some(upstream_lb_id.clone()), None);
+
+        // Query the upstream for its data plane addresses
+        let upstream_info = upstream_client
+            .get_load_balancer()
+            .await
+            .map_err(|e| {
+                Status::internal(format!("Failed to get upstream load balancer info: {e}"))
+            })?
+            .into_inner();
+
+        let upstream_data_ipv4 = if upstream_info.data_ipv4_address.is_empty() {
+            None
+        } else {
+            Some(upstream_info.data_ipv4_address)
+        };
+        let upstream_data_ipv6 = if upstream_info.data_ipv6_address.is_empty() {
+            None
+        } else {
+            Some(upstream_info.data_ipv6_address)
+        };
+
+        // Cycle detection: check if adding this chain would create a forwarding loop.
+        // Build the compound identity "host:port/lb_id" for this node's reservation.
+        let listen = &self.config.server.listen[0];
+        let my_compound_id = format!("{}:{}/{}", listen.ip(), listen.port(), reservation_id);
+        match upstream_client
+            .get_chain_graph(upstream_lb_id.clone(), vec![my_compound_id])
+            .await
+        {
+            Ok(reply) => {
+                if reply.into_inner().cycle_detected {
+                    return Err(Status::failed_precondition(
+                        "ChainLoadBalancer would create a forwarding cycle",
+                    ));
+                }
+            }
+            Err(e) => {
+                warn!(
+                    "chain_load_balancer: cycle check failed (upstream unreachable), proceeding optimistically: {e}"
+                );
+            }
+        }
+
+        let register_reply = upstream_client
+            .register(
+                format!("chain-{reservation_id}"),
+                request.weight,
+                ip_address,
+                data_port,
+                port_range,
+                request.min_factor,
+                request.max_factor,
+                true, // keepLbHeader
+                request.slot_demands,
+            )
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to register with upstream control plane: {e}"
+                ))
+            })?;
+
+        let reply = register_reply.into_inner();
+        let upstream_session_token = reply.token;
+        let upstream_session_id = reply.session_id;
+
+        // Store the upstream chain in the database
+        let chain = self
+            .db
+            .create_upstream_chain(
+                reservation_id,
+                &ejfat_url.grpc_host,
+                upstream_grpc_port,
+                ejfat_url.tls_enabled,
+                &upstream_lb_id,
+                &upstream_token,
+                &upstream_session_token,
+                &upstream_session_id,
+                upstream_data_ipv4.as_deref(),
+                upstream_data_ipv6.as_deref(),
+            )
+            .await
+            .map_err(|e| Status::internal(format!("Failed to store upstream chain: {e}")))?;
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "chain_load_balancer: reservation_id={}, chain_id={}, upstream={}:{}/lb/{}, token_id={:?}, source={}",
+            reservation_id, chain.id, ejfat_url.grpc_host, upstream_grpc_port, upstream_lb_id, token_id, src
+        );
+
+        Ok(Response::new(ChainLoadBalancerReply {
+            chain_id: chain.id.to_string(),
+        }))
+    }
+
+    pub(crate) async fn handle_unchain_load_balancer(
+        &self,
+        request: Request<UnchainLoadBalancerRequest>,
+    ) -> Result<Response<UnchainLoadBalancerReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let remote_addr = request.remote_addr();
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+        let chain_id = request
+            .chain_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid chain ID"))?;
+
+        let (ok, token_id) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::Update,
+            )
+            .await?;
+        if !ok {
+            let src = remote_addr
+                .map(|a| a.to_string())
+                .unwrap_or_else(|| "unknown".to_string());
+            warn!(
+                "unchain_load_balancer: permission denied. reservation_id={}, token_id={}, source={}",
+                reservation_id,
+                token_id.unwrap_or(-1),
+                src
+            );
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        // Get the upstream chain and verify it belongs to this reservation
+        let chain = self
+            .db
+            .get_upstream_chain(chain_id)
+            .await
+            .map_err(|e| Status::not_found(format!("Upstream chain not found: {e}")))?;
+
+        if chain.reservation_id != reservation_id {
+            return Err(Status::invalid_argument(
+                "Chain does not belong to this reservation",
+            ));
+        }
+
+        // Deregister from the upstream control plane (best-effort)
+        if let Err(e) = crate::reservation::upstream::deregister_upstream(&chain).await {
+            warn!(
+                "unchain_load_balancer: failed to deregister from upstream (chain_id={}): {}",
+                chain_id, e
+            );
+        }
+
+        // Soft-delete the chain
+        self.db
+            .delete_upstream_chain(chain_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to delete upstream chain: {e}")))?;
+
+        let src = remote_addr
+            .map(|a| a.to_string())
+            .unwrap_or_else(|| "unknown".to_string());
+        info!(
+            "unchain_load_balancer: reservation_id={}, chain_id={}, token_id={:?}, source={}",
+            reservation_id, chain_id, token_id, src
+        );
+
+        Ok(Response::new(UnchainLoadBalancerReply {}))
+    }
+
+    pub(crate) async fn handle_get_chain_graph(
+        &self,
+        request: Request<GetChainGraphRequest>,
+    ) -> Result<Response<GetChainGraphReply>, Status> {
+        let token = Self::extract_token(request.metadata())?;
+        let request = request.into_inner();
+        let reservation_id = request
+            .lb_id
+            .parse::<i64>()
+            .map_err(|_| Status::invalid_argument("Invalid load balancer ID"))?;
+
+        let (ok, _) = self
+            .validate_token(
+                &token,
+                Resource::Reservation(reservation_id),
+                PermissionType::ReadOnly,
+            )
+            .await?;
+        if !ok {
+            return Err(Status::permission_denied("Permission denied"));
+        }
+
+        // Derive this node's compound identity: "host:port/lb_id"
+        let listen = &self.config.server.listen[0];
+        let my_compound_id = format!("{}:{}/{}", listen.ip(), listen.port(), reservation_id);
+
+        // If we appear in the visited set, the caller found a cycle back to us
+        if request.visited.contains(&my_compound_id) {
+            return Ok(Response::new(GetChainGraphReply {
+                edges: vec![],
+                cycle_detected: true,
+            }));
+        }
+
+        // Fetch local LB data-plane addresses for the downstream side of edges
+        let reservation = self
+            .db
+            .get_reservation(reservation_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get reservation: {e}")))?;
+        let lb = self
+            .db
+            .get_loadbalancer(reservation.loadbalancer_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to get load balancer: {e}")))?;
+        let downstream_data_ipv4 = lb
+            .unicast_ipv4_address
+            .map(|ip| ip.to_string())
+            .unwrap_or_default();
+        let downstream_data_ipv6 = lb
+            .unicast_ipv6_address
+            .map(|ip| ip.to_string())
+            .unwrap_or_default();
+
+        let chains = self
+            .db
+            .list_upstream_chains_for_reservation(reservation_id)
+            .await
+            .map_err(|e| Status::internal(format!("Failed to list upstream chains: {e}")))?;
+
+        let mut edges = Vec::new();
+        let mut new_visited = request.visited.clone();
+        new_visited.push(my_compound_id);
+
+        for chain in &chains {
+            edges.push(ChainGraphEdge {
+                upstream_lb_id: chain.upstream_lb_id.clone(),
+                upstream_data_ipv4: chain
+                    .upstream_data_ipv4
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default(),
+                upstream_data_ipv6: chain
+                    .upstream_data_ipv6
+                    .map(|ip| ip.to_string())
+                    .unwrap_or_default(),
+                downstream_lb_id: reservation_id.to_string(),
+                downstream_data_ipv4: downstream_data_ipv4.clone(),
+                downstream_data_ipv6: downstream_data_ipv6.clone(),
+                chain_id: chain.id.to_string(),
+            });
+
+            let ejfat_token = match &chain.upstream_ejfat_token {
+                Some(t) => t.clone(),
+                None => {
+                    warn!(
+                        "get_chain_graph: chain {} has no ejfat token, skipping recursion",
+                        chain.id
+                    );
+                    continue;
+                }
+            };
+
+            let mut upstream_client =
+                match crate::reservation::upstream::create_upstream_client(chain, &ejfat_token)
+                    .await
+                {
+                    Ok(c) => c,
+                    Err(e) => {
+                        warn!(
+                            "get_chain_graph: cannot connect to upstream {}:{} (chain {}): {}",
+                            chain.upstream_grpc_host, chain.upstream_grpc_port, chain.id, e
+                        );
+                        continue;
+                    }
+                };
+
+            match upstream_client
+                .get_chain_graph(chain.upstream_lb_id.clone(), new_visited.clone())
+                .await
+            {
+                Ok(reply) => {
+                    let reply = reply.into_inner();
+                    if reply.cycle_detected {
+                        return Ok(Response::new(GetChainGraphReply {
+                            edges,
+                            cycle_detected: true,
+                        }));
+                    }
+                    edges.extend(reply.edges);
+                }
+                Err(e) => {
+                    warn!(
+                        "get_chain_graph: upstream {}:{} error (chain {}): {}",
+                        chain.upstream_grpc_host, chain.upstream_grpc_port, chain.id, e
+                    );
+                }
+            }
+        }
+
+        Ok(Response::new(GetChainGraphReply {
+            edges,
+            cycle_detected: false,
         }))
     }
 }

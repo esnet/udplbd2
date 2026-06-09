@@ -110,10 +110,10 @@ impl ActiveReservation {
         Ok(rules)
     }
 
-    /// Creates whitelist rules for authorized sender IPs.
+    /// Creates whitelist rules for authorized sender IPs, including upstream chain data addresses.
     async fn generate_source_filter_rules(&self, db: &LoadBalancerDB) -> Result<Vec<TableRule>> {
         let senders = db.get_reservation_senders(self.reservation_id).await?;
-        Ok(senders
+        let mut rules: Vec<TableRule> = senders
             .into_iter()
             .map(|addr| {
                 IpSrcFilterRule {
@@ -123,7 +123,32 @@ impl ActiveReservation {
                 }
                 .into()
             })
-            .collect())
+            .collect();
+
+        // Add upstream chain data plane addresses as valid senders
+        if let Ok(chains) = db
+            .list_upstream_chains_for_reservation(self.reservation_id)
+            .await
+        {
+            for chain in chains {
+                for addr in chain
+                    .upstream_data_ipv4
+                    .iter()
+                    .chain(chain.upstream_data_ipv6.iter())
+                {
+                    rules.push(
+                        IpSrcFilterRule {
+                            match_lb_instance_id: self.lb_fpga_id,
+                            match_src_ip_addr: *addr,
+                            priority: 0,
+                        }
+                        .into(),
+                    );
+                }
+            }
+        }
+
+        Ok(rules)
     }
 
     /// Maps session IDs to network endpoints, handling both IPv4 and IPv6.
@@ -300,6 +325,8 @@ impl ActiveReservation {
                         match_event: boundary.start,
                         match_event_prefix_len: 64 - boundary.power_of_two,
                         set_epoch: (epoch.epoch_count % 4) as u32,
+                        slot_select_bit_cnt: 9,
+                        slot_select_xor: 0,
                         priority: if i == recent_epochs.len() - 1 { 63 } else { 0 },
                     }
                     .into(),

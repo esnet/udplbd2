@@ -75,6 +75,17 @@ service LoadBalancer {
 	rpc ListChildTokens (ListChildTokensRequest) returns (ListChildTokensReply) {};
 	// Revokes a token and all its children
 	rpc RevokeToken (RevokeTokenRequest) returns (RevokeTokenReply) {};
+
+	// Registers this load balancer as a receiver with an upstream control plane,
+	// enabling LB chaining. The local LB's data plane address is registered upstream
+	// with keepLbHeader = true. Aggregated SendState updates are sent periodically.
+	rpc ChainLoadBalancer (ChainLoadBalancerRequest) returns (ChainLoadBalancerReply) {};
+	// Removes a specific upstream chain by ID, deregistering from the upstream control plane.
+	rpc UnchainLoadBalancer (UnchainLoadBalancerRequest) returns (UnchainLoadBalancerReply) {};
+	// Returns the transitive upstream chain graph starting from this node, recursing to each
+	// upstream's control plane. Used by control planes to detect forwarding cycles before
+	// accepting new ChainLoadBalancer requests. Also useful for operators to visualize topology.
+	rpc GetChainGraph (GetChainGraphRequest) returns (GetChainGraphReply) {};
 }
 
 
@@ -480,3 +491,59 @@ message RevokeTokenRequest {
 }
 
 message RevokeTokenReply {}
+
+
+//
+// ChainLoadBalancer
+//
+message ChainLoadBalancerRequest {
+	string lbId = 1; // local reservation ID
+	string ejfatUri = 2; // EJFAT URI of the upstream control plane (including token and lb_id)
+	IpFamily ipFamily = 3; // IPV4 or IPV6 only (DUAL_STACK not allowed)
+	float weight = 4; // relative weight of this node for initial lb calendar
+	float minFactor = 5; // min slot factor (see Register)
+	float maxFactor = 6; // max slot factor (see Register)
+	repeated SlotRange slotDemands = 7; // slot ranges that should always be assigned to this node
+}
+message ChainLoadBalancerReply {
+	string chainId = 1; // database identifier for this upstream chain
+}
+
+//
+// GetChainGraph
+//
+message GetChainGraphRequest {
+	// lb_id of the LB reservation to start the traversal from.
+	// When called during cycle detection this is the upstream's lb_id (from the ejfatUri).
+	string lbId = 1;
+	// Globally-unique node identifiers already visited in this traversal.
+	// Format: "{grpc_host}:{grpc_port}/{lb_id}" — prefixing with the control plane's
+	// first gRPC listen address makes lb_ids unique across instances.
+	// Prevents infinite loops and serves as the cycle-detection sentinel:
+	// if an upstream's compound id matches any entry, cycleDetected is returned true.
+	repeated string visited = 2;
+}
+message ChainGraphEdge {
+	string upstreamLbId       = 1; // lb_id of the upstream LB reservation
+	string upstreamDataIpv4   = 2; // IPv4 data-plane address of the upstream LB (if available)
+	string upstreamDataIpv6   = 3; // IPv6 data-plane address of the upstream LB (if available)
+	string downstreamLbId     = 4; // lb_id of the downstream (local) LB reservation
+	string downstreamDataIpv4 = 5; // IPv4 data-plane address of the downstream LB (if available)
+	string downstreamDataIpv6 = 6; // IPv6 data-plane address of the downstream LB (if available)
+	string chainId            = 7; // local upstream_chain row id
+}
+message GetChainGraphReply {
+	repeated ChainGraphEdge edges = 1;
+	// True when an upstream's compound id matched a visited entry, meaning the
+	// initiating LB already exists upstream in this chain (cycle detected).
+	bool cycleDetected = 2;
+}
+
+//
+// UnchainLoadBalancer
+//
+message UnchainLoadBalancerRequest {
+	string lbId = 1; // local reservation ID
+	string chainId = 2; // upstream chain ID from ChainLoadBalancerReply
+}
+message UnchainLoadBalancerReply {}

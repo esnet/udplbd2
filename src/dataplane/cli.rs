@@ -150,6 +150,10 @@ pub struct SendArgs {
     /// Slot index to use in the LB header for slot-based routing.
     #[arg(long, short)]
     pub slot: Option<u16>,
+
+    /// Use LB protocol version 2 instead of the default version 3.
+    #[arg(long = "v2")]
+    pub v2: bool,
 }
 
 #[derive(Args, Debug)]
@@ -166,6 +170,9 @@ pub struct DoctorArgs {
     /// Expect packets to still contain LB headers.
     #[arg(long)]
     pub lb: bool,
+    /// Test LB chaining (reserves two LBs and chains them).
+    #[arg(long)]
+    pub chain: bool,
     /// Output results as JUnit XML instead of JSON.
     #[arg(long)]
     pub junit: bool,
@@ -340,57 +347,76 @@ impl DataplaneCli {
                     .to
                     .as_ref()
                     .map(|addr| addr.parse().expect("Invalid address:port format"));
-                send_file(
-                    args.file.clone(),
-                    target_addr,
-                    url.to_string(),
-                    0,
-                    args.slot,
-                )
-                .await?;
+                send_file(args.file.clone(), target_addr, url.to_string(), 0, args.slot, args.v2).await?;
             }
             DataplaneCommand::Doctor(args) => {
-                let addresses = if args.addresses.is_empty() {
-                    vec![default_address()?]
-                } else {
-                    args.addresses.clone()
-                };
-                let port = match args.port {
-                    Some(p) => p,
-                    None => find_open_udp_port().await?,
-                };
-                let results =
-                    doctor_multi(&url, addresses, port, args.mtu, args.lb).await;
-                let mut had_errors = false;
-                for (address, res) in results {
-                    match res {
+                if args.chain {
+                    let ip_addr: std::net::IpAddr = args
+                        .addresses
+                        .first()
+                        .expect("At least one address required for --chain")
+                        .parse()
+                        .expect("Invalid IP address");
+                    let port = match args.port {
+                        Some(p) => p,
+                        None => find_open_udp_port().await?,
+                    };
+                    match crate::dataplane::doctor::test_chain(
+                        &url, ip_addr, port, args.mtu, args.lb,
+                    )
+                    .await
+                    {
                         Ok(output) => {
-                            if !output.is_ok() {
-                                had_errors = true;
-                            }
-                            if args.junit {
-                                println!("{}", output.to_junit_xml());
-                            } else {
-                                println!("{output}");
-                            }
+                            println!(
+                                "{}",
+                                serde_json::to_string_pretty(&output).unwrap()
+                            );
                         }
-                        Err(e) => {
-                            had_errors = true;
-                            if args.junit {
-                                println!(
-                                    "{}",
-                                    crate::dataplane::doctor::DoctorOutput::error_xml(
-                                        &address, &e
-                                    )
-                                );
-                            } else {
-                                eprintln!("doctor error: {e}");
+                        Err(e) => eprintln!("chain doctor error: {e}"),
+                    }
+                } else {
+                    let addresses = if args.addresses.is_empty() {
+                        vec![default_address()?]
+                    } else {
+                        args.addresses.clone()
+                    };
+                    let port = match args.port {
+                        Some(p) => p,
+                        None => find_open_udp_port().await?,
+                    };
+                    let results =
+                        doctor_multi(&url, addresses, port, args.mtu, args.lb).await;
+                    let mut had_errors = false;
+                    for (address, res) in results {
+                        match res {
+                            Ok(output) => {
+                                if !output.is_ok() {
+                                    had_errors = true;
+                                }
+                                if args.junit {
+                                    println!("{}", output.to_junit_xml());
+                                } else {
+                                    println!("{output}");
+                                }
+                            }
+                            Err(e) => {
+                                had_errors = true;
+                                if args.junit {
+                                    println!(
+                                        "{}",
+                                        crate::dataplane::doctor::DoctorOutput::error_xml(
+                                            &address, &e
+                                        )
+                                    );
+                                } else {
+                                    eprintln!("doctor error: {e}");
+                                }
                             }
                         }
                     }
-                }
-                if had_errors {
-                    std::process::exit(1);
+                    if had_errors {
+                        std::process::exit(1);
+                    }
                 }
             }
             DataplaneCommand::Test(args) => {
@@ -512,6 +538,7 @@ pub async fn send_file(
     url: String,
     data_id: u16,
     slot: Option<u16>,
+    v2: bool,
 ) -> Result<()> {
     let mut buffer = Vec::new();
     if file_path == "-" {
@@ -525,6 +552,9 @@ pub async fn send_file(
         Some(addr) => {
             let socket = UdpSocket::bind("0.0.0.0:0").await?;
             let mut sender = Sender::from_data_socket(socket, addr, None).await?;
+            if v2 {
+                sender.lb_version = crate::dataplane::protocol::LBHeaderVersion::V2;
+            }
             match slot {
                 Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
                 None => sender.send_ts(&buffer, data_id).await,
@@ -532,6 +562,9 @@ pub async fn send_file(
         }
         None => {
             let mut sender = Sender::from_url(&url.parse().expect("bad URL"), None, false).await?;
+            if v2 {
+                sender.lb_version = crate::dataplane::protocol::LBHeaderVersion::V2;
+            }
             match slot {
                 Some(tick) => sender.send(&buffer, tick as u64, data_id).await,
                 None => sender.send_ts(&buffer, data_id).await,

@@ -2,16 +2,18 @@
 use crate::{
     metrics::INBOUND_GRPC,
     proto::loadbalancer::v1::{
-        load_balancer_server, AddSendersReply, AddSendersRequest, CreateTokenReply,
-        CreateTokenRequest, DeregisterReply, DeregisterRequest, ExtendReservationReply,
-        ExtendReservationRequest, FreeLoadBalancerReply, FreeLoadBalancerRequest,
-        GetLoadBalancerRequest, ListChildTokensReply, ListChildTokensRequest,
-        ListTokenPermissionsReply, ListTokenPermissionsRequest, LoadBalancerStatusReply,
-        LoadBalancerStatusRequest, OverviewReply, OverviewRequest, RegisterReply, RegisterRequest,
-        RemoveSendersReply, RemoveSendersRequest, ReserveLoadBalancerReply,
-        ReserveLoadBalancerRequest, ResetLoadBalancerReply, ResetLoadBalancerRequest,
-        RevokeTokenReply, RevokeTokenRequest, SendStateReply, SendStateRequest,
-        SetSlotDemandsReply, SetSlotDemandsRequest, TimeseriesRequest, TimeseriesResponse,
+        load_balancer_server, AddSendersReply, AddSendersRequest, ChainLoadBalancerReply,
+        ChainLoadBalancerRequest, CreateTokenReply, CreateTokenRequest, DeregisterReply,
+        DeregisterRequest, ExtendReservationReply, ExtendReservationRequest,
+        FreeLoadBalancerReply, FreeLoadBalancerRequest, GetLoadBalancerRequest,
+        ListChildTokensReply, ListChildTokensRequest, ListTokenPermissionsReply,
+        ListTokenPermissionsRequest, LoadBalancerStatusReply, LoadBalancerStatusRequest,
+        OverviewReply, OverviewRequest, RegisterReply, RegisterRequest, RemoveSendersReply,
+        RemoveSendersRequest, ReserveLoadBalancerReply, ReserveLoadBalancerRequest,
+        ResetLoadBalancerReply, ResetLoadBalancerRequest, RevokeTokenReply, RevokeTokenRequest,
+        SendStateReply, SendStateRequest, SetSlotDemandsReply, SetSlotDemandsRequest,
+        TimeseriesRequest, TimeseriesResponse, UnchainLoadBalancerReply,
+        UnchainLoadBalancerRequest, GetChainGraphRequest, GetChainGraphReply,
         VersionReply, VersionRequest,
     },
 };
@@ -169,6 +171,30 @@ impl load_balancer_server::LoadBalancer for LoadBalancerService {
     ) -> Result<Response<TimeseriesResponse>, Status> {
         INBOUND_GRPC.inc();
         self.handle_timeseries(request).await
+    }
+
+    async fn chain_load_balancer(
+        &self,
+        request: Request<ChainLoadBalancerRequest>,
+    ) -> Result<Response<ChainLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_chain_load_balancer(request).await
+    }
+
+    async fn unchain_load_balancer(
+        &self,
+        request: Request<UnchainLoadBalancerRequest>,
+    ) -> Result<Response<UnchainLoadBalancerReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_unchain_load_balancer(request).await
+    }
+
+    async fn get_chain_graph(
+        &self,
+        request: Request<GetChainGraphRequest>,
+    ) -> Result<Response<GetChainGraphReply>, Status> {
+        INBOUND_GRPC.inc();
+        self.handle_get_chain_graph(request).await
     }
 }
 

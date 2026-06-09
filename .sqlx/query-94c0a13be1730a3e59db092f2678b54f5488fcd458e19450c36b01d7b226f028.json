@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE reservation SET reserved_until = ?1 WHERE id = ?2 AND deleted_at IS NULL",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "94c0a13be1730a3e59db092f2678b54f5488fcd458e19450c36b01d7b226f028"
+}

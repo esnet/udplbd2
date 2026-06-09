@@ -1,9 +1,17 @@
 {
-    "strategy": "explicit",
     "sender": {
         "rate": 80,
         "event_count": 1000,
         "event_size": 25000
+    },
+    "chain": {
+        "nodes": {
+            "default": {
+                "uri_env": "EJFAT_URI",
+                "strategy": "explicit"
+            }
+        },
+        "edges": []
     },
     "receivers": [
         {

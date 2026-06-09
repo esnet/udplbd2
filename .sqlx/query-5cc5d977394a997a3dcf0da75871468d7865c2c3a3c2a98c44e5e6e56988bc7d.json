@@ -1,0 +1,20 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id FROM healthcheck_event\n            WHERE event_type = 'receiver_packet_stall'\n              AND session_id = ?1\n              AND resolved_at IS NULL\n            LIMIT 1\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "5cc5d977394a997a3dcf0da75871468d7865c2c3a3c2a98c44e5e6e56988bc7d"
+}

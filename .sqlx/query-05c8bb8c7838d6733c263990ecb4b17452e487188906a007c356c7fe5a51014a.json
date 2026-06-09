@@ -1,0 +1,92 @@
+{
+  "db_name": "SQLite",
+  "query": "\n            SELECT id, reservation_id, upstream_grpc_host, upstream_grpc_port,\n                upstream_tls_enabled, upstream_lb_id, upstream_ejfat_token,\n                upstream_session_token, upstream_session_id,\n                upstream_data_ipv4, upstream_data_ipv6, created_at, deleted_at\n            FROM upstream_chain\n            WHERE reservation_id = ?1 AND deleted_at IS NULL\n            ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Integer"
+      },
+      {
+        "name": "reservation_id",
+        "ordinal": 1,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_grpc_host",
+        "ordinal": 2,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_grpc_port",
+        "ordinal": 3,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_tls_enabled",
+        "ordinal": 4,
+        "type_info": "Integer"
+      },
+      {
+        "name": "upstream_lb_id",
+        "ordinal": 5,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_ejfat_token",
+        "ordinal": 6,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_session_token",
+        "ordinal": 7,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_session_id",
+        "ordinal": 8,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_data_ipv4",
+        "ordinal": 9,
+        "type_info": "Text"
+      },
+      {
+        "name": "upstream_data_ipv6",
+        "ordinal": 10,
+        "type_info": "Text"
+      },
+      {
+        "name": "created_at",
+        "ordinal": 11,
+        "type_info": "Float"
+      },
+      {
+        "name": "deleted_at",
+        "ordinal": 12,
+        "type_info": "Float"
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false,
+      false,
+      true,
+      false,
+      false,
+      true,
+      true,
+      false,
+      true
+    ]
+  },
+  "hash": "05c8bb8c7838d6733c263990ecb4b17452e487188906a007c356c7fe5a51014a"
+}

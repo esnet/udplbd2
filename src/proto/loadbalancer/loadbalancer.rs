@@ -740,6 +740,104 @@ pub struct RevokeTokenRequest {
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct RevokeTokenReply {}
+/// ChainLoadBalancer
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ChainLoadBalancerRequest {
+    /// local reservation ID
+    #[prost(string, tag = "1")]
+    pub lb_id: ::prost::alloc::string::String,
+    /// EJFAT URI of the upstream control plane (including token and lb_id)
+    #[prost(string, tag = "2")]
+    pub ejfat_uri: ::prost::alloc::string::String,
+    /// IPV4 or IPV6 only (DUAL_STACK not allowed)
+    #[prost(enumeration = "IpFamily", tag = "3")]
+    pub ip_family: i32,
+    /// relative weight of this node for initial lb calendar
+    #[prost(float, tag = "4")]
+    pub weight: f32,
+    /// min slot factor (see Register)
+    #[prost(float, tag = "5")]
+    pub min_factor: f32,
+    /// max slot factor (see Register)
+    #[prost(float, tag = "6")]
+    pub max_factor: f32,
+    /// slot ranges that should always be assigned to this node
+    #[prost(message, repeated, tag = "7")]
+    pub slot_demands: ::prost::alloc::vec::Vec<SlotRange>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChainLoadBalancerReply {
+    /// database identifier for this upstream chain
+    #[prost(string, tag = "1")]
+    pub chain_id: ::prost::alloc::string::String,
+}
+/// GetChainGraph
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetChainGraphRequest {
+    /// lb_id of the LB reservation to start the traversal from.
+    /// When called during cycle detection this is the upstream's lb_id (from the ejfatUri).
+    #[prost(string, tag = "1")]
+    pub lb_id: ::prost::alloc::string::String,
+    /// Globally-unique node identifiers already visited in this traversal.
+    /// Format: "{grpc_host}:{grpc_port}/{lb_id}" — prefixing with the control plane's
+    /// first gRPC listen address makes lb_ids unique across instances.
+    /// Prevents infinite loops and serves as the cycle-detection sentinel:
+    /// if an upstream's compound id matches any entry, cycleDetected is returned true.
+    #[prost(string, repeated, tag = "2")]
+    pub visited: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ChainGraphEdge {
+    /// lb_id of the upstream LB reservation
+    #[prost(string, tag = "1")]
+    pub upstream_lb_id: ::prost::alloc::string::String,
+    /// IPv4 data-plane address of the upstream LB (if available)
+    #[prost(string, tag = "2")]
+    pub upstream_data_ipv4: ::prost::alloc::string::String,
+    /// IPv6 data-plane address of the upstream LB (if available)
+    #[prost(string, tag = "3")]
+    pub upstream_data_ipv6: ::prost::alloc::string::String,
+    /// lb_id of the downstream (local) LB reservation
+    #[prost(string, tag = "4")]
+    pub downstream_lb_id: ::prost::alloc::string::String,
+    /// IPv4 data-plane address of the downstream LB (if available)
+    #[prost(string, tag = "5")]
+    pub downstream_data_ipv4: ::prost::alloc::string::String,
+    /// IPv6 data-plane address of the downstream LB (if available)
+    #[prost(string, tag = "6")]
+    pub downstream_data_ipv6: ::prost::alloc::string::String,
+    /// local upstream_chain row id
+    #[prost(string, tag = "7")]
+    pub chain_id: ::prost::alloc::string::String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetChainGraphReply {
+    #[prost(message, repeated, tag = "1")]
+    pub edges: ::prost::alloc::vec::Vec<ChainGraphEdge>,
+    /// True when an upstream's compound id matched a visited entry, meaning the
+    /// initiating LB already exists upstream in this chain (cycle detected).
+    #[prost(bool, tag = "2")]
+    pub cycle_detected: bool,
+}
+/// UnchainLoadBalancer
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnchainLoadBalancerRequest {
+    /// local reservation ID
+    #[prost(string, tag = "1")]
+    pub lb_id: ::prost::alloc::string::String,
+    /// upstream chain ID from ChainLoadBalancerReply
+    #[prost(string, tag = "2")]
+    pub chain_id: ::prost::alloc::string::String,
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct UnchainLoadBalancerReply {}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
 #[repr(i32)]
@@ -1406,6 +1504,89 @@ pub mod load_balancer_client {
                 .insert(GrpcMethod::new("loadbalancer.LoadBalancer", "RevokeToken"));
             self.inner.unary(req, path, codec).await
         }
+        /// Registers this load balancer as a receiver with an upstream control plane,
+        /// enabling LB chaining. The local LB's data plane address is registered upstream
+        /// with keepLbHeader = true. Aggregated SendState updates are sent periodically.
+        pub async fn chain_load_balancer(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ChainLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ChainLoadBalancerReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/loadbalancer.LoadBalancer/ChainLoadBalancer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("loadbalancer.LoadBalancer", "ChainLoadBalancer"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Removes a specific upstream chain by ID, deregistering from the upstream control plane.
+        pub async fn unchain_load_balancer(
+            &mut self,
+            request: impl tonic::IntoRequest<super::UnchainLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnchainLoadBalancerReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/loadbalancer.LoadBalancer/UnchainLoadBalancer",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("loadbalancer.LoadBalancer", "UnchainLoadBalancer"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Returns the transitive upstream chain graph starting from this node, recursing to each
+        /// upstream's control plane. Used by control planes to detect forwarding cycles before
+        /// accepting new ChainLoadBalancer requests. Also useful for operators to visualize topology.
+        pub async fn get_chain_graph(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetChainGraphRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetChainGraphReply>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/loadbalancer.LoadBalancer/GetChainGraph",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(GrpcMethod::new("loadbalancer.LoadBalancer", "GetChainGraph"));
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -1556,6 +1737,34 @@ pub mod load_balancer_server {
             request: tonic::Request<super::RevokeTokenRequest>,
         ) -> std::result::Result<
             tonic::Response<super::RevokeTokenReply>,
+            tonic::Status,
+        >;
+        /// Registers this load balancer as a receiver with an upstream control plane,
+        /// enabling LB chaining. The local LB's data plane address is registered upstream
+        /// with keepLbHeader = true. Aggregated SendState updates are sent periodically.
+        async fn chain_load_balancer(
+            &self,
+            request: tonic::Request<super::ChainLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ChainLoadBalancerReply>,
+            tonic::Status,
+        >;
+        /// Removes a specific upstream chain by ID, deregistering from the upstream control plane.
+        async fn unchain_load_balancer(
+            &self,
+            request: tonic::Request<super::UnchainLoadBalancerRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::UnchainLoadBalancerReply>,
+            tonic::Status,
+        >;
+        /// Returns the transitive upstream chain graph starting from this node, recursing to each
+        /// upstream's control plane. Used by control planes to detect forwarding cycles before
+        /// accepting new ChainLoadBalancer requests. Also useful for operators to visualize topology.
+        async fn get_chain_graph(
+            &self,
+            request: tonic::Request<super::GetChainGraphRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetChainGraphReply>,
             tonic::Status,
         >;
     }
@@ -2484,6 +2693,143 @@ pub mod load_balancer_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = RevokeTokenSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/loadbalancer.LoadBalancer/ChainLoadBalancer" => {
+                    #[allow(non_camel_case_types)]
+                    struct ChainLoadBalancerSvc<T: LoadBalancer>(pub Arc<T>);
+                    impl<
+                        T: LoadBalancer,
+                    > tonic::server::UnaryService<super::ChainLoadBalancerRequest>
+                    for ChainLoadBalancerSvc<T> {
+                        type Response = super::ChainLoadBalancerReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ChainLoadBalancerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as LoadBalancer>::chain_load_balancer(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ChainLoadBalancerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/loadbalancer.LoadBalancer/UnchainLoadBalancer" => {
+                    #[allow(non_camel_case_types)]
+                    struct UnchainLoadBalancerSvc<T: LoadBalancer>(pub Arc<T>);
+                    impl<
+                        T: LoadBalancer,
+                    > tonic::server::UnaryService<super::UnchainLoadBalancerRequest>
+                    for UnchainLoadBalancerSvc<T> {
+                        type Response = super::UnchainLoadBalancerReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::UnchainLoadBalancerRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as LoadBalancer>::unchain_load_balancer(&inner, request)
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = UnchainLoadBalancerSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/loadbalancer.LoadBalancer/GetChainGraph" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetChainGraphSvc<T: LoadBalancer>(pub Arc<T>);
+                    impl<
+                        T: LoadBalancer,
+                    > tonic::server::UnaryService<super::GetChainGraphRequest>
+                    for GetChainGraphSvc<T> {
+                        type Response = super::GetChainGraphReply;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetChainGraphRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as LoadBalancer>::get_chain_graph(&inner, request).await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetChainGraphSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
