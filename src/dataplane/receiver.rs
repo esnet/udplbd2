@@ -81,7 +81,7 @@ impl ReassemblyBuffer {
         self.received_packets
             .iter()
             .enumerate()
-            .filter(|(_, &received)| !received)
+            .filter(|&(_, &received)| !received)
             .map(|(i, _)| i)
             .collect()
     }

@@ -498,7 +498,7 @@ impl LoadBalancerDB {
             .collect();
 
         Ok(Epoch {
-            id: epoch_record.id,
+            id: epoch_record.id.ok_or(Error::Parse("missing epoch id".to_string()))?,
             reservation_id: epoch_record.reservation_id,
             boundary_event: epoch_record.boundary_event as u64,
             predicted_at: DateTime::<Utc>::from_timestamp_millis(epoch_record.predicted_at)

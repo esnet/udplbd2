@@ -340,7 +340,7 @@ impl LoadBalancerDB {
         let op_start = Instant::now();
 
         // STEP 1: Rotate / re‐use archive if enabled, and grab the path string.
-        let (archive_path_opt, do_archive) = if let Some(ref archive_mutex) = &self.archive_manager
+        let (archive_path_opt, do_archive) = if let Some(archive_mutex) = &self.archive_manager
         {
             let mut mgr = archive_mutex.lock().await;
             let _ = mgr.get_or_rotate_and_get_pool(Utc::now()).await?;
@@ -400,7 +400,7 @@ impl LoadBalancerDB {
         };
 
         // STEP 3: If archiving is enabled, do everything in one write_pool transaction.
-        if let (Some(ref archive_path), true) = (&archive_path_opt, do_archive) {
+        if let (Some(archive_path), true) = (&archive_path_opt, do_archive) {
             // 3a) DETACH "archive" unconditionally, ignoring any error (it might not be attached).
             let _ = sqlx::query("DETACH DATABASE archive")
                 .execute(&self.write_pool)
@@ -417,7 +417,7 @@ impl LoadBalancerDB {
 
             // 3d) ATTACH the archive DB under alias "archive"
             let attach_sql = format!("ATTACH DATABASE '{archive_path}' AS archive");
-            sqlx::query(&attach_sql)
+            sqlx::query(sqlx::AssertSqlSafe(attach_sql))
                 .execute(&mut *tx)
                 .await
                 .map_err(Error::Database)?;
@@ -554,7 +554,7 @@ async fn delete_old_rows_by_column(
     older_than_ms: i64,
 ) -> Result<u64> {
     let sql = format!("DELETE FROM `{table}` WHERE `{column}` < ?");
-    let result = sqlx::query(&sql)
+    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(older_than_ms)
         .execute(pool)
         .await
@@ -576,14 +576,14 @@ async fn archive_old_rows_by_column(
         "INSERT INTO archive.`{table}` ({columns_csv})
          SELECT {columns_csv} FROM main.`{table}` WHERE `{column}` < ?"
     );
-    sqlx::query(&insert_sql)
+    sqlx::query(sqlx::AssertSqlSafe(insert_sql))
         .bind(older_than_ms)
         .execute(&mut *tx)
         .await
         .map_err(Error::Database)?;
 
     let delete_sql = format!("DELETE FROM `{table}` WHERE `{column}` < ?");
-    let result = sqlx::query(&delete_sql)
+    let result = sqlx::query(sqlx::AssertSqlSafe(delete_sql))
         .bind(older_than_ms)
         .execute(&mut *tx)
         .await
@@ -615,7 +615,7 @@ async fn prune_keeping_recent(
              )
          )"
     );
-    let result = sqlx::query(&sql)
+    let result = sqlx::query(sqlx::AssertSqlSafe(sql))
         .bind(older_than_ms)
         .bind(keep_n)
         .execute(pool)
@@ -655,7 +655,7 @@ async fn archive_prune_keeping_recent(
         "INSERT INTO archive.`{table}` ({columns_csv})
          SELECT {columns_csv} FROM `{table}` WHERE {predicate}"
     );
-    sqlx::query(&insert_sql)
+    sqlx::query(sqlx::AssertSqlSafe(insert_sql))
         .bind(older_than_ms)
         .bind(keep_n)
         .execute(&mut *tx)
@@ -663,7 +663,7 @@ async fn archive_prune_keeping_recent(
         .map_err(Error::Database)?;
 
     let delete_sql = format!("DELETE FROM `{table}` WHERE {predicate}");
-    let result = sqlx::query(&delete_sql)
+    let result = sqlx::query(sqlx::AssertSqlSafe(delete_sql))
         .bind(older_than_ms)
         .bind(keep_n)
         .execute(&mut *tx)
@@ -727,7 +727,7 @@ impl TableMetadataCache {
         }
 
         let pragma_sql = format!("PRAGMA table_info(`{table}`)");
-        let rows = sqlx::query(&pragma_sql)
+        let rows = sqlx::query(sqlx::AssertSqlSafe(pragma_sql))
             .fetch_all(pool)
             .await
             .map_err(Error::Database)?;

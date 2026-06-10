@@ -548,7 +548,7 @@ impl LoadBalancerDB {
              ORDER BY sampled_at ASC",
             column_name
         );
-        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
+        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(sqlx::AssertSqlSafe(query))
             .bind(since_ms)
             .fetch_all(&self.read_pool)
             .await?;
@@ -591,7 +591,7 @@ impl LoadBalancerDB {
              ORDER BY sampled_at ASC",
             metric
         );
-        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
+        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(sqlx::AssertSqlSafe(query))
             .bind(reservation_id)
             .bind(since_ms)
             .fetch_all(&self.read_pool)
@@ -628,7 +628,7 @@ impl LoadBalancerDB {
              ORDER BY sampled_at ASC",
             metric
         );
-        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
+        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(sqlx::AssertSqlSafe(query))
             .bind(session_id)
             .bind(since_ms)
             .fetch_all(&self.read_pool)
@@ -684,7 +684,7 @@ impl LoadBalancerDB {
              WHERE session_id = ? AND timestamp >= ?
              ORDER BY timestamp ASC"
         );
-        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
+        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(sqlx::AssertSqlSafe(query))
             .bind(session_id)
             .bind(since_ms)
             .fetch_all(&self.read_pool)
@@ -729,7 +729,7 @@ impl LoadBalancerDB {
              WHERE reservation_id = ? AND local_timestamp >= ?
              ORDER BY local_timestamp ASC"
         );
-        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(&query)
+        let samples = sqlx::query_as::<sqlx::Sqlite, FloatSample>(sqlx::AssertSqlSafe(query))
             .bind(reservation_id)
             .bind(since_ms)
             .fetch_all(&self.read_pool)
@@ -1071,10 +1071,7 @@ impl LoadBalancerDB {
                 let value = match m {
                     "fill_percent" => row.fill_percent as f32,
                     "control_signal" => row.control_signal as f32,
-                    "is_ready"
-                        if row.is_ready => {
-                            1.0
-                        }
+                    "is_ready" if row.is_ready => 1.0,
                     "total_events_recv" => row.total_events_recv as f32,
                     "total_events_reassembled" => row.total_events_reassembled as f32,
                     "total_events_reassembly_err" => row.total_events_reassembly_err as f32,

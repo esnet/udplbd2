@@ -153,7 +153,9 @@ impl LoadBalancerDB {
             )
             .fetch_one(&mut *tx)
             .await?;
-            state_record.id
+            state_record
+                .id
+                .ok_or(Error::Parse("missing session_state id".to_string()))?
         };
 
         // Update session.latest_session_state_id and is_ready in one query
@@ -319,7 +321,7 @@ impl LoadBalancerDB {
             // Convert to (Some(session_id), slot_index, slot_length)
             let slot_demands_with_id: Vec<(Option<i64>, i32, u32)> = slot_demands
                 .into_iter()
-                .map(|(slot_index, slot_length)| (Some(record.id), slot_index, slot_length))
+                .map(|(slot_index, slot_length)| (record.id, slot_index, slot_length))
                 .collect();
             // Use resolve_slot_demands to check for conflicts and assign index -1
             let resolved = self

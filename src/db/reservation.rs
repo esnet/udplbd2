@@ -36,7 +36,7 @@ impl LoadBalancerDB {
         .await?;
 
         Ok(Reservation {
-            id: record.id,
+            id: record.id.ok_or(Error::Parse("missing reservation id".to_string()))?,
             loadbalancer_id: record.loadbalancer_id,
             name: record.name,
             reserved_until: DateTime::<Utc>::from_timestamp_millis(record.reserved_until)

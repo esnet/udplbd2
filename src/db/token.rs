@@ -261,10 +261,7 @@ impl LoadBalancerDB {
     }
 
     /// Recursively list all descendant tokens of the given parent token ID.
-    pub async fn list_descendant_tokens_by_id(
-        &self,
-        parent_id: i64,
-    ) -> Result<Vec<TokenDetails>> {
+    pub async fn list_descendant_tokens_by_id(&self, parent_id: i64) -> Result<Vec<TokenDetails>> {
         let descendant_tokens = sqlx::query!(
             r#"
             WITH RECURSIVE token_tree AS (
@@ -568,7 +565,7 @@ impl LoadBalancerDB {
         .map_err(Error::Database)?
         .count;
 
-        if remaining == 0 {
+        if remaining == Some(0) {
             // If no permissions remain in any table, delete the token
             sqlx::query!("DELETE FROM token WHERE id = ?1", token_id)
                 .execute(&mut *tx)
