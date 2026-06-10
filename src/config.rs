@@ -465,6 +465,26 @@ impl Config {
             }
         }
 
+        // Validate that no two instances share the same IP address
+        let mut seen_ipv4 = std::collections::HashMap::new();
+        let mut seen_ipv6 = std::collections::HashMap::new();
+        for (i, inst) in self.lb.instances.iter().enumerate() {
+            if let Some(addr) = inst.ipv4 {
+                if let Some(j) = seen_ipv4.insert(addr, i) {
+                    return Err(ConfigError::Invalid(format!(
+                        "duplicate IPv4 address {addr} in LoadBalancer instances at indices {j} and {i}"
+                    )));
+                }
+            }
+            if let Some(addr) = inst.ipv6 {
+                if let Some(j) = seen_ipv6.insert(addr, i) {
+                    return Err(ConfigError::Invalid(format!(
+                        "duplicate IPv6 address {addr} in LoadBalancer instances at indices {j} and {i}"
+                    )));
+                }
+            }
+        }
+
         // Validate durations
         if let Err(e) = parse_duration(&self.controller.duration) {
             return Err(ConfigError::Invalid(format!(
@@ -708,5 +728,111 @@ rest:
         assert_eq!(merged.server.listen[0].to_string(), "127.0.0.1:1234");
         // controller.duration should be from config2
         assert_eq!(merged.controller.duration, "2s");
+    }
+
+    #[test]
+    fn test_duplicate_ipv4_rejected() {
+        let yaml = r#"
+lb:
+  mac_unicast: "00:00:00:00:00:01"
+  instances:
+    - event_number_port: 1000
+      ipv4: "10.0.0.1"
+    - event_number_port: 2000
+      ipv4: "10.0.0.1"
+database:
+  file: "/tmp/test.db"
+controller:
+  duration: "1s"
+  offset: "800ms"
+server:
+  listen: ["127.0.0.1:1234"]
+  auth_token: "tok"
+  tls:
+    enable: false
+smartnic: []
+rest:
+  enable: true
+log:
+  level: "info"
+"#;
+        let result = Config::from_yaml_str(yaml);
+        assert!(
+            result.is_err(),
+            "expected error for duplicate IPv4 address"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("duplicate IPv4 address"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_duplicate_ipv6_rejected() {
+        let yaml = r#"
+lb:
+  mac_unicast: "00:00:00:00:00:01"
+  instances:
+    - event_number_port: 1000
+      ipv6: "fd00::1"
+    - event_number_port: 2000
+      ipv6: "fd00::1"
+database:
+  file: "/tmp/test.db"
+controller:
+  duration: "1s"
+  offset: "800ms"
+server:
+  listen: ["127.0.0.1:1234"]
+  auth_token: "tok"
+  tls:
+    enable: false
+smartnic: []
+rest:
+  enable: true
+log:
+  level: "info"
+"#;
+        let result = Config::from_yaml_str(yaml);
+        assert!(
+            result.is_err(),
+            "expected error for duplicate IPv6 address"
+        );
+        let msg = result.unwrap_err().to_string();
+        assert!(
+            msg.contains("duplicate IPv6 address"),
+            "unexpected error message: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_distinct_ips_accepted() {
+        let yaml = r#"
+lb:
+  mac_unicast: "00:00:00:00:00:01"
+  instances:
+    - event_number_port: 1000
+      ipv4: "10.0.0.1"
+    - event_number_port: 2000
+      ipv4: "10.0.0.2"
+database:
+  file: "/tmp/test.db"
+controller:
+  duration: "1s"
+  offset: "800ms"
+server:
+  listen: ["127.0.0.1:1234"]
+  auth_token: "tok"
+  tls:
+    enable: false
+smartnic: []
+rest:
+  enable: true
+log:
+  level: "info"
+"#;
+        let result = Config::from_yaml_str(yaml);
+        assert!(result.is_ok(), "expected distinct IPs to be accepted");
     }
 }
