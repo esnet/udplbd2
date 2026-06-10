@@ -28,20 +28,38 @@ pub mod receiver {
             let socket = UdpSocket::bind(("0.0.0.0", port)).await?;
             let keep_lb_header = offset > 0;
 
-            let reg = client
-                .register(
-                    name.into(),
-                    weight,
-                    ip_address.clone(),
-                    port,
-                    PortRange::PortRange1,
-                    min_factor,
-                    max_factor,
-                    keep_lb_header,
-                    slot_demands,
-                )
-                .await?
-                .into_inner();
+            // Retry registration to handle the case where the reservation may
+            // not yet be committed when the receiver starts (e.g. timeline race
+            // in turmoil simulations where UDPHostReady fires before the
+            // ReserveLoadBalancer gRPC call has fully committed).
+            let mut reg = None;
+            for attempt in 0..10u32 {
+                match client
+                    .register(
+                        name.into(),
+                        weight,
+                        ip_address.clone(),
+                        port,
+                        PortRange::PortRange1,
+                        min_factor,
+                        max_factor,
+                        keep_lb_header,
+                        slot_demands.clone(),
+                    )
+                    .await
+                {
+                    Ok(response) => {
+                        reg = Some(response.into_inner());
+                        break;
+                    }
+                    Err(e) if attempt < 9 => {
+                        tracing::warn!("register attempt {} failed, retrying: {}", attempt + 1, e);
+                        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                    }
+                    Err(e) => return Err(e.into()),
+                }
+            }
+            let reg = reg.expect("register should have succeeded after retries");
 
             let stats = Arc::new(RwLock::new(ReassemblyStats::default()));
             let stats_clone = stats.clone();
@@ -123,8 +141,8 @@ pub mod tester {
     use serde::{Deserialize, Serialize};
     use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
     use std::sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     };
     use std::time::Duration;
     use tokio::sync::Mutex;
@@ -132,7 +150,7 @@ pub mod tester {
     use tonic::transport::Server;
     use tracing::debug;
     use turmoil::lookup;
-    use turmoil::{net::TcpListener, Builder};
+    use turmoil::{Builder, net::TcpListener};
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Configuration types for multiple timelines.
@@ -647,8 +665,8 @@ pub mod connector {
 
     type Fut = Pin<Box<dyn Future<Output = Result<TokioIo<TcpStream>, std::io::Error>> + Send>>;
 
-    pub fn connector(
-    ) -> impl Service<Uri, Response = TokioIo<TcpStream>, Error = std::io::Error, Future = Fut> + Clone
+    pub fn connector()
+    -> impl Service<Uri, Response = TokioIo<TcpStream>, Error = std::io::Error, Future = Fut> + Clone
     {
         tower::service_fn(|uri: Uri| {
             trace!("connector attempting connection to {:?}", uri);
@@ -663,7 +681,7 @@ pub mod connector {
 
 #[cfg(test)]
 pub mod test {
-    use super::tester::{run_turmoil_test, TurmoilConfig};
+    use super::tester::{TurmoilConfig, run_turmoil_test};
     use crate::dataplane::meta_events::MetaEventManager;
 
     #[test]

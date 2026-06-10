@@ -280,7 +280,9 @@ where
             serde::de::Error::custom(format!("Invalid LB IP address '{lb_addr_str}': {e}"))
         })?;
         let local_addr: SocketAddr = local_addr_str.parse().map_err(|e| {
-            serde::de::Error::custom(format!("Invalid local socket address '{local_addr_str}': {e}"))
+            serde::de::Error::custom(format!(
+                "Invalid local socket address '{local_addr_str}': {e}"
+            ))
         })?;
         result.insert(lb_addr, local_addr);
     }
@@ -298,7 +300,7 @@ impl Config {
             .map(|i| LoadBalancerInstanceConfig {
                 ipv4: Some(format!("192.0.2.{}", i).parse().unwrap()),
                 ipv6: Some(format!("2001:db8::{}", i).parse().unwrap()),
-                event_number_port: 19524,
+                event_number_port: 19531 + i,
             })
             .collect();
 
@@ -757,10 +759,7 @@ log:
   level: "info"
 "#;
         let result = Config::from_yaml_str(yaml);
-        assert!(
-            result.is_err(),
-            "expected error for duplicate IPv4 address"
-        );
+        assert!(result.is_err(), "expected error for duplicate IPv4 address");
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("duplicate IPv4 address"),
@@ -795,10 +794,7 @@ log:
   level: "info"
 "#;
         let result = Config::from_yaml_str(yaml);
-        assert!(
-            result.is_err(),
-            "expected error for duplicate IPv6 address"
-        );
+        assert!(result.is_err(), "expected error for duplicate IPv6 address");
         let msg = result.unwrap_err().to_string();
         assert!(
             msg.contains("duplicate IPv6 address"),
