@@ -14,6 +14,7 @@ stages:
   - push
   - deploy
   - doctor
+  - pages
 
 include:
   - project: "security/container-scanning"
@@ -53,15 +54,20 @@ build_udplbd:
       - target/x86_64-unknown-linux-musl/release/udplbd
     expire_in: 3 month
 
-build_docs:
-  stage: build
+pages:
+  stage: pages
   extends: .build_environment
   script:
+    - cargo install mdbook
+    - mdbook build docs
     - cargo doc --no-deps
-    - mv target/doc public
+    - mv docs/book public
+    - mv target/doc public/api
   artifacts:
     paths:
       - public
+  rules:
+    - if: $CI_COMMIT_BRANCH == $MAIN_BRANCH
 
 build_container:
   stage: build
@@ -153,22 +159,27 @@ doctor_node4_cicd9:
   after_script:
     - |
       # Extract the JSON string value of "doctor.stdout" and unescape it into doctor.xml.
-      # The line looks like:  "doctor.stdout": "<?xml ...\"...\n..."
-      # awk strips the outer quotes then replaces \" with " and \n with newline.
+      # The line looks like:  "doctor.stdout": "<?xml ...\\"...\\n..."
+      # Ansible double-escapes the JSON: quotes become \\" and newlines become \\n.
+      # awk strips the outer quotes then replaces \\" with " and \\n with newline.
       awk '
         /"doctor\.stdout"/ {
           # Find the opening quote of the value
           sub(/^[^"]*"doctor\.stdout":[[:space:]]*"/, "")
           # Strip the trailing closing quote
           sub(/"[[:space:]]*$/, "")
-          # Unescape \" -> " and \n -> newline
-          gsub(/\\"/, "\"")
-          gsub(/\\n/, "\n")
+          # Unescape \\" -> " and \\n -> newline
+          gsub(/\\\\"/, "\"")
+          gsub(/\\\\n/, "\n")
           print
           found = 1
         }
         END { if (!found) { print "ERROR: doctor.stdout not found in stdout.txt" > "/dev/stderr"; exit 1 } }
       ' stdout.txt > doctor.xml
   artifacts:
+    paths:
+      - doctor.xml
+      - stdout.txt
+    when: always
     reports:
       junit: doctor.xml
