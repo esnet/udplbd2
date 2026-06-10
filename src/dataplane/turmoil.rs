@@ -54,16 +54,13 @@ pub mod receiver {
             )));
             let reassembler_clone = reassembler.clone();
 
-            let listen_task_handle = tokio::spawn(async move {
-                listen_and_reassemble_with_offset(
-                    socket,
-                    tx,
-                    offset,
-                    reassembler_clone,
-                    stats_clone,
-                )
-                .await;
-            });
+            let listen_task_handle = listen_and_reassemble_with_offset(
+                socket,
+                tx,
+                offset,
+                reassembler_clone,
+                stats_clone,
+            );
 
             let mut receiver = Self {
                 client: client.clone(),

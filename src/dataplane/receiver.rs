@@ -15,7 +15,7 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::error::TrySendError;
 use tokio::sync::{Mutex, RwLock};
 use tokio::time::timeout;
-use tracing::warn;
+use tracing::{debug, warn};
 use zerocopy::FromBytes;
 
 use std::collections::HashMap;
@@ -173,8 +173,9 @@ impl Reassembler {
         let length = reassembly_packet.header.length.get() as usize;
 
         let if_new_mem_required = RE_OVERHEAD + length;
+        let is_new_event = !self.buffers.contains_key(&(tick, data_id));
         let mut memory_required = 0;
-        if !self.buffers.contains_key(&(tick, data_id)) {
+        if is_new_event {
             memory_required = if_new_mem_required;
         }
 
@@ -184,6 +185,11 @@ impl Reassembler {
             if self.total_memory_usage + memory_required > self.max_memory {
                 return Err(ReassemblyError::MaxMemoryLimitReached);
             }
+        }
+
+        if is_new_event {
+            let mut stats = stats.write().await;
+            stats.total_events_recv += 1;
         }
 
         let reassembly_buffer = self
@@ -258,13 +264,13 @@ impl Reassembler {
     }
 }
 
-pub async fn listen_and_reassemble_with_offset(
+pub fn listen_and_reassemble_with_offset(
     socket: UdpSocket,
     tx: mpsc::Sender<EjfatEvent>,
     header_offset: usize,
     reassembler: Arc<Mutex<Reassembler>>,
-    stats: Arc<RwLock<ReassemblyStats>>, // Accept stats as a parameter
-) {
+    stats: Arc<RwLock<ReassemblyStats>>,
+) -> tokio::task::JoinHandle<()> {
     let mut buffer = vec![0; 65536];
     let stats_clone = stats.clone();
     let tx_clone = tx.clone();
@@ -287,12 +293,11 @@ pub async fn listen_and_reassemble_with_offset(
                 Ok(Some(event)) => {
                     let tick = event.tick;
                     let mut stats = stats_clone.write().await;
-                    stats.total_events_recv += 1;
+                    stats.total_events_reassembled += 1;
                     match tx_clone.try_send(event) {
                         Err(TrySendError::Closed(_)) => {
-                            panic!(
-                                "ejfat::receiver::listen_and_reassemble_with_offset channel closed"
-                            )
+                            debug!("receiver channel closed, shutting down listener");
+                            break;
                         }
                         Err(TrySendError::Full(_)) => {
                             stats.total_event_enqueue_err += 1;
@@ -307,11 +312,14 @@ pub async fn listen_and_reassemble_with_offset(
                 }
                 Ok(None) => {}
                 Err(err) => {
+                    let mut stats = stats_clone.write().await;
+                    stats.total_events_reassembly_err += 1;
+                    drop(stats);
                     warn!("{}", err);
                 }
             }
         }
-    });
+    })
 }
 
 pub async fn listen_and_reassemble(
@@ -321,14 +329,14 @@ pub async fn listen_and_reassemble(
     max_memory: usize,
     meta_event_context: Option<MetaEventContext>,
     stats: Arc<RwLock<ReassemblyStats>>, // Accept stats as a parameter
-) {
+) -> tokio::task::JoinHandle<()> {
     // Create the reassembler and wrap in Arc<Mutex<>>
     let reassembler = Arc::new(Mutex::new(Reassembler::new(
         max_memory,
         mtu,
         meta_event_context,
     )));
-    listen_and_reassemble_with_offset(socket, tx, 0, reassembler, stats).await
+    listen_and_reassemble_with_offset(socket, tx, 0, reassembler, stats)
 }
 
 pub struct PIDController {
@@ -476,10 +484,8 @@ impl Receiver {
         )));
 
         let reassembler_clone = reassembler.clone();
-        let listen_task_handle = tokio::spawn(async move {
-            listen_and_reassemble_with_offset(socket, tx, offset, reassembler_clone, stats_clone)
-                .await;
-        });
+        let listen_task_handle =
+            listen_and_reassemble_with_offset(socket, tx, offset, reassembler_clone, stats_clone);
 
         let mut receiver = Self {
             client: client.clone(),
@@ -564,8 +570,8 @@ impl Receiver {
     }
 
     pub fn cancel_tasks(&mut self) {
-        if let Some(listen_task) = self.listen_task.take() {
-            listen_task.abort();
+        if let Some(udp_task) = self.listen_task.take() {
+            udp_task.abort();
         }
         if let Some(pid_task) = self.pid_task.take() {
             pid_task.abort();

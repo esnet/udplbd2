@@ -152,17 +152,13 @@ doctor_node4_cicd9:
     - if: $CI_COMMIT_BRANCH == "develop"
   after_script:
     - |
-      python3 <<'PY'
-      import re
-      with open("stdout.txt") as f:
-          txt = f.read()
-      m = re.search(r'"doctor\.stdout":\s*"(.*)"\s*\n\}', txt, re.DOTALL)
-      if not m:
-          raise SystemExit("doctor.stdout not found in stdout.txt")
-      xml = m.group(1).encode('utf-8').decode('unicode_escape').encode('utf-8').decode('unicode_escape')
-      with open("doctor.xml", "w") as f:
-          f.write(xml)
-      PY
+      # Extract the JSON string value of "doctor.stdout" and unescape it into doctor.xml
+      raw=$(sed -n 's/.*"doctor\.stdout":[[:space:]]*"\(.*\)"[[:space:]]*$/\1/p' stdout.txt)
+      if [ -z "$raw" ]; then
+        echo "ERROR: doctor.stdout not found in stdout.txt" >&2
+        exit 1
+      fi
+      printf '%b' "$(printf '%s' "$raw" | sed 's/\\n/\n/g; s/\\t/\t/g; s/\\"/"/g; s/\\\\/\\/g')" > doctor.xml
   artifacts:
     reports:
       junit: doctor.xml

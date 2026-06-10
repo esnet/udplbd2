@@ -39,6 +39,10 @@ pub struct DynamicStrategyOutput {
     pub split_event_keys: Vec<(u64, u16)>,
     pub overview_found: bool,
     pub overview_errors: Vec<String>,
+    /// total_events_recv reported by all workers for our LB in Overview
+    pub overview_total_events_recv: i64,
+    /// total_events_reassembled reported by all workers for our LB in Overview
+    pub overview_total_events_reassembled: i64,
     pub remove_add_after_remove: usize,
     pub remove_add_duration_ms: u128,
     pub remove_add_sender_ok: bool,
@@ -196,7 +200,19 @@ impl DynamicStrategyOutput {
         cases.push_str(&junit_testcase(&classname, "distribution", None));
 
         // split events
-        cases.push_str(&junit_testcase(&classname, "split_events", None));
+        if self.split_event_count == 0 {
+            cases.push_str(&junit_testcase(&classname, "split_events", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "split_events",
+                Some(&format!(
+                    "{} split event(s) detected: {:?}",
+                    self.split_event_count, self.split_event_keys
+                )),
+            ));
+        }
 
         // remove/add sender
         if self.remove_add_sender_ok {
@@ -223,6 +239,21 @@ impl DynamicStrategyOutput {
             cases.push_str(&junit_testcase(&classname, "overview", Some(&msg)));
         }
 
+        // receiver stats from overview
+        if self.overview_total_events_reassembled > 0 {
+            cases.push_str(&junit_testcase(&classname, "receiver_stats", None));
+        } else {
+            failures += 1;
+            cases.push_str(&junit_testcase(
+                &classname,
+                "receiver_stats",
+                Some(&format!(
+                    "overview reported zero reassembled events (recv={}, reassembled={})",
+                    self.overview_total_events_recv, self.overview_total_events_reassembled
+                )),
+            ));
+        }
+
         // deregister
         if self.deregister_ok {
             cases.push_str(&junit_testcase(&classname, "deregister", None));
@@ -241,7 +272,7 @@ impl DynamicStrategyOutput {
             cases.push_str(&junit_testcase(&classname, "cleanup", Some(err)));
         }
 
-        let tests = 9usize.saturating_add(self.errors.len());
+        let tests = 10usize.saturating_add(self.errors.len());
         format!(
             "  <testsuite name=\"dynamic\" tests=\"{tests}\" failures=\"{failures}\" errors=\"0\">\n{cases}  </testsuite>\n"
         )
@@ -316,6 +347,8 @@ impl DynamicStrategyOutput {
             && self.deregister_ok
             && self.remove_add_sender_ok
             && self.overview_found
+            && self.split_event_count == 0
+            && self.overview_total_events_reassembled > 0
     }
 }
 
@@ -584,6 +617,8 @@ async fn test_dynamic_strategy(
         .iter()
         .find(|lb| lb.reservation.as_ref().unwrap().lb_id == lb_id);
     let mut overview_found = false;
+    let mut overview_total_events_recv: i64 = 0;
+    let mut overview_total_events_reassembled: i64 = 0;
     if let Some(lb) = our_lb {
         overview_found = true;
         if lb.name != "ejfat-doctor" {
@@ -615,13 +650,19 @@ async fn test_dynamic_strategy(
         if status.expires_at.is_none() {
             overview_errors.push("expiration time is missing".to_string());
         }
+        for worker in &status.workers {
+            overview_total_events_recv += worker.total_events_recv;
+            overview_total_events_reassembled += worker.total_events_reassembled;
+        }
     } else {
         overview_errors.push("our lb not found in overview".to_string());
     }
     tracing::info!(
-        "✓ Overview test: found={}, errors={}",
+        "✓ Overview test: found={}, errors={}, events_recv={}, events_reassembled={}",
         overview_found,
-        overview_errors.len()
+        overview_errors.len(),
+        overview_total_events_recv,
+        overview_total_events_reassembled,
     );
 
     // Test deregister
@@ -662,6 +703,8 @@ async fn test_dynamic_strategy(
         split_event_keys,
         overview_found,
         overview_errors,
+        overview_total_events_recv,
+        overview_total_events_reassembled,
         remove_add_after_remove,
         remove_add_duration_ms,
         remove_add_sender_ok,

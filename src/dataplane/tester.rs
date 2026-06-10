@@ -472,9 +472,8 @@ async fn run_test_inner(
         // ── 5. Register receivers on leaf nodes ───────────────────────────────────
         let mut tasks = vec![];
         let mut receiver_names = vec![];
-        let mut current_port = port;
 
-        for receiver_config in receivers {
+        for (current_port, receiver_config) in (port..).zip(receivers) {
             // Determine which node this receiver should register with.
             let target_node_name = match &receiver_config.node {
                 Some(n) => {
@@ -567,7 +566,6 @@ async fn run_test_inner(
                 count
             });
             tasks.push(task);
-            current_port += 1;
         }
 
         // Allow an epoch to pass (and chain propagation time)
