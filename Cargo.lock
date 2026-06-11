@@ -3114,7 +3114,7 @@ dependencies = [
 
 [[package]]
 name = "udplbd"
-version = "2.3.0"
+version = "2.3.1"
 dependencies = [
  "async-stream",
  "axum",

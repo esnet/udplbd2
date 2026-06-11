@@ -1,5 +1,9 @@
 # udplbd2 Changelog
 
+## v2.3.1
+
+Fixes an issue with the documentation building in CI/CD.
+
 ## v2.3.0
 
 ### ChainLoadBalancer: Load Balancer Chaining
