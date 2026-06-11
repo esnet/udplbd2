@@ -59,7 +59,7 @@ pages:
   extends: .build_environment
   script:
     - cargo install mdbook
-    - mdbook build docs
+    - .cargo/bin/mdbook build docs
     - cargo doc --no-deps
     - mv docs/book public
     - mv target/doc public/api
