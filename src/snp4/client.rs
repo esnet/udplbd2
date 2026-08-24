@@ -162,19 +162,32 @@ impl SNP4Client {
 
         // Collect failed rules by matching indices
         let mut failed_rules = Vec::new();
+        let mut resp_idx = 0;
 
-        for (req_index, request) in cloned_requests.iter().enumerate() {
+        for request in &cloned_requests {
             if let Some(batch_request::Item::TableRule(table_rule_request)) = &request.item {
-                if let Some(batch_response::Item::TableRule(rule_response)) =
-                    &responses[req_index].item
-                {
-                    if rule_response.error_code != ErrorCode::EcOk as i32 {
-                        // Match the failing response to the rule using the index
-                        if let Some(rule) = table_rule_request.rules.get(req_index) {
+                for rule in &table_rule_request.rules {
+                    if let Some(resp) = responses.get(resp_idx) {
+                        let is_err = resp.error_code != ErrorCode::EcOk as i32
+                            || match &resp.item {
+                                Some(batch_response::Item::TableRule(rule_response)) => {
+                                    rule_response.error_code != ErrorCode::EcOk as i32
+                                }
+                                _ => false,
+                            };
+                        if is_err {
                             failed_rules.push(rule.to_string());
                         }
                     }
+                    resp_idx += 1;
                 }
+            } else {
+                if let Some(resp) = responses.get(resp_idx)
+                    && resp.error_code != ErrorCode::EcOk as i32
+                {
+                    failed_rules.push(format!("batch request item {:?} failed", request.op));
+                }
+                resp_idx += 1;
             }
         }
 
@@ -184,7 +197,7 @@ impl SNP4Client {
 
         if !failed_rules.is_empty() {
             warn!(
-                "Batch operation completed with errors. Failed rules:\n{}",
+                "batch operation completed with errors. failed rules:\n{}",
                 failed_rules.join("\n")
             );
             crate::metrics::SMARTNIC_GRPC_ERRORS
