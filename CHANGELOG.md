@@ -1,5 +1,12 @@
 # udplbd2 Changelog
 
+## v2.3.2
+
+This patch release applies miscellaneous bug fixes:
+- Fixed the batch rule failure log to display the correct rule that failed.
+- Periodically cleanup the lb_scoped_sample stats table in the database.
+- Prevent creation of duplicate epoch wildcard rules.
+
 ## v2.3.1
 
 Fixes an issue with the documentation building in CI/CD.

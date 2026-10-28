@@ -365,7 +365,12 @@ impl LoadBalancerDB {
             "loadbalancer",
             "slot_demand",
         ];
-        let tables_with_created_at = ["stat_global_sample", "stat_lb_sample", "stat_member_sample"];
+        let tables_with_created_at = [
+            "stat_global_sample",
+            "stat_lb_sample",
+            "stat_lb_scoped_sample",
+            "stat_member_sample",
+        ];
 
         let mut deleted_col_lists: HashMap<&str, String> = HashMap::new();
         for &table in &tables_with_deleted_at {

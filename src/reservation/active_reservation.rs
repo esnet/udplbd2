@@ -266,6 +266,36 @@ impl ActiveReservation {
 
         recent_epochs.reverse(); // Process oldest to newest
 
+        // Drop stale epochs whose boundary_event is not strictly less than the
+        // next kept epoch's boundary. This ensures epochs have strictly increasing
+        // boundaries, which is required for non-overlapping prefix ranges. When no
+        // sync packets have been received all boundaries are 0, so all but the
+        // newest epoch are dropped — preventing duplicate wildcard rules.
+        // Backported from origin/develop commit be9bcc9.
+        if let Some(newest) = recent_epochs.last().map(|e| e.boundary_event) {
+            let mut keep = vec![true; recent_epochs.len()];
+            let mut next_kept_boundary = newest;
+            for i in (0..recent_epochs.len() - 1).rev() {
+                if recent_epochs[i].boundary_event < next_kept_boundary {
+                    next_kept_boundary = recent_epochs[i].boundary_event;
+                } else {
+                    tracing::debug!(
+                        reservation_id = self.reservation_id,
+                        stale_epoch = recent_epochs[i].epoch_count,
+                        stale_boundary = recent_epochs[i].boundary_event,
+                        next_boundary = next_kept_boundary,
+                        "dropping stale epoch whose boundary is not less than the next kept epoch"
+                    );
+                    keep[i] = false;
+                }
+            }
+            recent_epochs = recent_epochs
+                .into_iter()
+                .zip(keep)
+                .filter_map(|(e, k)| k.then_some(e))
+                .collect();
+        }
+
         trace!(
             "generate_epoch_rules: reservation_id={}, epochs_found={}: {:?}",
             self.reservation_id,
